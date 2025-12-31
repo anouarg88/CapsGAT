@@ -3,6 +3,7 @@ import re
 import json
 import csv
 import os
+import math
 import webbrowser
 from pathlib import Path
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, 
@@ -12,8 +13,8 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout
                              QGridLayout, QPlainTextEdit, QCheckBox, QTabWidget, QRadioButton,
                              QSlider, QProgressBar, QMenuBar, QMenu, QAction, QFontDialog,
                              QGroupBox, QScrollArea, QSizePolicy, QComboBox)
-from PyQt5.QtCore import Qt, QTimer, QUrl
-from PyQt5.QtGui import QFont, QKeySequence, QColor, QTextCharFormat, QSyntaxHighlighter, QIcon
+from PyQt5.QtCore import Qt, QTimer, QUrl, pyqtSignal, QPoint, QRect
+from PyQt5.QtGui import QFont, QKeySequence, QColor, QTextCharFormat, QSyntaxHighlighter, QIcon, QPainter, QPen, QBrush, QPainterPath
 from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 from PyQt5.QtMultimediaWidgets import QVideoWidget
 
@@ -35,7 +36,7 @@ class TextSelectionDialog(QDialog):
     def init_ui(self):
         self.setWindowTitle("Select Text")
         self.setGeometry(300, 300, 700, 300)
-        	        
+        
         layout = QVBoxLayout(self)
         
         instructions = QLabel("Use ← → arrows to adjust selection, Shift+arrows to extend, then press Enter:")
@@ -126,7 +127,7 @@ class BlockSplitDialog(QDialog):
     def init_ui(self):
         self.setWindowTitle("Split Block")
         self.setGeometry(300, 300, 700, 250)
-                
+        
         layout = QVBoxLayout(self)
         
         instructions = QLabel("Use ← → arrows to position split, then press Enter to confirm:")
@@ -590,6 +591,47 @@ class JsonImportDialog(QDialog):
         else:
             return "one_block"
 
+class UnassignedSegmentsDialog(QDialog):
+    def __init__(self, unassigned_count, parent=None):
+        super().__init__(parent)
+        self.unassigned_count = unassigned_count
+        self.selected_option = "skip"  # skip, no_label, unknown
+        self.init_ui()
+        
+    def init_ui(self):
+        self.setWindowTitle("Unassigned Segments")
+        self.setGeometry(300, 300, 450, 200)
+        
+        layout = QVBoxLayout(self)
+        
+        instructions = QLabel(f"Found {self.unassigned_count} unassigned segment(s). How should they be handled?")
+        instructions.setStyleSheet("font-weight: bold;")
+        layout.addWidget(instructions)
+        
+        # Radio buttons for options
+        self.skip_radio = QRadioButton("Do not include in SRT file")
+        self.skip_radio.setChecked(True)
+        layout.addWidget(self.skip_radio)
+        
+        self.no_label_radio = QRadioButton("Include without speaker label")
+        layout.addWidget(self.no_label_radio)
+        
+        self.unknown_radio = QRadioButton("Label as 'Unknown:'")
+        layout.addWidget(self.unknown_radio)
+        
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+        
+    def get_selected_option(self):
+        if self.skip_radio.isChecked():
+            return "skip"
+        elif self.no_label_radio.isChecked():
+            return "no_label"
+        else:
+            return "unknown"
+
 class ExportPreviewDialog(QDialog):
     def __init__(self, parent=None, has_timestamps=True, project_info=None, audio_path=None):
         super().__init__(parent)
@@ -617,15 +659,25 @@ class ExportPreviewDialog(QDialog):
         self.txt_radio = QRadioButton("Plain Text (.txt)")
         self.txt_radio.toggled.connect(self.on_format_changed)
         
+        # NEW: SRT format radio button
+        self.srt_radio = QRadioButton("Subtitle File (.srt)")
+        self.srt_radio.toggled.connect(self.on_format_changed)
+        
         format_layout.addWidget(self.html_radio)
         format_layout.addWidget(self.txt_radio)
+        format_layout.addWidget(self.srt_radio)
         format_layout.addStretch()
+        
+        # Disable SRT radio if no timestamps
+        if not self.include_timestamps:
+            self.srt_radio.setEnabled(False)
+            self.srt_radio.setToolTip("SRT export requires timestamp information. Original file does not contain timestamps.")
         
         # Options group
         options_group = QGroupBox("Export Options")
         options_layout = QVBoxLayout()
         
-        # Timestamp option
+        # Timestamp option (disabled for SRT since SRT always has timestamps)
         self.timestamp_check = QCheckBox("Include timestamps")
         self.timestamp_check.setChecked(self.include_timestamps)
         self.timestamp_check.setEnabled(self.include_timestamps)
@@ -633,6 +685,11 @@ class ExportPreviewDialog(QDialog):
         
         if not self.include_timestamps:
             self.timestamp_check.setToolTip("Timestamps not available for text file imports")
+        
+        # NEW: Diarization option (for SRT format)
+        self.diarization_check = QCheckBox("Include diarization (speaker labels)")
+        self.diarization_check.setChecked(True)
+        self.diarization_check.toggled.connect(self.update_preview)
         
         # Project info options
         self.title_check = QCheckBox("Include project title")
@@ -648,6 +705,7 @@ class ExportPreviewDialog(QDialog):
         self.audio_check.toggled.connect(self.update_preview)
         
         options_layout.addWidget(self.timestamp_check)
+        options_layout.addWidget(self.diarization_check)  # NEW
         options_layout.addWidget(self.title_check)
         options_layout.addWidget(self.memo_check)
         options_layout.addWidget(self.audio_check)
@@ -675,8 +733,28 @@ class ExportPreviewDialog(QDialog):
     def on_format_changed(self):
         if self.html_radio.isChecked():
             self.export_format = "html"
-        else:
+        elif self.txt_radio.isChecked():
             self.export_format = "txt"
+        else:  # SRT format
+            self.export_format = "srt"
+        
+        # Enable/disable options based on format
+        is_srt = (self.export_format == "srt")
+        
+        # For SRT: disable project info options, enable diarization
+        # For other formats: enable project info, disable/gray out diarization
+        self.title_check.setEnabled(not is_srt)
+        self.memo_check.setEnabled(not is_srt)
+        self.audio_check.setEnabled(not is_srt)
+        self.timestamp_check.setEnabled(not is_srt and self.include_timestamps)
+        
+        # Diarization is only applicable for SRT format
+        self.diarization_check.setEnabled(is_srt)
+        if not is_srt:
+            self.diarization_check.setChecked(True)  # Always on for non-SRT
+        else:
+            self.diarization_check.setChecked(True)  # Default on for SRT
+            
         self.update_preview()
         
     def on_timestamp_changed(self, checked):
@@ -685,8 +763,19 @@ class ExportPreviewDialog(QDialog):
         QTimer.singleShot(100, self.update_preview)
         
     def update_preview(self):
-        # Get the parent to regenerate transcript text with current timestamp setting
+        # Get the parent to regenerate transcript text
         parent = self.parent()
+        
+        if self.export_format == "srt":
+            # For SRT format preview
+            srt_text = parent.generate_srt_text(
+                include_diarization=self.diarization_check.isChecked(),
+                unassigned_handling="skip"  # Default for preview
+            )
+            self.preview_text.setPlainText(srt_text)
+            return
+            
+        # Original preview code for HTML/TXT formats
         if hasattr(parent, 'generate_transcript_text'):
             transcript_text = parent.generate_transcript_text(include_timestamps=self.current_include_timestamps)
             
@@ -769,10 +858,162 @@ class ExportPreviewDialog(QDialog):
         return {
             'format': self.export_format,
             'include_timestamps': self.current_include_timestamps,
+            'include_diarization': self.diarization_check.isChecked(),
             'include_title': self.title_check.isChecked(),
             'include_memo': self.memo_check.isChecked(),
             'include_audio': self.audio_check.isChecked()
         }
+
+class SearchDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.parent = parent
+        self.current_match = 0
+        self.total_matches = 0
+        self.match_positions = []  # List of (block_index, start_pos, end_pos)
+        self.init_ui()
+        
+    def init_ui(self):
+        self.setWindowTitle("Search")
+        self.setGeometry(300, 200, 500, 150)
+        
+        layout = QVBoxLayout(self)
+        
+        # Search input
+        search_layout = QHBoxLayout()
+        search_layout.addWidget(QLabel("Search:"))
+        
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Enter search term")
+        self.search_input.textChanged.connect(self.perform_search)
+        search_layout.addWidget(self.search_input)
+        
+        self.case_sensitive_check = QCheckBox("Case sensitive")
+        self.case_sensitive_check.toggled.connect(self.perform_search)
+        search_layout.addWidget(self.case_sensitive_check)
+        
+        layout.addLayout(search_layout)
+        
+        # Match information and navigation
+        nav_layout = QHBoxLayout()
+        
+        self.match_label = QLabel("0 matches")
+        nav_layout.addWidget(self.match_label)
+        
+        self.prev_button = QPushButton("◀ Previous")
+        self.prev_button.clicked.connect(self.previous_match)
+        self.prev_button.setEnabled(False)
+        nav_layout.addWidget(self.prev_button)
+        
+        self.next_button = QPushButton("Next ▶")
+        self.next_button.clicked.connect(self.next_match)
+        self.next_button.setEnabled(False)
+        nav_layout.addWidget(self.next_button)
+        
+        layout.addLayout(nav_layout)
+        
+        # Close button
+        button_box = QDialogButtonBox(QDialogButtonBox.Close)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+        
+        self.setFocus()
+        self.search_input.setFocus()
+        
+    def perform_search(self):
+        search_term = self.search_input.text()
+        case_sensitive = self.case_sensitive_check.isChecked()
+        
+        if not search_term:
+            self.match_label.setText("0 matches")
+            self.prev_button.setEnabled(False)
+            self.next_button.setEnabled(False)
+            self.match_positions = []
+            self.total_matches = 0
+            if self.parent:
+                self.parent.clear_search_highlights()
+            return
+            
+        self.match_positions = []
+        
+        # Search through all blocks
+        for block_idx, block in enumerate(self.parent.srt_blocks):
+            text = block['text']
+            if not text:
+                continue
+                
+            if case_sensitive:
+                search_in = text
+            else:
+                search_in = text.lower()
+                search_term_lower = search_term.lower()
+            
+            start_pos = 0
+            while True:
+                if case_sensitive:
+                    pos = search_in.find(search_term, start_pos)
+                else:
+                    pos = search_in.find(search_term_lower, start_pos)
+                    
+                if pos == -1:
+                    break
+                    
+                self.match_positions.append((block_idx, pos, pos + len(search_term)))
+                start_pos = pos + 1
+        
+        self.total_matches = len(self.match_positions)
+        self.current_match = 0
+        
+        if self.total_matches > 0:
+            self.match_label.setText(f"{self.current_match + 1}/{self.total_matches} matches")
+            self.prev_button.setEnabled(True)
+            self.next_button.setEnabled(True)
+            self.highlight_current_match()
+        else:
+            self.match_label.setText("0 matches")
+            self.prev_button.setEnabled(False)
+            self.next_button.setEnabled(False)
+            
+    def highlight_current_match(self):
+        if not self.match_positions or self.current_match >= len(self.match_positions):
+            return
+            
+        block_idx, start_pos, end_pos = self.match_positions[self.current_match]
+        
+        if self.parent:
+            self.parent.highlight_search_match(block_idx, start_pos, end_pos)
+            
+    def next_match(self):
+        if self.total_matches == 0:
+            return
+            
+        self.current_match = (self.current_match + 1) % self.total_matches
+        self.match_label.setText(f"{self.current_match + 1}/{self.total_matches} matches")
+        self.highlight_current_match()
+        
+    def previous_match(self):
+        if self.total_matches == 0:
+            return
+            
+        self.current_match = (self.current_match - 1) % self.total_matches
+        self.match_label.setText(f"{self.current_match + 1}/{self.total_matches} matches")
+        self.highlight_current_match()
+        
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Escape:
+            self.reject()
+            event.accept()
+        elif event.key() == Qt.Key_F3 and event.modifiers() & Qt.ShiftModifier:
+            self.previous_match()
+            event.accept()
+        elif event.key() == Qt.Key_F3:
+            self.next_match()
+            event.accept()
+        elif event.key() == Qt.Key_G and event.modifiers() == Qt.ControlModifier:
+            self.next_match()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
 
 class JumpToTimeDialog(QDialog):
     def __init__(self, max_duration_ms, parent=None):
@@ -861,6 +1102,117 @@ class JumpToTimeDialog(QDialog):
     def get_target_time(self):
         return self.target_time_ms
 
+class SpeedKnob(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.value = 1.0  # Default 1.0x speed
+        self.min_value = 0.1
+        self.max_value = 2.0
+        self.step = 0.1
+        self.is_dragging = False
+        self.last_mouse_pos = None
+        self.setMinimumSize(60, 60)
+        
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # Draw knob background
+        center = QPoint(self.width() // 2, self.height() // 2)
+        radius = min(self.width(), self.height()) // 2 - 5
+        
+        # Outer circle
+        painter.setBrush(QColor(240, 240, 240))
+        painter.setPen(QPen(QColor(180, 180, 180), 2))
+        painter.drawEllipse(center, radius, radius)
+        
+        # Value indicator
+        angle = 142 + (self.value - self.min_value) / (self.max_value - self.min_value) * 270
+        angle_rad = math.radians(angle)
+        
+        indicator_length = radius - 5
+        end_x = center.x() + indicator_length * math.cos(angle_rad)
+        end_y = center.y() + indicator_length * math.sin(angle_rad)
+        
+        painter.setPen(QPen(QColor(0, 120, 215), 2))
+        painter.drawLine(center, QPoint(int(end_x), int(end_y)))
+        
+        # Draw center dot
+        painter.setBrush(QColor(0, 120, 215))
+        painter.setPen(Qt.NoPen)
+        painter.drawEllipse(center, 4, 4)
+        
+        # Draw value text
+        painter.setPen(QColor(50, 50, 50))
+        font = painter.font()
+        font.setPointSize(9)
+        painter.setFont(font)
+        value_text = f"{self.value:.1f}x"
+        text_rect = QRect(center.x() - 30, center.y() - -2, 60, 20)
+        painter.drawText(text_rect, Qt.AlignCenter, value_text)
+        
+        # Draw min/max labels
+        font.setPointSize(7)
+        painter.setFont(font)
+        painter.drawText(center.x() - 40, center.y() - radius + 50, "0.1x")
+        painter.drawText(center.x() + 27, center.y() - radius + 50, "2.0x")
+        
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.is_dragging = True
+            self.last_mouse_pos = event.pos()
+            event.accept()
+            
+    def mouseMoveEvent(self, event):
+        if self.is_dragging and self.last_mouse_pos:
+            delta_y = self.last_mouse_pos.y() - event.y()
+            delta_x = event.x() - self.last_mouse_pos.x()
+            
+            # Combined movement for diagonal sensitivity
+            delta = delta_y + delta_x
+            
+            new_value = self.value + (delta * self.step / 50)
+            new_value = max(self.min_value, min(self.max_value, new_value))
+            
+            if new_value != self.value:
+                self.value = round(new_value / self.step) * self.step
+                self.value = max(self.min_value, min(self.max_value, self.value))
+                self.update()
+                self.valueChanged.emit(self.value)
+                
+            self.last_mouse_pos = event.pos()
+            event.accept()
+            
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.is_dragging = False
+            self.last_mouse_pos = None
+            event.accept()
+            
+    def wheelEvent(self, event):
+        delta = event.angleDelta().y()
+        if delta > 0:
+            self.increase_speed()
+        else:
+            self.decrease_speed()
+        event.accept()
+        
+    def increase_speed(self):
+        new_value = self.value + self.step
+        if new_value <= self.max_value:
+            self.value = new_value
+            self.update()
+            self.valueChanged.emit(self.value)
+            
+    def decrease_speed(self):
+        new_value = self.value - self.step
+        if new_value >= self.min_value:
+            self.value = new_value
+            self.update()
+            self.valueChanged.emit(self.value)
+                      
+    valueChanged = pyqtSignal(float)
+
 class SRTEditor(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -889,7 +1241,7 @@ class SRTEditor(QMainWindow):
         self.init_ui()
         
     def init_ui(self):
-        self.setWindowTitle("CapsGAT 1.1 - Subtitle to GAT2-style Transcript Workstation")
+        self.setWindowTitle("CapsGAT 1.2 - GAT2 Transcription Workstation")
         self.setGeometry(100, 100, 1400, 900)
         self.setWindowIcon(QIcon(resource_path('images/logo.ico')))
         
@@ -1068,7 +1420,7 @@ class SRTEditor(QMainWindow):
         self.time_label.setAlignment(Qt.AlignCenter)
 
         # Jump to time button
-        self.btn_jump_to = QPushButton("Jump")
+        self.btn_jump_to = QPushButton("Jump (Ctrl+J)")
         self.btn_jump_to.clicked.connect(self.jump_to_time)
         self.btn_jump_to.setEnabled(False)
 
@@ -1091,6 +1443,35 @@ class SRTEditor(QMainWindow):
         sync_layout.addStretch()
 
         audio_layout.addLayout(sync_layout)
+        
+        # Add this after the auto-sync and autopause checkboxes
+        speed_layout = QHBoxLayout()
+        speed_layout.addWidget(QLabel("Playback Speed:"))
+        
+        self.speed_knob = SpeedKnob()
+        self.speed_knob.valueChanged.connect(self.set_playback_speed)
+        speed_layout.addWidget(self.speed_knob)
+        
+        # Add speed buttons
+        self.speed_slower_btn = QPushButton("-")
+        self.speed_slower_btn.clicked.connect(self.decrease_speed)
+        self.speed_slower_btn.setFixedWidth(30)
+        
+        self.speed_normal_btn = QPushButton("1.0x")
+        self.speed_normal_btn.clicked.connect(self.reset_speed)
+        self.speed_normal_btn.setFixedWidth(50)
+        
+        self.speed_faster_btn = QPushButton("+")
+        self.speed_faster_btn.clicked.connect(self.increase_speed)
+        self.speed_faster_btn.setFixedWidth(30)
+        
+        speed_buttons_layout = QHBoxLayout()
+        speed_buttons_layout.addWidget(self.speed_slower_btn)
+        speed_buttons_layout.addWidget(self.speed_normal_btn)
+        speed_buttons_layout.addWidget(self.speed_faster_btn)
+        
+        speed_layout.addLayout(speed_buttons_layout)
+        audio_layout.addLayout(speed_layout)
 
         audio_group.setLayout(audio_layout)
         right_panel.addWidget(audio_group)
@@ -1128,7 +1509,29 @@ class SRTEditor(QMainWindow):
         
         self.setup_shortcuts()
         self.init_audio_player()
-        
+    
+    def set_playback_speed(self, speed):
+        """Set the playback speed"""
+        if self.media_player:
+            self.media_player.setPlaybackRate(speed)
+            self.speed_normal_btn.setText(f"{speed:.1f}x")
+            
+    def increase_speed(self):
+        """Increase playback speed"""
+        if self.speed_knob.value < self.speed_knob.max_value:
+            self.speed_knob.increase_speed()
+            
+    def decrease_speed(self):
+        """Decrease playback speed"""
+        if self.speed_knob.value > self.speed_knob.min_value:
+            self.speed_knob.decrease_speed()
+            
+    def reset_speed(self):
+        """Reset playback speed to 1.0"""
+        self.speed_knob.value = 1.0
+        self.speed_knob.update()
+        self.set_playback_speed(1.0)
+    
     def escape_html(self, text):
         """Escape HTML special characters to prevent interpretation as HTML tags"""
         if not text:
@@ -1193,6 +1596,10 @@ class SRTEditor(QMainWindow):
         # Edit menu
         edit_menu = menubar.addMenu('Edit')
         
+        search_action = QAction('Search...', self)
+        search_action.triggered.connect(self.open_search_dialog)
+        edit_menu.addAction(search_action)
+        
         settings_action = QAction('Settings...', self)
         settings_action.triggered.connect(self.open_settings)
         edit_menu.addAction(settings_action)
@@ -1245,7 +1652,66 @@ class SRTEditor(QMainWindow):
             else:  # Cancel
                 return False
         return True
+
+    def open_search_dialog(self):
+        """Open the search dialog"""
+        if not hasattr(self, 'search_dialog') or not self.search_dialog:
+            self.search_dialog = SearchDialog(self)
+            self.search_dialog.show()
+        else:
+            self.search_dialog.show()
+            self.search_dialog.activateWindow()
+            self.search_dialog.search_input.setFocus()
+            
+    def highlight_search_match(self, block_idx, start_pos, end_pos):
+        """Highlight a specific search match and navigate to it"""
+        # Navigate to the block
+        self.current_block_index = block_idx
+        self.update_display()
         
+        # Highlight the text within the block
+        cursor = self.text_display.textCursor()
+        cursor.select(cursor.Document)
+        
+        # Clear previous extra selections
+        self.text_display.setExtraSelections([])
+        
+        # Find the position of this block in the displayed text
+        start_idx = max(0, self.current_block_index - self.context_blocks)
+        display_block_pos = (block_idx - start_idx) * 2
+        
+        # Calculate the position in the displayed text
+        # We need to account for the ">> " prefix for current block or "   " for others
+        cursor.movePosition(cursor.Start)
+        for i in range(display_block_pos):
+            cursor.movePosition(cursor.Down)
+            
+        # Move to the beginning of the block text (after prefix)
+        cursor.movePosition(cursor.Down)
+        cursor.movePosition(cursor.StartOfLine)
+        
+        # Skip the prefix (">> " or "   ")
+        cursor.movePosition(cursor.Right, cursor.MoveAnchor, 3)
+        
+        # Move to the start position within the text
+        cursor.movePosition(cursor.Right, cursor.MoveAnchor, start_pos)
+        cursor.movePosition(cursor.Right, cursor.KeepAnchor, end_pos - start_pos)
+        
+        # Create and apply highlight
+        selection = QTextEdit.ExtraSelection()
+        selection.cursor = cursor
+        selection.format.setBackground(QColor(255, 255, 0))  # Yellow highlight
+        selection.format.setForeground(QColor(0, 0, 0))
+        
+        self.text_display.setExtraSelections([selection])
+        self.text_display.setTextCursor(cursor)
+        self.text_display.ensureCursorVisible()
+        
+    def clear_search_highlights(self):
+        """Clear all search highlights"""
+        self.text_display.setExtraSelections([])
+
+
     def show_shortcuts(self):
         """Show keyboard shortcuts dialog"""
         shortcuts_text = """
@@ -1273,6 +1739,15 @@ Audio Controls:
 • End: Play/Pause audio
 • PgUp: Rewind 5 seconds
 • PgDn: Fast forward 5 seconds
+• Ctrl+J: Jump to Time
+• -: Lower Playback Speed
+• +: Speed up Playback
+
+Search Functions:
+• Ctrl+F: Open search dialog
+• F3: Find Next
+• Shift+F3: Find Previous
+
 
 File Operations:
 • Ctrl+N: New Project
@@ -1288,7 +1763,7 @@ File Operations:
     def show_about(self):
         """Show about dialog"""
         about_text = """
-CapsGAT 1.1
+CapsGAT 1.2
 
 (c) 2025 Anouâr Gadermann
 Published under GNU Public License 3.0
@@ -1301,7 +1776,7 @@ Engineered with DeepSeek-V3.2
         """Mark that there are unsaved changes"""
         self.has_unsaved_changes = True
         # Update window title to indicate unsaved changes
-        base_title = "CapsGAT 1.1 - GAT2 Transcription Workstation"
+        base_title = "CapsGAT 1.2 - GAT2 Transcription Workstation"
         if self.project_name:
             self.setWindowTitle(f"{base_title} - {self.project_name} *")
         else:
@@ -1310,7 +1785,7 @@ Engineered with DeepSeek-V3.2
     def clear_unsaved_changes(self):
         """Clear unsaved changes marker"""
         self.has_unsaved_changes = False
-        base_title = "CapsGAT 1.1 - GAT2 Transcription Workstation"
+        base_title = "CapsGAT 1.2 - GAT2 Transcription Workstation"
         if self.project_name:
             self.setWindowTitle(f"{base_title} - {self.project_name}")
         else:
@@ -1661,20 +2136,40 @@ Engineered with DeepSeek-V3.2
         QShortcut(QKeySequence("Delete"), self).activated.connect(self.merge_with_next)
         QShortcut(QKeySequence("E"), self).activated.connect(self.edit_current_block)
         QShortcut(QKeySequence("*"), self).activated.connect(self.open_pause_dialog)
-        QShortcut(QKeySequence("p"), self).activated.connect(self.open_pause_dialog)
+        #QShortcut(QKeySequence("P"), self).activated.connect(self.open_pause_dialog)
         QShortcut(QKeySequence("U"), self).activated.connect(self.unassign_current)
         QShortcut(QKeySequence("Return"), self).activated.connect(self.insert_empty_line)
         # FIXED: Changed shortcuts to use placement dialog
         QShortcut(QKeySequence("."), self).activated.connect(lambda: self.handle_pause("(.)"))
-        QShortcut(QKeySequence("h"), self).activated.connect(lambda: self.handle_pause("°h"))
-        QShortcut(QKeySequence("H"), self).activated.connect(lambda: self.handle_pause("h°"))
+        QShortcut(QKeySequence("H"), self).activated.connect(lambda: self.handle_pause("°h"))
+        QShortcut(QKeySequence("Shift+H"), self).activated.connect(lambda: self.handle_pause("h°"))
         
         # NEW: Audio control shortcuts
         QShortcut(QKeySequence("PgUp"), self).activated.connect(self.rewind_audio)
         QShortcut(QKeySequence("End"), self).activated.connect(self.toggle_playback)
         QShortcut(QKeySequence("PgDown"), self).activated.connect(self.forward_audio)
+        QShortcut(QKeySequence("Ctrl+J"), self).activated.connect(self.jump_to_time)
+               
+        # Add playback speed shortcuts
+        QShortcut(QKeySequence("+"), self).activated.connect(self.increase_speed)
+        QShortcut(QKeySequence("-"), self).activated.connect(self.decrease_speed)
+        QShortcut(QKeySequence("0"), self).activated.connect(self.reset_speed)
         
-        
+        # Add search navigation shortcuts
+        QShortcut(QKeySequence("Ctrl+F"), self).activated.connect(self.open_search_dialog)
+        QShortcut(QKeySequence("F3"), self).activated.connect(self.find_next)
+        QShortcut(QKeySequence("Shift+F3"), self).activated.connect(self.find_previous)
+
+    def find_next(self):
+        """Find next occurrence (for F3 shortcut)"""
+        if hasattr(self, 'search_dialog') and self.search_dialog and self.search_dialog.isVisible():
+            self.search_dialog.next_match()
+            
+    def find_previous(self):
+        """Find previous occurrence (for Shift+F3 shortcut)"""
+        if hasattr(self, 'search_dialog') and self.search_dialog and self.search_dialog.isVisible():
+            self.search_dialog.previous_match()
+
     def rename_speaker(self, speaker_idx, new_name):
         if speaker_idx < len(self.speakers):
             self.speakers[speaker_idx] = new_name
@@ -2340,17 +2835,56 @@ Engineered with DeepSeek-V3.2
                 text_after = current_block['text'][split_pos:].strip()
                 
                 if text_before and text_after:
-                    current_block['text'] = text_before
-                    
-                    new_block = current_block.copy()
-                    new_block['text'] = text_after
-                    new_block['index'] = max(block['index'] for block in self.srt_blocks) + 1
-                    new_block['speaker'] = None
-                    new_block['is_turn_start'] = False
-                    
-                    if current_block['speaker'] is not None:
-                        new_block['speaker'] = current_block['speaker']
+                    # Calculate proportional timestamps if they exist
+                    if current_block.get('start_time') and current_block.get('end_time'):
+                        # Save original end time before modifying
+                        original_end_time = current_block['end_time']
+                        original_end_ms = self.time_to_ms(original_end_time)
+                        
+                        # Convert timestamps to milliseconds
+                        start_ms = self.time_to_ms(current_block['start_time'])
+                        end_ms = original_end_ms
+                        total_duration = end_ms - start_ms
+                        
+                        # Calculate proportion based on text length
+                        total_chars = len(text_before) + len(text_after)
+                        before_proportion = len(text_before) / total_chars
+                        
+                        # Calculate split time
+                        split_ms = start_ms + int(total_duration * before_proportion)
+                        
+                        # Ensure split_ms is between start_ms and end_ms
+                        split_ms = max(start_ms + 100, min(end_ms - 100, split_ms))
+                        
+                        # Update current block's end time
+                        current_block['text'] = text_before
+                        current_block['end_time'] = self.ms_to_time(split_ms)
+                        
+                        # Create new block with adjusted start and end times
+                        new_block = current_block.copy()
+                        new_block['text'] = text_after
+                        new_block['index'] = max(block['index'] for block in self.srt_blocks) + 1
+                        new_block['start_time'] = self.ms_to_time(split_ms)
+                        new_block['end_time'] = original_end_time  # Use the original end time
+                        new_block['speaker'] = None
                         new_block['is_turn_start'] = False
+                        
+                        if current_block['speaker'] is not None:
+                            new_block['speaker'] = current_block['speaker']
+                            new_block['is_turn_start'] = False
+                    else:
+                        # No timestamps available
+                        current_block['text'] = text_before
+                        
+                        new_block = current_block.copy()
+                        new_block['text'] = text_after
+                        new_block['index'] = max(block['index'] for block in self.srt_blocks) + 1
+                        new_block['speaker'] = None
+                        new_block['is_turn_start'] = False
+                        
+                        if current_block['speaker'] is not None:
+                            new_block['speaker'] = current_block['speaker']
+                            new_block['is_turn_start'] = False
                     
                     self.srt_blocks.insert(self.current_block_index + 1, new_block)
                     self.update_display()
@@ -2666,8 +3200,35 @@ Engineered with DeepSeek-V3.2
         preview_dialog = ExportPreviewDialog(self, self.file_has_timestamps, project_info, self.audio_file_path)
         if preview_dialog.exec_() == QDialog.Accepted:
             settings = preview_dialog.get_export_settings()
-            transcript_text = self.generate_transcript_text(include_timestamps=settings['include_timestamps'])
-            self.final_export(transcript_text, settings, project_info)
+            
+            # For SRT export, ask about unassigned segments
+            unassigned_handling = "skip"  # Default
+            if settings['format'] == 'srt':
+                # Count unassigned segments
+                unassigned_count = sum(1 for block in self.srt_blocks 
+                                     if block['speaker'] is None and not block.get('is_pause') 
+                                     and not block.get('is_comment') and not block.get('is_empty'))
+                
+                if unassigned_count > 0:
+                    dialog = UnassignedSegmentsDialog(unassigned_count, self)
+                    if dialog.exec_() == QDialog.Accepted:
+                        unassigned_handling = dialog.get_selected_option()
+                    else:
+                        return  # User canceled
+                else:
+                    # No unassigned segments, default to skip
+                    unassigned_handling = "skip"
+            
+            # Generate transcript based on format
+            if settings['format'] == 'srt':
+                transcript_text = self.generate_srt_text(
+                    include_diarization=settings['include_diarization'],
+                    unassigned_handling=unassigned_handling
+                )
+            else:
+                transcript_text = self.generate_transcript_text(include_timestamps=settings['include_timestamps'])
+            
+            self.final_export(transcript_text, settings, project_info, unassigned_handling)
     
     def generate_transcript_text(self, include_timestamps=True):
         total_lines = len([b for b in self.srt_blocks if b.get('speaker') is not None or b.get('is_pause') or b.get('is_comment') or b.get('is_empty')])
@@ -2741,8 +3302,195 @@ Engineered with DeepSeek-V3.2
         
         return '\n'.join(output_lines)
     
-    def final_export(self, transcript_text, settings, project_info):
+    def generate_srt_text(self, include_diarization=True, unassigned_handling="skip"):
+        """Generate SRT format text with optional diarization."""
+        if not self.file_has_timestamps:
+            return "SRT export requires timestamp information. Original file does not contain timestamps.\n\nNote: SRT files require precise timing information for each subtitle."
+        
+        # First, ensure all blocks have proper timestamps
+        blocks_with_timestamps = self.estimate_missing_timestamps()
+        
+        srt_blocks = []
+        subtitle_index = 1
+        
+        for block in blocks_with_timestamps:
+            # Skip pause/comment/empty blocks that shouldn't be in SRT
+            if block.get('is_pause') or block.get('is_comment') or block.get('is_empty'):
+                continue
+                
+            # Handle unassigned blocks based on user choice
+            if block['speaker'] is None:
+                if unassigned_handling == "skip":
+                    continue
+                elif unassigned_handling == "no_label":
+                    speaker_prefix = ""
+                elif unassigned_handling == "unknown":
+                    speaker_prefix = "Unknown: "
+            else:
+                # Get speaker name if assigned
+                speaker_prefix = ""
+                if include_diarization:
+                    speaker_prefix = f"{self.speakers[block['speaker']]}: "
+            
+            # Format the time
+            start_time = self.format_srt_time(block['start_time'])
+            end_time = self.format_srt_time(block['end_time'])
+            
+            # Create SRT block
+            srt_block = f"{subtitle_index}\n{start_time} --> {end_time}\n{speaker_prefix}{block['text']}\n"
+            srt_blocks.append(srt_block)
+            subtitle_index += 1
+        
+        return "\n".join(srt_blocks)
+    
+    def format_srt_time(self, time_str):
+        """Convert time string to SRT format (HH:MM:SS,mmm)."""
+        if not time_str:
+            return "00:00:00,000"
+        
+        # Handle different time formats
+        if ',' in time_str:  # Already in SRT format
+            return time_str
+        elif ':' in time_str:  # Assume HH:MM:SS or MM:SS
+            parts = time_str.split(':')
+            if len(parts) == 2:  # MM:SS
+                return f"00:{parts[0].zfill(2)}:{parts[1].zfill(2)},000"
+            elif len(parts) == 3:  # HH:MM:SS
+                # Check if there are milliseconds
+                time_part = parts[2]
+                if ',' in time_part:
+                    time_part, ms_part = time_part.split(',')
+                    return f"{parts[0].zfill(2)}:{parts[1].zfill(2)}:{time_part.zfill(2)},{ms_part.zfill(3)}"
+                else:
+                    return f"{parts[0].zfill(2)}:{parts[1].zfill(2)}:{time_part.zfill(2)},000"
+        
+        return "00:00:00,000"
+    
+    def estimate_missing_timestamps(self):
+        """Estimate timestamps for blocks that don't have them."""
+        if not self.srt_blocks:
+            return []
+        
+        blocks = self.srt_blocks.copy()
+        
+        # Find blocks with timestamps to use as anchors
+        timestamped_blocks = []
+        for i, block in enumerate(blocks):
+            if block.get('start_time') and block.get('end_time'):
+                timestamped_blocks.append((i, block))
+        
+        if not timestamped_blocks:
+            # No timestamps at all, cannot estimate
+            return blocks
+        
+        # Group blocks into segments between timestamped blocks
+        segments = []
+        last_timestamped_idx = -1
+        
+        for i, block in timestamped_blocks:
+            if last_timestamped_idx == -1:
+                # First segment (from start to first timestamped block)
+                segments.append({
+                    'start_idx': 0,
+                    'end_idx': i,
+                    'start_time': None,
+                    'end_time': block['start_time'],
+                    'total_chars': sum(len(b['text']) for b in blocks[0:i])
+                })
+            else:
+                # Segment between two timestamped blocks
+                segments.append({
+                    'start_idx': last_timestamped_idx + 1,
+                    'end_idx': i,
+                    'start_time': blocks[last_timestamped_idx]['end_time'],
+                    'end_time': block['start_time'],
+                    'total_chars': sum(len(b['text']) for b in blocks[last_timestamped_idx + 1:i])
+                })
+            last_timestamped_idx = i
+        
+        # Add final segment if needed
+        if last_timestamped_idx < len(blocks) - 1:
+            last_block = timestamped_blocks[-1][1] if timestamped_blocks else None
+            segments.append({
+                'start_idx': last_timestamped_idx + 1,
+                'end_idx': len(blocks) - 1,
+                'start_time': last_block['end_time'] if last_block else None,
+                'end_time': None,
+                'total_chars': sum(len(b['text']) for b in blocks[last_timestamped_idx + 1:])
+            })
+        
+        # Estimate timestamps for each segment
+        for segment in segments:
+            if segment['start_time'] and segment['end_time'] and segment['total_chars'] > 0:
+                # Convert times to milliseconds
+                start_ms = self.time_to_ms(segment['start_time'])
+                end_ms = self.time_to_ms(segment['end_time'])
+                total_duration = end_ms - start_ms
+                
+                current_time = start_ms
+                for i in range(segment['start_idx'], segment['end_idx'] + 1):
+                    block = blocks[i]
+                    # Only estimate if block doesn't have timestamps
+                    if not block.get('start_time') or not block.get('end_time'):
+                        # Calculate duration based on text length ratio
+                        block_chars = len(block['text'])
+                        if segment['total_chars'] > 0:
+                            block_duration = (block_chars / segment['total_chars']) * total_duration
+                        else:
+                            block_duration = 1000  # Default 1 second
+                        
+                        # Ensure minimum duration of 100ms
+                        block_duration = max(100, block_duration)
+                        
+                        block['start_time'] = self.ms_to_time(current_time)
+                        block['end_time'] = self.ms_to_time(current_time + block_duration)
+                        current_time += block_duration
+        
+        return blocks
+    
+    def time_to_ms(self, time_str):
+        """Convert time string to milliseconds."""
+        if not time_str:
+            return 0
+        
+        # Handle different formats
+        if ',' in time_str:  # SRT format HH:MM:SS,mmm
+            time_part, ms_part = time_str.split(',')
+            ms = int(ms_part)
+        else:  # Assume HH:MM:SS
+            time_part = time_str
+            ms = 0
+        
+        parts = time_part.split(':')
+        if len(parts) == 3:  # HH:MM:SS
+            hours = int(parts[0])
+            minutes = int(parts[1])
+            seconds = int(parts[2])
+        elif len(parts) == 2:  # MM:SS
+            hours = 0
+            minutes = int(parts[0])
+            seconds = int(parts[1])
+        else:
+            return 0
+        
+        return (hours * 3600 + minutes * 60 + seconds) * 1000 + ms
+    
+    def ms_to_time(self, ms):
+        """Convert milliseconds to SRT time format."""
+        hours = int(ms // 3600000)
+        ms %= 3600000
+        minutes = int(ms // 60000)
+        ms %= 60000
+        seconds = int(ms // 1000)
+        milliseconds = int(ms % 1000)
+        
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d},{milliseconds:03d}"
+    
+    def final_export(self, transcript_text, settings, project_info, unassigned_handling="skip"):
         file_ext = ".html" if settings['format'] == 'html' else ".txt"
+        if settings['format'] == 'srt':
+            file_ext = ".srt"
+            
         file_path, _ = QFileDialog.getSaveFileName(
             self, f"Export Transcript", "", 
             f"{settings['format'].upper()} Files (*{file_ext})"
@@ -2750,81 +3498,89 @@ Engineered with DeepSeek-V3.2
         
         if file_path:
             try:
-                # Build header content based on settings
-                header_lines = []
-                
-                if settings.get('include_title', True) and project_info.get('name'):
-                    if settings['format'] == "html":
+                if settings['format'] == 'srt':
+                    # SRT export
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        f.write(transcript_text)
+                    
+                elif settings['format'] == 'html':
+                    # Build header content based on settings
+                    header_lines = []
+                    
+                    if settings.get('include_title', True) and project_info.get('name'):
                         escaped_name = self.escape_html(project_info['name'])
                         header_lines.append(f"<h1>{escaped_name}</h1>")
-                    else:
-                        header_lines.append(project_info['name'])
-                        header_lines.append("=" * len(project_info['name']))
-                        header_lines.append("")
-                
-                if settings.get('include_memo', True) and project_info.get('memo'):
-                    if settings['format'] == "html":
+                    
+                    if settings.get('include_memo', True) and project_info.get('memo'):
                         escaped_memo = self.escape_html(project_info['memo'])
                         header_lines.append(f"<p><strong>Project Memo:</strong> {escaped_memo}</p>")
-                    else:
-                        header_lines.append(f"Project Memo: {project_info['memo']}")
-                        header_lines.append("")
-                
-                if settings.get('include_audio', True) and self.audio_file_path:
-                    audio_name = Path(self.audio_file_path).name
-                    if settings['format'] == "html":
+                    
+                    if settings.get('include_audio', True) and self.audio_file_path:
+                        audio_name = Path(self.audio_file_path).name
                         escaped_audio = self.escape_html(audio_name)
                         header_lines.append(f"<p><strong>Audio File:</strong> {escaped_audio}</p>")
-                    else:
-                        header_lines.append(f"Audio File: {audio_name}")
-                        header_lines.append("")
-                
-                if header_lines:
-                    if settings['format'] == "html":
+                    
+                    if header_lines:
                         header_text = "\n".join(header_lines)
-                        # Escape the transcript text for HTML
                         escaped_transcript = self.escape_html(transcript_text)
                         full_text = f"{header_text}\n{escaped_transcript}"
                     else:
-                        header_text = "\n".join(header_lines)
-                        full_text = f"{header_text}\n{transcript_text}"
-                else:
-                    if settings['format'] == "html":
                         full_text = self.escape_html(transcript_text)
-                    else:
-                        full_text = transcript_text
-                
-                if settings['format'] == 'html':
-                    # FIXED: Ensure no leading spaces in HTML body and escape content
+                    
+                    # HTML export
                     clean_text = full_text.lstrip()
                     html_content = f"""<!DOCTYPE html>
-    <html>
-    <head>
-    <meta charset="UTF-8">
-    <title>GAT2 Transcript - {self.escape_html(project_info.get('name', 'Untitled'))}</title>
-    <style>
-    body {{
-        font-family: 'Courier New', monospace;
-        font-size: 10pt;
-        line-height: 1.2;
-        margin: 20px;
-        white-space: pre;
-    }}
-    h1 {{
-        font-family: Arial, sans-serif;
-        color: #333;
-        border-bottom: 2px solid #333;
-        padding-bottom: 10px;
-    }}
-    </style>
-    </head>
-    <body>
-    {clean_text}
-    </body>
-    </html>"""
+<html>
+<head>
+<meta charset="UTF-8">
+<title>GAT2 Transcript - {self.escape_html(project_info.get('name', 'Untitled'))}</title>
+<style>
+body {{
+    font-family: 'Courier New', monospace;
+    font-size: 10pt;
+    line-height: 1.2;
+    margin: 20px;
+    white-space: pre;
+}}
+h1 {{
+    font-family: Arial, sans-serif;
+    color: #333;
+    border-bottom: 2px solid #333;
+    padding-bottom: 10px;
+}}
+</style>
+</head>
+<body>
+{clean_text}
+</body>
+</html>"""
                     with open(file_path, 'w', encoding='utf-8') as f:
                         f.write(html_content)
                 else:
+                    # Plain text export
+                    # Build header content based on settings
+                    header_lines = []
+                    
+                    if settings.get('include_title', True) and project_info.get('name'):
+                        header_lines.append(project_info['name'])
+                        header_lines.append("=" * len(project_info['name']))
+                        header_lines.append("")
+                    
+                    if settings.get('include_memo', True) and project_info.get('memo'):
+                        header_lines.append(f"Project Memo: {project_info['memo']}")
+                        header_lines.append("")
+                    
+                    if settings.get('include_audio', True) and self.audio_file_path:
+                        audio_name = Path(self.audio_file_path).name
+                        header_lines.append(f"Audio File: {audio_name}")
+                        header_lines.append("")
+                    
+                    if header_lines:
+                        header_text = "\n".join(header_lines)
+                        full_text = f"{header_text}\n{transcript_text}"
+                    else:
+                        full_text = transcript_text
+                    
                     with open(file_path, 'w', encoding='utf-8') as f:
                         f.write(full_text)
                 
