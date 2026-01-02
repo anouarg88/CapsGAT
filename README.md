@@ -1,11 +1,12 @@
 # CapsGAT
 
-<img width="100" height="100" alt="logo" src="https://github.com/user-attachments/assets/c1cfd5d3-614c-4769-8ffd-87673cd6e5a2" />
+<img width="100" height="100" alt="capsgat_logo" src="https://github.com/user-attachments/assets/c45c77bf-3dfc-46db-957b-55746d3c7371" />
 
 CapsGAT is a lightweight tool for reformatting subtitle files (.SRT, .JSON, .TSV, .TXT) into qualitative interview transcripts based on the minimal version of GAT2 ([Gesprächsanalytisches Transkriptionssystem 2](https://gat-to.uni-jena.de/)). It enables users to assign speakers to segments quickly using keyboard shortcuts.
 
 
-<img width="1680" height="978" alt="capsgat_screenshot" src="https://github.com/user-attachments/assets/4c42087f-19eb-4450-9e96-7ce77cf22931" />
+<img width="1809" height="990" alt="capsgat_v1.2_screenshot" src="https://github.com/user-attachments/assets/be0b0b89-e837-4cb2-809b-0ba4091568cc" />
+
 
 
 Audio files can be imported and synced to the transcript. This is meant to reduce window-switching and simplify the formatting process. CapsGAT features basic GAT2-editing functionality such as segment splitting and merging, overlapping speech, pauses and comments. 
