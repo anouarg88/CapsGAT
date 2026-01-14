@@ -13,6 +13,6 @@ Audio files can be imported and synced to the transcript. This is meant to reduc
 
 However, it is not meant as a replacement for professional transcription software (for full-fledged, professional transcription software, check out [EXMARaLDA](https://www.exmaralda.org); for AI-powered transcription with automatic diarization check out [noScribe](https://ai4culture.eu/resources/tools/172)), but more as a complementary formatting tool to be used with transcription AI models such as Whisper AI or CapsWriter.
 
-CapsGAT projects can be loaded or saved. Transcripts can be exported as .HTML, .TXT or .SRT files. With the exceptions of segments containing unassigned pauses and .SRT exports, only segments that have been assigned are included in the transcripts that are exported. The format for interview transcripts is based on the minimal GAT2 transcription convention, though many aspects (such as multiple tiers) are not implemented.
+CapsGAT projects can be loaded or saved. Transcripts can be exported as .HTML, .DOC, .TXT or .SRT files. With the exceptions of segments containing unassigned pauses and .SRT exports, only segments that have been assigned are included in the transcripts that are exported. The format for interview transcripts is based on the minimal GAT2 transcription convention, though many aspects (such as multiple tiers) are not implemented. A simpler transcription convention based on Dresing & Pehl can also be chosen for export formatting.
 
 CapsGAT was developed using AI.
