@@ -1,11 +1,18 @@
 import sys
 import re
 import json
-import csv
 import os
 import math
+import tempfile
 import webbrowser
+import logging
+import vlc
 from pathlib import Path
+from datetime import datetime
+from collections import deque
+import queue
+import threading
+import time
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, 
                              QTextEdit, QListWidget, QPushButton, QWidget, QLabel, 
                              QFileDialog, QMessageBox, QSpinBox, QShortcut, QFrame,
@@ -13,10 +20,28 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout
                              QGridLayout, QPlainTextEdit, QCheckBox, QTabWidget, QRadioButton,
                              QSlider, QProgressBar, QMenuBar, QMenu, QAction, QFontDialog,
                              QGroupBox, QScrollArea, QSizePolicy, QComboBox)
-from PyQt5.QtCore import Qt, QTimer, QUrl, pyqtSignal, QPoint, QRect
+from PyQt5.QtCore import Qt, QTimer, QUrl, pyqtSignal, QPoint, QRect, QElapsedTimer, QThread
 from PyQt5.QtGui import QFont, QKeySequence, QColor, QTextCharFormat, QSyntaxHighlighter, QIcon, QPainter, QPen, QBrush, QPainterPath
-from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
-from PyQt5.QtMultimediaWidgets import QVideoWidget
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+try:
+    import pyaudio
+    import soundfile as sf
+    HAS_PYAUDIO = True
+except ImportError:
+    HAS_PYAUDIO = False
+    logger.warning("PyAudio not installed. Fallback audio will not work.")
+    
+try:
+    import vlc
+    VLC_AVAILABLE = True
+    logger.info("VLC library is available")
+except Exception as e:
+    VLC_AVAILABLE = False
+    logger.warning(f"VLC library not available: {e}")
 
 def resource_path(relative_path):
     try:
@@ -24,6 +49,308 @@ def resource_path(relative_path):
     except Exception:
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
+
+class SimpleAudioPlayer(QThread):
+    """Simple fallback audio player using PyAudio (no speed control)"""
+    playback_started = pyqtSignal()
+    playback_stopped = pyqtSignal()
+    position_changed = pyqtSignal(float)  # Position in seconds
+    
+    def __init__(self):
+        super().__init__()
+        self.audio_path = None
+        self.is_playing = False
+        self.is_paused = False
+        self.stop_flag = False
+        self.current_position = 0.0
+        self.duration = 0.0
+        self.sample_rate = 44100
+        self.channels = 1
+        self.pyaudio = None
+        self.stream = None
+        self.audio_data = None
+        
+    def load_file(self, audio_path):
+        """Load audio file"""
+        try:
+            self.audio_path = audio_path
+            
+            # Load audio data
+            audio_data, self.sample_rate = sf.read(audio_path)
+            
+            # Convert to mono if needed
+            if len(audio_data.shape) > 1:
+                audio_data = audio_data.mean(axis=1)
+            
+            # Convert to int16
+            if audio_data.dtype != np.int16:
+                audio_data = (audio_data * 32767).astype(np.int16)
+            
+            self.audio_data = audio_data.tobytes()
+            self.duration = len(audio_data) / self.sample_rate
+            self.channels = 1
+            
+            logger.info(f"Simple audio loaded: {self.duration:.2f}s")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to load audio for fallback: {e}")
+            return False
+    
+    def play(self):
+        """Start playback"""
+        if not HAS_PYAUDIO:
+            logger.error("PyAudio not available for fallback")
+            return
+        
+        self.is_playing = True
+        self.is_paused = False
+        self.stop_flag = False
+        
+        if not self.isRunning():
+            self.start()
+        
+        self.playback_started.emit()
+    
+    def pause(self):
+        """Pause playback"""
+        self.is_playing = False
+        self.is_paused = True
+        
+        if self.stream and self.stream.is_active():
+            self.stream.stop_stream()
+    
+    def stop(self):
+        """Stop playback"""
+        self.stop_flag = True
+        self.is_playing = False
+        self.is_paused = False
+        self.current_position = 0.0
+        
+        if self.stream and self.stream.is_active():
+            self.stream.stop_stream()
+        
+        self.playback_stopped.emit()
+    
+    def seek(self, position_seconds):
+        """Seek to position"""
+        self.current_position = max(0, min(self.duration, position_seconds))
+        
+        # Stop and restart if playing
+        if self.is_playing and not self.is_paused:
+            self.stop()
+            self.play()
+    
+    def get_position(self):
+        """Get current position"""
+        return self.current_position
+    
+    def run(self):
+        """Main playback thread"""
+        if not HAS_PYAUDIO or not self.audio_data:
+            logger.error("Fallback player: No PyAudio or audio data")
+            return
+        
+        try:
+            import numpy as np
+            import pyaudio
+            
+            self.pyaudio = pyaudio.PyAudio()
+            
+            # Calculate start position in bytes
+            start_byte = int(self.current_position * self.sample_rate * 2)  # 2 bytes per sample for int16
+            
+            # Open stream
+            self.stream = self.pyaudio.open(
+                format=pyaudio.paInt16,
+                channels=self.channels,
+                rate=self.sample_rate,
+                output=True
+            )
+            
+            # Play from current position
+            chunk_size = 1024
+            data_bytes = len(self.audio_data)
+            
+            for i in range(start_byte, data_bytes, chunk_size):
+                if self.stop_flag:
+                    break
+                
+                if not self.is_playing or self.is_paused:
+                    time.sleep(0.01)
+                    continue
+                
+                chunk = self.audio_data[i:i+chunk_size]
+                if chunk:
+                    self.stream.write(chunk)
+                    
+                    # Update position
+                    self.current_position = i / (self.sample_rate * 2)
+                    self.position_changed.emit(self.current_position)
+                    
+                    # Check if at end
+                    if i + chunk_size >= data_bytes:
+                        self.stop()
+                        break
+                
+                time.sleep(chunk_size / (self.sample_rate * 2))  # Approximate timing
+            
+        except Exception as e:
+            logger.error(f"Error in fallback player: {e}")
+        finally:
+            if self.stream:
+                self.stream.stop_stream()
+                self.stream.close()
+            if self.pyaudio:
+                self.pyaudio.terminate()
+    
+    def cleanup(self):
+        """Clean up resources"""
+        self.stop()
+        if self.isRunning():
+            self.quit()
+            self.wait()
+
+class VlcAudioPlayer(QThread):
+    """Audio player using VLC media player"""
+    playback_started = pyqtSignal()
+    playback_paused = pyqtSignal()
+    playback_stopped = pyqtSignal()
+    position_changed = pyqtSignal(float)  # Position in seconds
+    end_reached = pyqtSignal()
+    
+    def __init__(self):
+        super().__init__()
+        self.instance = vlc.Instance()
+        self.player = self.instance.media_player_new()
+        self.media = None
+        self.is_playing = False
+        self.duration = 0.0
+        self.current_position = 0.0
+        self.playback_speed = 1.0
+        self.audio_file_path = None
+        
+        # Timer for position updates
+        self.position_timer = QTimer()
+        self.position_timer.timeout.connect(self.update_position)
+        self.position_timer.start(100)  # Update every 100ms
+        
+        # Event manager for VLC events
+        self.event_manager = self.player.event_manager()
+        self.event_manager.event_attach(vlc.EventType.MediaPlayerEndReached, self._on_end_reached)
+        
+    def load_file(self, audio_path):
+        """Load audio file"""
+        try:
+            self.audio_file_path = audio_path
+            self.media = self.instance.media_new(audio_path)
+            self.player.set_media(self.media)
+            
+            # Get duration
+            self.media.parse()
+            time.sleep(0.1)  # Give VLC time to parse
+            self.duration = self.media.get_duration() / 1000.0  # Convert ms to seconds
+            
+            # Set initial speed
+            self.player.set_rate(1.0)
+            self.playback_speed = 1.0
+            
+            logger.info(f"Audio loaded: {audio_path}, duration: {self.duration:.2f}s")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to load audio with VLC: {e}")
+            return False
+    
+    def play(self):
+        """Start playback"""
+        if self.player.play() == 0:
+            self.is_playing = True
+            self.playback_started.emit()
+            logger.info("Playback started")
+        else:
+            logger.error("Failed to start playback")
+    
+    def pause(self):
+        """Pause playback"""
+        self.player.pause()
+        self.is_playing = False
+        self.playback_paused.emit()
+        logger.info("Playback paused")
+    
+    def stop(self):
+        """Stop playback"""
+        self.player.stop()
+        self.is_playing = False
+        self.current_position = 0.0
+        self.playback_stopped.emit()
+        logger.info("Playback stopped")
+    
+    def seek(self, position_seconds):
+        """Seek to position in seconds"""
+        try:
+            # Convert seconds to milliseconds for VLC
+            position_ms = int(position_seconds * 1000)
+            self.player.set_time(position_ms)
+            self.current_position = position_seconds
+            self.position_changed.emit(position_seconds)
+            logger.debug(f"Seeked to {position_seconds:.2f}s")
+        except Exception as e:
+            logger.error(f"Error seeking: {e}")
+    
+    def set_speed(self, speed):
+        """Set playback speed (0.5 to 2.0)"""
+        try:
+            # VLC supports rate from 0.25 to 4.0
+            speed = max(0.25, min(4.0, speed))
+            self.player.set_rate(speed)
+            self.playback_speed = speed
+            logger.info(f"Playback speed set to {speed:.1f}x")
+            return True
+        except Exception as e:
+            logger.error(f"Error setting playback speed: {e}")
+            return False
+    
+    def get_position(self):
+        """Get current position in seconds"""
+        try:
+            # VLC returns time in milliseconds
+            time_ms = self.player.get_time()
+            if time_ms >= 0:
+                self.current_position = time_ms / 1000.0
+            return self.current_position
+        except:
+            return self.current_position
+    
+    def get_state(self):
+        """Get current player state"""
+        return self.player.get_state()
+    
+    def update_position(self):
+        """Update and emit current position"""
+        if self.is_playing:
+            pos = self.get_position()
+            if pos >= 0:
+                self.position_changed.emit(pos)
+                
+                # Check if we've reached the end
+                if self.duration > 0 and pos >= self.duration - 0.1:
+                    self.stop()
+    
+    def _on_end_reached(self, event):
+        """Handle end of media"""
+        self.is_playing = False
+        self.end_reached.emit()
+        logger.info("End of media reached")
+    
+    def cleanup(self):
+        """Clean up resources"""
+        self.position_timer.stop()
+        self.stop()
+        if self.player:
+            self.player.release()
+        if self.instance:
+            self.instance.release()
 
 class TextSelectionDialog(QDialog):
     def __init__(self, block_text, parent=None):
@@ -638,13 +965,14 @@ class ExportPreviewDialog(QDialog):
         self.include_timestamps = has_timestamps
         self.current_include_timestamps = has_timestamps
         self.export_format = "html"  # Default to HTML
+        self.transcript_convention = "gat2"  # Default to GAT2
         self.project_info = project_info or {}
         self.audio_path = audio_path
         self.init_ui()
         
     def init_ui(self):
         self.setWindowTitle("Export Preview")
-        self.setGeometry(100, 100, 800, 700)
+        self.setGeometry(100, 100, 850, 750)  # Increased height
         
         layout = QVBoxLayout(self)
         
@@ -652,18 +980,22 @@ class ExportPreviewDialog(QDialog):
         format_layout = QHBoxLayout()
         format_layout.addWidget(QLabel("Export Format:"))
         
+        # Changed order: HTML, DOCX TXT, SRT
         self.html_radio = QRadioButton("HTML (.html)")
         self.html_radio.setChecked(True)
         self.html_radio.toggled.connect(self.on_format_changed)
         
+        self.docx_radio = QRadioButton("Word Document (.docx)")
+        self.docx_radio.toggled.connect(self.on_format_changed)
+               
         self.txt_radio = QRadioButton("Plain Text (.txt)")
         self.txt_radio.toggled.connect(self.on_format_changed)
         
-        # NEW: SRT format radio button
         self.srt_radio = QRadioButton("Subtitle File (.srt)")
         self.srt_radio.toggled.connect(self.on_format_changed)
         
         format_layout.addWidget(self.html_radio)
+        format_layout.addWidget(self.docx_radio)
         format_layout.addWidget(self.txt_radio)
         format_layout.addWidget(self.srt_radio)
         format_layout.addStretch()
@@ -672,6 +1004,16 @@ class ExportPreviewDialog(QDialog):
         if not self.include_timestamps:
             self.srt_radio.setEnabled(False)
             self.srt_radio.setToolTip("SRT export requires timestamp information. Original file does not contain timestamps.")
+        
+        # Convention selection
+        convention_layout = QHBoxLayout()
+        convention_layout.addWidget(QLabel("Transcript Convention:"))
+        
+        self.convention_combo = QComboBox()
+        self.convention_combo.addItems(["GAT2 (Conversation Analysis)", "Dresing & Pehl (Sociological Interviews)"])
+        self.convention_combo.currentTextChanged.connect(self.on_convention_changed)
+        convention_layout.addWidget(self.convention_combo)
+        convention_layout.addStretch()
         
         # Options group
         options_group = QGroupBox("Export Options")
@@ -686,7 +1028,7 @@ class ExportPreviewDialog(QDialog):
         if not self.include_timestamps:
             self.timestamp_check.setToolTip("Timestamps not available for text file imports")
         
-        # NEW: Diarization option (for SRT format)
+        # Diarization option
         self.diarization_check = QCheckBox("Include diarization (speaker labels)")
         self.diarization_check.setChecked(True)
         self.diarization_check.toggled.connect(self.update_preview)
@@ -705,7 +1047,7 @@ class ExportPreviewDialog(QDialog):
         self.audio_check.toggled.connect(self.update_preview)
         
         options_layout.addWidget(self.timestamp_check)
-        options_layout.addWidget(self.diarization_check)  # NEW
+        options_layout.addWidget(self.diarization_check)
         options_layout.addWidget(self.title_check)
         options_layout.addWidget(self.memo_check)
         options_layout.addWidget(self.audio_check)
@@ -717,7 +1059,9 @@ class ExportPreviewDialog(QDialog):
         
         self.preview_text = QTextEdit()
         self.preview_text.setReadOnly(True)
-        self.update_preview()
+        
+        # Initial setup for format and convention
+        self.on_format_changed()
         
         # Buttons
         button_box = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
@@ -725,6 +1069,7 @@ class ExportPreviewDialog(QDialog):
         button_box.rejected.connect(self.reject)
         
         layout.addLayout(format_layout)
+        layout.addLayout(convention_layout)
         layout.addWidget(options_group)
         layout.addWidget(preview_label)
         layout.addWidget(self.preview_text)
@@ -733,6 +1078,8 @@ class ExportPreviewDialog(QDialog):
     def on_format_changed(self):
         if self.html_radio.isChecked():
             self.export_format = "html"
+        elif self.docx_radio.isChecked():
+            self.export_format = "docx"
         elif self.txt_radio.isChecked():
             self.export_format = "txt"
         else:  # SRT format
@@ -742,19 +1089,34 @@ class ExportPreviewDialog(QDialog):
         is_srt = (self.export_format == "srt")
         
         # For SRT: disable project info options, enable diarization
-        # For other formats: enable project info, disable/gray out diarization
         self.title_check.setEnabled(not is_srt)
         self.memo_check.setEnabled(not is_srt)
         self.audio_check.setEnabled(not is_srt)
         self.timestamp_check.setEnabled(not is_srt and self.include_timestamps)
         
-        # Diarization is only applicable for SRT format
-        self.diarization_check.setEnabled(is_srt)
-        if not is_srt:
-            self.diarization_check.setChecked(True)  # Always on for non-SRT
+        # Diarization logic: For SRT, enable it. For non-SRT and GAT2, disable and check. For non-SRT and Dresing & Pehl, disable and check.
+        if is_srt:
+            self.diarization_check.setEnabled(True)
+            self.diarization_check.setChecked(True)
         else:
-            self.diarization_check.setChecked(True)  # Default on for SRT
+            # For non-SRT formats, diarization is always included and cannot be disabled
+            self.diarization_check.setEnabled(False)
+            self.diarization_check.setChecked(True)
             
+        self.update_preview()
+        
+    def on_convention_changed(self, convention_text):
+        if "Dresing" in convention_text:
+            self.transcript_convention = "dresing_pehl"
+        else:
+            self.transcript_convention = "gat2"
+        
+        # Update diarization checkbox based on format and convention
+        if self.export_format != "srt":
+            # For non-SRT formats, diarization is always included
+            self.diarization_check.setEnabled(False)
+            self.diarization_check.setChecked(True)
+                
         self.update_preview()
         
     def on_timestamp_changed(self, checked):
@@ -774,10 +1136,20 @@ class ExportPreviewDialog(QDialog):
             )
             self.preview_text.setPlainText(srt_text)
             return
-            
-        # Original preview code for HTML/TXT formats
+
+        if self.export_format == "docx":
+            # Show informative message for DOCX formats
+            preview_text = "Preview not available for this format. The exported file will contain the full transcript with selected options."
+            self.preview_text.setPlainText(preview_text)
+            return
+
+        # For other formats (HTML, TXT)
         if hasattr(parent, 'generate_transcript_text'):
-            transcript_text = parent.generate_transcript_text(include_timestamps=self.current_include_timestamps)
+            transcript_text = parent.generate_transcript_text(
+                include_timestamps=self.current_include_timestamps,
+                convention=self.transcript_convention,
+                include_diarization=self.diarization_check.isChecked()
+            )
             
             # Add project info if requested
             header_lines = []
@@ -786,7 +1158,7 @@ class ExportPreviewDialog(QDialog):
                 if self.export_format == "html":
                     escaped_name = parent.escape_html(self.project_info['name'])
                     header_lines.append(f"<h1>{escaped_name}</h1>")
-                else:
+                else:  # TXT
                     header_lines.append(self.project_info['name'])
                     header_lines.append("=" * len(self.project_info['name']))
                     header_lines.append("")
@@ -795,7 +1167,7 @@ class ExportPreviewDialog(QDialog):
                 if self.export_format == "html":
                     escaped_memo = parent.escape_html(self.project_info['memo'])
                     header_lines.append(f"<p><strong>Project Memo:</strong> {escaped_memo}</p>")
-                else:
+                else:  # TXT
                     header_lines.append(f"Project Memo: {self.project_info['memo']}")
                     header_lines.append("")
             
@@ -804,7 +1176,7 @@ class ExportPreviewDialog(QDialog):
                 if self.export_format == "html":
                     escaped_audio = parent.escape_html(audio_name)
                     header_lines.append(f"<p><strong>Audio File:</strong> {escaped_audio}</p>")
-                else:
+                else:  # TXT
                     header_lines.append(f"Audio File: {audio_name}")
                     header_lines.append("")
             
@@ -813,7 +1185,7 @@ class ExportPreviewDialog(QDialog):
                     header_text = "\n".join(header_lines)
                     escaped_transcript = parent.escape_html(transcript_text)
                     full_text = f"{header_text}\n{escaped_transcript}"
-                else:
+                else:  # TXT
                     header_text = "\n".join(header_lines)
                     full_text = f"{header_text}\n{transcript_text}"
             else:
@@ -826,12 +1198,17 @@ class ExportPreviewDialog(QDialog):
             full_text = "Preview not available"
             
         if self.export_format == "html":
+            # Choose font based on convention
+            font_family = "'Courier New', monospace"
+            if self.transcript_convention == "dresing_pehl":
+                font_family = "'Times New Roman', serif"
+            
             html_content = f"""
             <html>
             <head>
             <style>
             body {{
-                font-family: 'Courier New', monospace;
+                font-family: {font_family};
                 font-size: 10pt;
                 line-height: 1.2;
                 margin: 20px;
@@ -845,7 +1222,7 @@ class ExportPreviewDialog(QDialog):
             }}
             </style>
             </head>
-            <body>
+<body>
             {full_text}
             </body>
             </html>
@@ -857,6 +1234,7 @@ class ExportPreviewDialog(QDialog):
     def get_export_settings(self):
         return {
             'format': self.export_format,
+            'convention': self.transcript_convention,
             'include_timestamps': self.current_include_timestamps,
             'include_diarization': self.diarization_check.isChecked(),
             'include_title': self.title_check.isChecked(),
@@ -1106,7 +1484,7 @@ class SpeedKnob(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.value = 1.0  # Default 1.0x speed
-        self.min_value = 0.1
+        self.min_value = 0.5
         self.max_value = 2.0
         self.step = 0.1
         self.is_dragging = False
@@ -1154,7 +1532,7 @@ class SpeedKnob(QWidget):
         # Draw min/max labels
         font.setPointSize(7)
         painter.setFont(font)
-        painter.drawText(center.x() - 40, center.y() - radius + 50, "0.1x")
+        painter.drawText(center.x() - 40, center.y() - radius + 50, "0.5x")
         painter.drawText(center.x() + 27, center.y() - radius + 50, "2.0x")
         
     def mousePressEvent(self, event):
@@ -1163,15 +1541,21 @@ class SpeedKnob(QWidget):
             self.last_mouse_pos = event.pos()
             event.accept()
             
+    def set_value_direct(self, value):
+        """Set value directly"""
+        new_value = max(self.min_value, min(self.max_value, value))
+        if abs(new_value - self.value) > 0.01:
+            self.value = new_value
+            self.update()
+            self.valueChanged.emit(self.value)
+            
     def mouseMoveEvent(self, event):
         if self.is_dragging and self.last_mouse_pos:
             delta_y = self.last_mouse_pos.y() - event.y()
             delta_x = event.x() - self.last_mouse_pos.x()
-            
-            # Combined movement for diagonal sensitivity
             delta = delta_y + delta_x
             
-            new_value = self.value + (delta * self.step / 50)
+            new_value = self.value + (delta * self.step / 30)
             new_value = max(self.min_value, min(self.max_value, new_value))
             
             if new_value != self.value:
@@ -1192,25 +1576,11 @@ class SpeedKnob(QWidget):
     def wheelEvent(self, event):
         delta = event.angleDelta().y()
         if delta > 0:
-            self.increase_speed()
+            self.set_value_direct(self.value + self.step)
         else:
-            self.decrease_speed()
+            self.set_value_direct(self.value - self.step)
         event.accept()
-        
-    def increase_speed(self):
-        new_value = self.value + self.step
-        if new_value <= self.max_value:
-            self.value = new_value
-            self.update()
-            self.valueChanged.emit(self.value)
-            
-    def decrease_speed(self):
-        new_value = self.value - self.step
-        if new_value >= self.min_value:
-            self.value = new_value
-            self.update()
-            self.valueChanged.emit(self.value)
-                      
+                            
     valueChanged = pyqtSignal(float)
 
 class SRTEditor(QMainWindow):
@@ -1229,19 +1599,56 @@ class SRTEditor(QMainWindow):
         self.current_file_path = None
         self.file_has_timestamps = True
         self.audio_file_path = None
-        self.media_player = None
-        self.is_playing = False
-        self.auto_sync_enabled = True
-        self.auto_pause_enabled = True  # NEW: Autopause feature
-        self.sync_timer = QTimer()
         self.project_name = ""
         self.project_memo = ""
         self.text_display_font = QFont("Arial", 12)
-        self.has_unsaved_changes = False  # NEW: Track unsaved changes
+        self.has_unsaved_changes = False
+        self.current_theme = "light"
+        self.playback_speed = 1.0
+        self.segment_sync_buffer = 0
+        self.original_audio_duration = 0
+        
+        # VLC audio player
+        self.audio_player = None
+        self.is_playing = False
+        self.auto_sync_enabled = False
+        self.auto_pause_enabled = False
+        
+        # Timer for UI updates
+        self.ui_update_timer = QTimer()
+        self.ui_update_timer.timeout.connect(self.update_ui)
+        self.ui_update_timer.start(50)
+        
+               # Check for VLC at startup
+        self.vlc_available = self.check_vlc_available()
+        
+        if not self.vlc_available:
+            # Show warning about missing VLC
+            QMessageBox.warning(None, "VLC Not Found", 
+                "VLC media player was not found on your system.\n\n"
+                "For full functionality including playback speed control, please install VLC from:\n"
+                "https://www.videolan.org/vlc/\n\n"
+                "The application will use a basic fallback player without speed control.")
+        
         self.init_ui()
         
+    def check_vlc_available(self):
+        """Check if VLC is installed and available"""
+        try:
+            # Try to create a VLC instance
+            instance = vlc.Instance()
+            # Try to create a player
+            player = instance.media_player_new()
+            # Release resources
+            player.release()
+            instance.release()
+            return True
+        except Exception as e:
+            logger.warning(f"VLC not available: {e}")
+            return False
+        
     def init_ui(self):
-        self.setWindowTitle("CapsGAT 1.2 - GAT2 Transcription Workstation")
+        self.setWindowTitle("CapsGAT 1.3 - VLC Transcription Workstation")
         self.setGeometry(100, 100, 1400, 900)
         self.setWindowIcon(QIcon(resource_path('images/logo.ico')))
         
@@ -1254,6 +1661,12 @@ class SRTEditor(QMainWindow):
         
         # Left panel - Context display
         left_panel = QVBoxLayout()
+        
+#         # VLC status indicator
+#         self.vlc_status_label = QLabel()
+#         self.update_vlc_status_display()
+#         audio_layout.addWidget(self.vlc_status_label)
+#         audio_layout.addWidget(self.audio_info_label)
         
         # Current block info display
         self.current_info_label = QLabel("No block selected")
@@ -1327,26 +1740,17 @@ class SRTEditor(QMainWindow):
         # Right panel - Controls
         right_panel = QVBoxLayout()
         
-        # Audio controls - now in a grouped layout
-        #audio_group = QGroupBox()
-        #audio_layout = QVBoxLayout()
-
-             
         # Speaker assignment
         speaker_label = QLabel("Assign Speaker:")
         speaker_label.setFont(QFont("Arial", 12, QFont.Bold))
         right_panel.addWidget(speaker_label)
-        
         
         self.speaker_container = QWidget()
         self.speaker_layout = QVBoxLayout(self.speaker_container)
         self.create_speaker_widgets()
         right_panel.addWidget(self.speaker_container)
         
-           
-         # Manage speakers
-        #right_panel.addWidget(QLabel("Manage Speakers:"))
-         
+        # Manage speakers
         manage_layout = QHBoxLayout()
         self.speaker_edit = QSpinBox()
         self.speaker_edit.setMinimum(2)
@@ -1358,84 +1762,92 @@ class SRTEditor(QMainWindow):
         manage_layout.addWidget(QLabel("Number of speakers:"))
         manage_layout.addWidget(self.speaker_edit)
         manage_layout.addStretch()
-
         right_panel.addLayout(manage_layout)
         
-         
-         # Audio Controls Label (outside the box)
+        # Audio Controls Label
         audio_label = QLabel("Audio Controls:")
         audio_label.setFont(QFont("Arial", 12, QFont.Bold))
         right_panel.addWidget(audio_label)
 
-        # Audio controls group (without title)
-        audio_group = QGroupBox()  # Remove the title from constructor
+        # Audio controls group
+        audio_group = QGroupBox()
         audio_layout = QVBoxLayout()
 
         # Audio file info
         self.audio_info_label = QLabel("No audio loaded")
-        self.audio_info_label.setStyleSheet("background-color: #f0f0f0; padding: 5px; border-radius: 3px;")
+        self.audio_info_label.setStyleSheet("""
+            QLabel {
+                background-color: #f0f0f0; 
+                padding: 5px; 
+                border-radius: 3px;
+                font-size: 11px;
+            }
+        """)
+        self.audio_info_label.setMinimumWidth(170)
         audio_layout.addWidget(self.audio_info_label)
 
-        # Audio controls - layout with rewind/forward
-        audio_controls_layout = QHBoxLayout()
-
-        self.btn_load_audio = QPushButton("...")
-        self.btn_load_audio.clicked.connect(self.load_audio_file)
-
-        # Rewind, Play/Pause, Fast Forward buttons
-        self.btn_rewind = QPushButton("⏪ (PgUp)")
-        self.btn_rewind.clicked.connect(self.rewind_audio)
-        self.btn_rewind.setEnabled(False)
-
-        self.btn_play = QPushButton("⏯ (End)")
-        self.btn_play.clicked.connect(self.toggle_playback)
-        self.btn_play.setEnabled(False)
-
-        self.btn_forward = QPushButton("⏩ (PgDn)")
-        self.btn_forward.clicked.connect(self.forward_audio)
-        self.btn_forward.setEnabled(False)
-
-        #self.btn_stop = QPushButton("Stop")
-        #self.btn_stop.clicked.connect(self.stop_audio)
-        #self.btn_stop.setEnabled(False)
-
-        audio_controls_layout.addWidget(self.btn_load_audio)
-        audio_controls_layout.addWidget(self.btn_rewind)
-        audio_controls_layout.addWidget(self.btn_play)
-        audio_controls_layout.addWidget(self.btn_forward)
-        #audio_controls_layout.addWidget(self.btn_stop)
-        audio_controls_layout.addStretch()
-
-        audio_layout.addLayout(audio_controls_layout)
-
-        # Progress bar
+        # Audio progress bar
         self.audio_progress = QSlider(Qt.Horizontal)
         self.audio_progress.setEnabled(False)
         self.audio_progress.sliderMoved.connect(self.seek_audio)
         audio_layout.addWidget(self.audio_progress)
 
-        # Time display with jump button
-        time_jump_layout = QHBoxLayout()
+        # Time display
+        time_layout = QHBoxLayout()
         self.time_label = QLabel("00:00 / 00:00")
         self.time_label.setAlignment(Qt.AlignCenter)
-
-        # Jump to time button
+        
         self.btn_jump_to = QPushButton("Jump (Ctrl+J)")
         self.btn_jump_to.clicked.connect(self.jump_to_time)
         self.btn_jump_to.setEnabled(False)
+        
+        time_layout.addWidget(self.time_label)
+        time_layout.addWidget(self.btn_jump_to)
+        audio_layout.addLayout(time_layout)
 
-        time_jump_layout.addWidget(self.time_label)
-        time_jump_layout.addWidget(self.btn_jump_to)
-        audio_layout.addLayout(time_jump_layout)
+        # Audio controls
+        audio_controls_layout = QHBoxLayout()
+        
+        audio_button_font = QFont("Segoe UI Symbol")
+        
+
+
+        self.btn_load_audio = QPushButton("Load Audio")
+        self.btn_load_audio.clicked.connect(self.load_audio_file)
+
+        self.btn_rewind = QPushButton("⏪ (PgUp)")
+        self.btn_rewind.clicked.connect(self.rewind_audio)
+        self.btn_rewind.setFont(audio_button_font)
+        self.btn_rewind.setEnabled(False)
+
+        self.btn_play = QPushButton("▶ (End)")
+        self.btn_play.clicked.connect(self.toggle_playback)
+        self.btn_play.setFont(audio_button_font)
+        self.btn_play.setEnabled(False)
+
+        self.btn_forward = QPushButton("⏩ (PgDn)")
+        self.btn_forward.clicked.connect(self.forward_audio)
+        self.btn_forward.setFont(audio_button_font)
+        self.btn_forward.setEnabled(False)
+
+        audio_controls_layout.addWidget(self.btn_load_audio)
+        audio_controls_layout.addWidget(self.btn_rewind)
+        audio_controls_layout.addWidget(self.btn_play)
+        audio_controls_layout.addWidget(self.btn_forward)
+        audio_controls_layout.addStretch()
+
+        audio_layout.addLayout(audio_controls_layout)
 
         # Auto-sync and Autopause checkboxes
         sync_layout = QHBoxLayout()
         self.auto_sync_check = QCheckBox("Auto-sync to audio")
         self.auto_sync_check.setEnabled(False)
+        self.auto_sync_check.setChecked(False)
         self.auto_sync_check.toggled.connect(self.toggle_auto_sync)
 
         self.auto_pause_check = QCheckBox("Autopause during editing")
         self.auto_pause_check.setEnabled(False)
+        self.auto_pause_check.setChecked(False)
         self.auto_pause_check.toggled.connect(self.toggle_auto_pause)
 
         sync_layout.addWidget(self.auto_sync_check)
@@ -1444,33 +1856,44 @@ class SRTEditor(QMainWindow):
 
         audio_layout.addLayout(sync_layout)
         
-        # Add this after the auto-sync and autopause checkboxes
+        # Speed control
         speed_layout = QHBoxLayout()
         speed_layout.addWidget(QLabel("Playback Speed:"))
         
+        self.speed_slower_btn = QPushButton("-")
+        self.speed_slower_btn.clicked.connect(lambda: self.speed_knob.set_value_direct(max(0.5, self.playback_speed - 0.1)))
+        self.speed_slower_btn.setFixedWidth(30)
+        speed_layout.addWidget(self.speed_slower_btn)
+        
         self.speed_knob = SpeedKnob()
-        self.speed_knob.valueChanged.connect(self.set_playback_speed)
+        self.speed_knob.valueChanged.connect(self.change_playback_speed)
         speed_layout.addWidget(self.speed_knob)
         
-        # Add speed buttons
-        self.speed_slower_btn = QPushButton("-")
-        self.speed_slower_btn.clicked.connect(self.decrease_speed)
-        self.speed_slower_btn.setFixedWidth(30)
+        # Disable speed controls if VLC is not available
+        if not self.vlc_available:
+            self.speed_knob.setEnabled(False)
+            self.speed_slower_btn.setEnabled(False)
+            self.speed_normal_btn.setEnabled(False)
+            self.speed_faster_btn.setEnabled(False)
+            self.speed_knob.setToolTip("Speed control requires VLC media player")
+            self.speed_slower_btn.setToolTip("Speed control requires VLC media player")
+            self.speed_normal_btn.setToolTip("Speed control requires VLC media player")
+            self.speed_faster_btn.setToolTip("Speed control requires VLC media player")
+                     
+
         
-        self.speed_normal_btn = QPushButton("1.0x")
-        self.speed_normal_btn.clicked.connect(self.reset_speed)
+        self.speed_normal_btn = QPushButton("Reset")
+        self.speed_normal_btn.clicked.connect(lambda: self.speed_knob.set_value_direct(1.0))
         self.speed_normal_btn.setFixedWidth(50)
         
         self.speed_faster_btn = QPushButton("+")
-        self.speed_faster_btn.clicked.connect(self.increase_speed)
+        self.speed_faster_btn.clicked.connect(lambda: self.speed_knob.set_value_direct(min(2.0, self.playback_speed + 0.1)))
         self.speed_faster_btn.setFixedWidth(30)
         
-        speed_buttons_layout = QHBoxLayout()
-        speed_buttons_layout.addWidget(self.speed_slower_btn)
-        speed_buttons_layout.addWidget(self.speed_normal_btn)
-        speed_buttons_layout.addWidget(self.speed_faster_btn)
+        speed_layout.addWidget(self.speed_faster_btn)
+        speed_layout.addWidget(self.speed_normal_btn)
         
-        speed_layout.addLayout(speed_buttons_layout)
+        
         audio_layout.addLayout(speed_layout)
 
         audio_group.setLayout(audio_layout)
@@ -1508,41 +1931,9 @@ class SRTEditor(QMainWindow):
         layout.addLayout(right_panel, 1)
         
         self.setup_shortcuts()
-        self.init_audio_player()
-    
-    def set_playback_speed(self, speed):
-        """Set the playback speed"""
-        if self.media_player:
-            self.media_player.setPlaybackRate(speed)
-            self.speed_normal_btn.setText(f"{speed:.1f}x")
-            
-    def increase_speed(self):
-        """Increase playback speed"""
-        if self.speed_knob.value < self.speed_knob.max_value:
-            self.speed_knob.increase_speed()
-            
-    def decrease_speed(self):
-        """Decrease playback speed"""
-        if self.speed_knob.value > self.speed_knob.min_value:
-            self.speed_knob.decrease_speed()
-            
-    def reset_speed(self):
-        """Reset playback speed to 1.0"""
-        self.speed_knob.value = 1.0
-        self.speed_knob.update()
-        self.set_playback_speed(1.0)
-    
-    def escape_html(self, text):
-        """Escape HTML special characters to prevent interpretation as HTML tags"""
-        if not text:
-            return text
-        return (text.replace('&', '&amp;')
-                   .replace('<', '&lt;')
-                   .replace('>', '&gt;')
-                   .replace('"', '&quot;')
-                   .replace("'", '&#39;'))
     
     def create_menu_bar(self):
+        # [Menu bar creation remains the same]
         menubar = self.menuBar()
         
         # File menu
@@ -1560,14 +1951,12 @@ class SRTEditor(QMainWindow):
         
         save_project_action = QAction('Save Project', self)
         save_project_action.setShortcut('Ctrl+S')
-        save_project_action.triggered.connect(self.save_project)  # This will now handle first-time save correctly
+        save_project_action.triggered.connect(self.save_project)
         file_menu.addAction(save_project_action)
         
         save_as_action = QAction('Save Project As...', self)
         save_as_action.triggered.connect(lambda: self.save_project(force_save_as=True))
         file_menu.addAction(save_as_action)
-        
-        # ... rest of the menu code remains the same
         
         file_menu.addSeparator()
         
@@ -1608,7 +1997,7 @@ class SRTEditor(QMainWindow):
         project_memo_action.triggered.connect(self.open_project_memo)
         edit_menu.addAction(project_memo_action)
         
-        # NEW: Help menu
+        # Help menu
         help_menu = menubar.addMenu('Help')
         
         shortcuts_action = QAction('Shortcuts', self)
@@ -1622,9 +2011,334 @@ class SRTEditor(QMainWindow):
         about_action = QAction('About CapsGAT', self)
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(about_action)
+    
+    def setup_shortcuts(self):
+        # [Shortcuts remain the same]
+        for i in range(len(self.speakers)):
+            QShortcut(QKeySequence(str(i+1)), self).activated.connect(
+                lambda idx=i: self.assign_speaker(idx))
+        QShortcut(QKeySequence("N"), self).activated.connect(self.next_block)
+        QShortcut(QKeySequence("P"), self).activated.connect(self.previous_block)
+        QShortcut(QKeySequence("Right"), self).activated.connect(self.next_block)
+        QShortcut(QKeySequence("Left"), self).activated.connect(self.previous_block)
+        QShortcut(QKeySequence("Space"), self).activated.connect(self.split_current_block)
+        QShortcut(QKeySequence("Delete"), self).activated.connect(self.merge_with_next)
+        QShortcut(QKeySequence("E"), self).activated.connect(self.edit_current_block)
+        QShortcut(QKeySequence("*"), self).activated.connect(self.open_pause_dialog)
+        QShortcut(QKeySequence("U"), self).activated.connect(self.unassign_current)
+        QShortcut(QKeySequence("Return"), self).activated.connect(self.insert_empty_line)
+        QShortcut(QKeySequence("."), self).activated.connect(lambda: self.handle_pause("(.)"))
+        QShortcut(QKeySequence("H"), self).activated.connect(lambda: self.handle_pause("°h"))
+        QShortcut(QKeySequence("Shift+H"), self).activated.connect(lambda: self.handle_pause("h°"))
         
+        QShortcut(QKeySequence("PgUp"), self).activated.connect(self.rewind_audio)
+        QShortcut(QKeySequence("End"), self).activated.connect(self.toggle_playback)
+        QShortcut(QKeySequence("PgDown"), self).activated.connect(self.forward_audio)
+        QShortcut(QKeySequence("Ctrl+J"), self).activated.connect(self.jump_to_time)
+               
+        QShortcut(QKeySequence("+"), self).activated.connect(lambda: self.speed_knob.set_value_direct(min(2.0, self.playback_speed + 0.1)))
+        QShortcut(QKeySequence("-"), self).activated.connect(lambda: self.speed_knob.set_value_direct(max(0.5, self.playback_speed - 0.1)))
+        QShortcut(QKeySequence("0"), self).activated.connect(lambda: self.speed_knob.set_value_direct(1.0))
+        
+        QShortcut(QKeySequence("Ctrl+F"), self).activated.connect(self.open_search_dialog)
+        QShortcut(QKeySequence("F3"), self).activated.connect(self.find_next)
+        QShortcut(QKeySequence("Shift+F3"), self).activated.connect(self.find_previous)
+    
+    def update_ui(self):
+        """Update UI elements based on current state"""
+        if self.audio_player:
+            current_time = self.audio_player.get_position()
+            duration = self.audio_player.duration
+            
+            if duration > 0:
+                # Update progress slider
+                self.audio_progress.setValue(int(current_time / duration * 100))
+                
+                # Update time label
+                current_str = f"{int(current_time // 60):02d}:{int(current_time % 60):02d}"
+                duration_str = f"{int(duration // 60):02d}:{int(duration % 60):02d}"
+                speed_str = f" ({self.playback_speed:.1f}x)" if abs(self.playback_speed - 1.0) > 0.01 else ""
+                self.time_label.setText(f"{current_str} / {duration_str}{speed_str}")
+                
+                # Auto-sync if enabled
+                if self.auto_sync_enabled and self.srt_blocks and self.file_has_timestamps:
+                    self.auto_sync_with_audio(current_time)
+    
+    def load_audio_file(self):
+        """Load an audio file using appropriate player"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Load Audio File", "", 
+            "Audio Files (*.mp3 *.wav *.ogg *.m4a *.flac *.aac *.wma);;All Files (*)"
+        )
+        
+        if file_path:
+            # Check for subtitle files
+            audio_dir = Path(file_path).parent
+            subtitle_files = list(audio_dir.glob("*.srt")) + list(audio_dir.glob("*.json")) + \
+                           list(audio_dir.glob("*.txt")) + list(audio_dir.glob("*.tsv"))
+            
+            if subtitle_files:
+                reply = QMessageBox.question(
+                    self,
+                    "Subtitle File Found",
+                    f"Found {len(subtitle_files)} subtitle file(s). Import one?",
+                    QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel
+                )
+                
+                if reply == QMessageBox.Yes:
+                    file_list = [str(f.name) for f in subtitle_files]
+                    file_name, ok = QInputDialog.getItem(
+                        self, "Select Subtitle File", "Choose file:", file_list, 0, False
+                    )
+                    if ok and file_name:
+                        if self.check_unsaved_changes():
+                            subtitle_path = audio_dir / file_name
+                            self.current_file_path = str(subtitle_path)
+                            self.load_file_from_path(str(subtitle_path))
+                elif reply == QMessageBox.Cancel:
+                    return
+            
+            # Stop any existing audio
+            if self.audio_player:
+                self.audio_player.cleanup()
+                self.audio_player = None
+            
+            # Reset to 1.0x speed for initial load
+            self.playback_speed = 1.0
+            self.speed_knob.value = 1.0
+            self.speed_knob.update()
+            self.speed_normal_btn.setText("1.0x")
+            
+            # Choose player based on VLC availability
+            if self.vlc_available:
+                # Use VLC player
+                self.audio_player = VlcAudioPlayer()
+                player_name = "VLC"
+            else:
+                # Use fallback player
+                if HAS_PYAUDIO:
+                    self.audio_player = SimpleAudioPlayer()
+                    player_name = "Simple"
+                else:
+                    QMessageBox.warning(self, "No Audio Backend", 
+                        "Neither VLC nor PyAudio is available on your system.\n\n"
+                        "Please install VLC from https://www.videolan.org/vlc/\n"
+                        "or install PyAudio with: pip install pyaudio")
+                    return
+            
+            # Connect signals
+            if self.audio_player:
+                self.audio_player.playback_started.connect(self.on_playback_started)
+                self.audio_player.playback_stopped.connect(self.on_playback_stopped)
+                self.audio_player.position_changed.connect(self.on_position_changed)
+                
+                if hasattr(self.audio_player, 'playback_paused'):
+                    self.audio_player.playback_paused.connect(self.on_playback_paused)
+                if hasattr(self.audio_player, 'end_reached'):
+                    self.audio_player.end_reached.connect(self.on_playback_ended)
+                
+                if self.audio_player.load_file(file_path):
+                    self.audio_file_path = file_path
+                    audio_name = Path(file_path).name
+                    
+                    # Update status
+                    if self.vlc_available:
+                        status = f"Audio loaded: {audio_name}"
+                    else:
+                        status = f"Audio loaded: {audio_name} (⚠ No VLC player found - using fallback)"
+                    
+                    self.audio_info_label.setText(status)
+                    
+                    # Enable controls
+                    self.btn_play.setEnabled(True)
+                    self.btn_rewind.setEnabled(True)
+                    self.btn_forward.setEnabled(True)
+                    self.btn_jump_to.setEnabled(True)
+                    self.auto_sync_check.setEnabled(self.file_has_timestamps)
+                    self.auto_pause_check.setEnabled(True)
+                    self.audio_progress.setEnabled(True)
+                    
+                    logger.info(f"Audio loaded with {player_name} player: {audio_name}")
+                else:
+                    QMessageBox.critical(self, "Error", f"Failed to load audio file")
+                    self.audio_player = None
+                    self.audio_info_label.setText("No audio loaded")
+    
+    def toggle_playback(self):
+        """Toggle play/pause"""
+        if not self.audio_player:
+            return
+        
+        if self.audio_player.is_playing:
+            self.audio_player.pause()
+            self.btn_play.setText("▶ (End)")
+            self.is_playing = False
+        else:
+            # For fallback player, ensure thread is running
+            if isinstance(self.audio_player, SimpleAudioPlayer) and not self.audio_player.isRunning():
+                self.audio_player.start()
+            
+            self.audio_player.play()
+            self.btn_play.setText("⏸ (End)")
+            self.is_playing = True
+            
+    def rewind_audio(self):
+        """Rewind by 5 seconds"""
+        if self.audio_player:
+            current_pos = self.audio_player.get_position()
+            new_pos = max(0, current_pos - 5)
+            self.audio_player.seek(new_pos)
+    
+    def forward_audio(self):
+        """Fast forward by 5 seconds"""
+        if self.audio_player:
+            current_pos = self.audio_player.get_position()
+            duration = self.audio_player.duration
+            new_pos = min(duration, current_pos + 5)
+            self.audio_player.seek(new_pos)
+    
+    def seek_audio(self, position_percent):
+        """Seek to position"""
+        if self.audio_player:
+            position_seconds = position_percent / 100.0 * self.audio_player.duration
+            self.audio_player.seek(position_seconds)
+    
+    def jump_to_time(self):
+        """Jump to specific time"""
+        if self.audio_player and self.audio_player.duration > 0:
+            max_duration = self.audio_player.duration
+            dialog = JumpToTimeDialog(int(max_duration * 1000), self)
+            if dialog.exec_() == QDialog.Accepted:
+                target_time_ms = dialog.get_target_time()
+                self.audio_player.seek(target_time_ms / 1000.0)
+    
+    def change_playback_speed(self, new_speed):
+        """Change playback speed (only works with VLC)"""
+        if not self.vlc_available:
+            # Show message that speed control requires VLC
+            QMessageBox.information(self, "Speed Control Not Available",
+                "Playback speed control requires VLC media player.\n\n"
+                "Please install VLC from https://www.videolan.org/vlc/")
+            return
+        
+        new_speed = max(0.5, min(2.0, new_speed))
+        
+        # Don't process if speed hasn't changed
+        if abs(new_speed - self.playback_speed) < 0.01:
+            return
+        
+        self.playback_speed = new_speed
+        
+        if self.audio_player and isinstance(self.audio_player, VlcAudioPlayer):
+            self.audio_player.set_speed(new_speed)
+        
+    
+    def on_playback_started(self):
+        """Handle playback started"""
+        self.is_playing = True
+        logger.info("Playback started")
+    
+    def on_playback_paused(self):
+        """Handle playback paused"""
+        self.is_playing = False
+        logger.info("Playback paused")
+    
+    def on_playback_stopped(self):
+        """Handle playback stopped"""
+        self.is_playing = False
+        self.btn_play.setText("▶ (End)")
+        logger.info("Playback stopped")
+    
+    def on_playback_ended(self):
+        """Handle playback ended"""
+        self.is_playing = False
+        self.btn_play.setText("▶ (End)")
+        logger.info("Playback ended")
+    
+    def on_position_changed(self, position):
+        """Handle position change"""
+        # This is handled in update_ui
+        pass
+    
+    def auto_sync_with_audio(self, current_time):
+        """Auto-sync transcript with audio position"""
+        if not self.srt_blocks or not self.file_has_timestamps:
+            return
+        
+        # Find block containing current time
+        current_time_ms = current_time * 1000  # Convert to milliseconds
+        buffer_ms = 100  # Small buffer for better sync
+        
+        # First check current block
+        if 0 <= self.current_block_index < len(self.srt_blocks):
+            block = self.srt_blocks[self.current_block_index]
+            if block.get('start_time') and block.get('end_time'):
+                start_ms = self.time_to_ms(block['start_time'])
+                end_ms = self.time_to_ms(block['end_time'])
+                
+                if start_ms - buffer_ms <= current_time_ms <= end_ms + buffer_ms:
+                    return  # Still in current block
+        
+        # Search for matching block
+        for i, block in enumerate(self.srt_blocks):
+            if block.get('start_time') and block.get('end_time'):
+                start_ms = self.time_to_ms(block['start_time'])
+                end_ms = self.time_to_ms(block['end_time'])
+                
+                if start_ms - buffer_ms <= current_time_ms <= end_ms + buffer_ms:
+                    if i != self.current_block_index:
+                        self.current_block_index = i
+                        self.update_display()
+                    break
+    
+    def time_to_ms(self, time_str):
+        """Convert time string to milliseconds"""
+        if not time_str:
+            return 0
+        
+        if ',' in time_str:
+            time_part, ms_part = time_str.split(',')
+            ms = int(ms_part)
+        else:
+            time_part = time_str
+            ms = 0
+        
+        parts = time_part.split(':')
+        if len(parts) == 3:
+            hours = int(parts[0])
+            minutes = int(parts[1])
+            seconds = int(parts[2])
+        elif len(parts) == 2:
+            hours = 0
+            minutes = int(parts[0])
+            seconds = int(parts[1])
+        else:
+            return 0
+        
+        return (hours * 3600 + minutes * 60 + seconds) * 1000 + ms
+    
+    def toggle_auto_sync(self, checked):
+        """Toggle auto-sync"""
+        self.auto_sync_enabled = checked
+        logger.info(f"Auto-sync {'enabled' if checked else 'disabled'}")
+    
+    def toggle_auto_pause(self, checked):
+        """Toggle auto-pause"""
+        self.auto_pause_enabled = checked
+        logger.info(f"Auto-pause {'enabled' if checked else 'disabled'}")
+
+    def escape_html(self, text):
+        """Escape HTML special characters to prevent interpretation as HTML tags"""
+        if not text:
+            return text
+        return (text.replace('&', '&amp;')
+                   .replace('<', '&lt;')
+                   .replace('>', '&gt;')
+                   .replace('"', '&quot;')
+                   .replace("'", '&#39;'))
+    
     def new_project(self):
-        """Create a new empty project"""
+        """Create new project"""
         if self.check_unsaved_changes():
             self.srt_blocks = []
             self.current_block_index = 0
@@ -1632,7 +2346,41 @@ class SRTEditor(QMainWindow):
             self.project_name = ""
             self.project_memo = ""
             self.has_unsaved_changes = False
+            
+            self.speakers = ["A", "B", "C", "D"]
+            self.speaker_edit.setValue(4)
+            
+            # Stop audio
+            if self.audio_player:
+                self.audio_player.cleanup()
+                self.audio_player = None
+            
+            self.audio_file_path = None
+            self.audio_info_label.setText("No audio loaded")
+            self.btn_play.setEnabled(False)
+            self.btn_rewind.setEnabled(False)
+            self.btn_forward.setEnabled(False)
+            self.btn_jump_to.setEnabled(False)
+            self.auto_sync_check.setEnabled(False)
+            self.auto_pause_check.setEnabled(False)
+            self.auto_sync_check.setChecked(False)
+            self.auto_pause_check.setChecked(False)
+            self.audio_progress.setEnabled(False)
+            self.time_label.setText("00:00 / 00:00")
+            self.audio_progress.setValue(0)
+            
+            # Reset speed to 1.0
+            self.playback_speed = 1.0
+            self.speed_knob.value = 1.0
+            self.speed_knob.update()
+            
+            self.clear_search_highlights()
+            self.unassigned_list.clear()
+            self.create_speaker_widgets()
+            self.setup_shortcuts()
+            
             self.update_display()
+            self.clear_unsaved_changes()
             
     def check_unsaved_changes(self):
         """Check if there are unsaved changes and prompt to save"""
@@ -1681,7 +2429,6 @@ class SRTEditor(QMainWindow):
         display_block_pos = (block_idx - start_idx) * 2
         
         # Calculate the position in the displayed text
-        # We need to account for the ">> " prefix for current block or "   " for others
         cursor.movePosition(cursor.Start)
         for i in range(display_block_pos):
             cursor.movePosition(cursor.Down)
@@ -1700,7 +2447,7 @@ class SRTEditor(QMainWindow):
         # Create and apply highlight
         selection = QTextEdit.ExtraSelection()
         selection.cursor = cursor
-        selection.format.setBackground(QColor(255, 255, 0))  # Yellow highlight
+        selection.format.setBackground(QColor(255, 255, 0))
         selection.format.setForeground(QColor(0, 0, 0))
         
         self.text_display.setExtraSelections([selection])
@@ -1748,7 +2495,6 @@ Search Functions:
 • F3: Find Next
 • Shift+F3: Find Previous
 
-
 File Operations:
 • Ctrl+N: New Project
 • Ctrl+O: Open Project
@@ -1763,20 +2509,32 @@ File Operations:
     def show_about(self):
         """Show about dialog"""
         about_text = """
-CapsGAT 1.2
+<b style="font-size: 16px;">CapsGAT 1.3</b><br><br>
 
-(c) 2025 Anouâr Gadermann
-Published under GNU Public License 3.0
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+<br><br>
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+<br><br>
+You should have received a copy of the GNU General Public License along with this program.  If not, see 
+<a href="https://www.gnu.org/licenses/">https://www.gnu.org/licenses/</a>.
+<br><br>
+(c) 2026 Anouâr Gadermann
+<br>
+Engineered wtih DeepSeek V3.2
 
-Engineered with DeepSeek-V3.2
 """
         QMessageBox.about(self, "About CapsGAT", about_text)
         
     def mark_unsaved_changes(self):
         """Mark that there are unsaved changes"""
         self.has_unsaved_changes = True
-        # Update window title to indicate unsaved changes
-        base_title = "CapsGAT 1.2 - GAT2 Transcription Workstation"
+        base_title = "CapsGAT 1.3 - Streaming Transcription Workstation"
         if self.project_name:
             self.setWindowTitle(f"{base_title} - {self.project_name} *")
         else:
@@ -1785,14 +2543,24 @@ Engineered with DeepSeek-V3.2
     def clear_unsaved_changes(self):
         """Clear unsaved changes marker"""
         self.has_unsaved_changes = False
-        base_title = "CapsGAT 1.2 - GAT2 Transcription Workstation"
+        base_title = "CapsGAT 1.3 - Streaming Transcription Workstation"
         if self.project_name:
             self.setWindowTitle(f"{base_title} - {self.project_name}")
         else:
             self.setWindowTitle(base_title)
+            
+    def find_next(self):
+        """Find next occurrence (for F3 shortcut)"""
+        if hasattr(self, 'search_dialog') and self.search_dialog and self.search_dialog.isVisible():
+            self.search_dialog.next_match()
+            
+    def find_previous(self):
+        """Find previous occurrence (for Shift+F3 shortcut)"""
+        if hasattr(self, 'search_dialog') and self.search_dialog and self.search_dialog.isVisible():
+            self.search_dialog.previous_match()
         
     def import_subtitles(self):
-        """Import subtitles via menu - already handles unsaved changes in load_file"""
+        """Import subtitles via menu"""
         self.load_file()
         
     def save_project_as(self):
@@ -1800,13 +2568,10 @@ Engineered with DeepSeek-V3.2
         self.save_project(force_save_as=True)
         
     def open_settings(self):
-        # Get current theme, default to 'light' if not set
-        current_theme = getattr(self, 'current_theme', 'light')
-        dialog = SettingsDialog(self.text_display_font, current_theme, self)  # Pass current_theme
+        dialog = SettingsDialog(self.text_display_font, self.current_theme, self)
         if dialog.exec_() == QDialog.Accepted:
             self.text_display_font = dialog.get_font()
             self.text_display.setFont(self.text_display_font)
-            # Apply theme
             theme = dialog.get_theme()
             self.apply_viewer_theme(theme)
             
@@ -1818,97 +2583,19 @@ Engineered with DeepSeek-V3.2
             self.project_name = project_info['name']
             self.project_memo = project_info['memo']
             self.mark_unsaved_changes()
-            self.clear_unsaved_changes()  # Update window title
+            self.clear_unsaved_changes()
         
-    def init_audio_player(self):
-        """Initialize the audio player"""
-        self.media_player = QMediaPlayer()
-        self.media_player.positionChanged.connect(self.update_audio_progress)
-        self.media_player.durationChanged.connect(self.audio_duration_changed)
-        self.media_player.mediaStatusChanged.connect(self.media_status_changed)
+    def ms_to_time(self, ms):
+        """Convert milliseconds to SRT time format"""
+        hours = int(ms // 3600000)
+        ms %= 3600000
+        minutes = int(ms // 60000)
+        ms %= 60000
+        seconds = int(ms // 1000)
+        milliseconds = int(ms % 1000)
         
-        # Timer for auto-sync during playback
-        self.sync_timer.timeout.connect(self.auto_sync_with_audio)
-        self.sync_timer.start(100)  # Update every 100ms
-        
-    def toggle_auto_sync(self, checked):
-        """Toggle auto-sync on/off"""
-        self.auto_sync_enabled = checked
-        
-    def toggle_auto_pause(self, checked):
-        """Toggle auto-pause on/off"""
-        self.auto_pause_enabled = checked
-        
-    def rewind_audio(self):
-        """Rewind audio by 5 seconds"""
-        if self.media_player:
-            current_pos = self.media_player.position()
-            new_pos = max(0, current_pos - 5000)  # 5 seconds
-            self.media_player.setPosition(new_pos)
-            
-    def forward_audio(self):
-        """Fast forward audio by 5 seconds"""
-        if self.media_player:
-            current_pos = self.media_player.position()
-            duration = self.media_player.duration()
-            new_pos = min(duration, current_pos + 5000)  # 5 seconds
-            self.media_player.setPosition(new_pos)
-            
-    def jump_to_time(self):
-        """Open dialog to jump to specific time"""
-        if self.media_player and self.media_player.duration() > 0:
-            dialog = JumpToTimeDialog(self.media_player.duration(), self)
-            if dialog.exec_() == QDialog.Accepted:
-                target_time = dialog.get_target_time()
-                self.media_player.setPosition(target_time)
-        
-    def load_audio_file(self):
-        """Load an audio file for synchronization"""
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "Load Audio File", "", 
-            "Audio Files (*.mp3 *.wav *.ogg *.m4a *.flac);;All Files (*)"
-        )
-        if file_path:
-            # Check for subtitle files in same directory
-            audio_dir = Path(file_path).parent
-            subtitle_files = list(audio_dir.glob("*.srt")) + list(audio_dir.glob("*.json")) + \
-                           list(audio_dir.glob("*.txt")) + list(audio_dir.glob("*.tsv"))
-            
-            if subtitle_files:
-                reply = QMessageBox.question(
-                    self,
-                    "Subtitle File Found",
-                    f"Found {len(subtitle_files)} subtitle file(s) in the same directory. Would you like to import one?",
-                    QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel
-                )
-                
-                if reply == QMessageBox.Yes:
-                    # Let user choose which file to import
-                    file_list = [str(f.name) for f in subtitle_files]
-                    file_name, ok = QInputDialog.getItem(
-                        self, "Select Subtitle File", "Choose a file to import:", file_list, 0, False
-                    )
-                    if ok and file_name:
-                        # ONLY NOW check for unsaved changes before loading subtitle
-                        if self.check_unsaved_changes():
-                            subtitle_path = audio_dir / file_name
-                            self.current_file_path = str(subtitle_path)
-                            self.load_file_from_path(str(subtitle_path))
-                elif reply == QMessageBox.Cancel:
-                    return  # User canceled entirely
-            
-            # Load audio file (no unsaved changes check needed for audio only)
-            self.audio_file_path = file_path
-            self.media_player.setMedia(QMediaContent(QUrl.fromLocalFile(file_path)))
-            self.audio_info_label.setText(f"Audio: {Path(file_path).name}")
-            self.btn_play.setEnabled(True)
-            self.btn_rewind.setEnabled(True)
-            self.btn_forward.setEnabled(True)
-            self.btn_jump_to.setEnabled(True)
-            self.auto_sync_check.setEnabled(True)
-            self.auto_pause_check.setEnabled(True)
-            self.audio_progress.setEnabled(True)
-            
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d},{milliseconds:03d}"
+     
     def load_file_from_path(self, file_path):
         """Load a subtitle file from given path"""
         try:
@@ -1930,7 +2617,6 @@ Engineered with DeepSeek-V3.2
                 with open(file_path, 'r', encoding='utf-8') as f:
                     content = json.load(f)
                 self.srt_blocks = self.parse_json(content)
-                # Check if any blocks have timestamps
                 self.file_has_timestamps = any(block.get('start_time') for block in self.srt_blocks)
                 
             elif file_extension == '.tsv':
@@ -1942,123 +2628,33 @@ Engineered with DeepSeek-V3.2
             self.current_block_index = 0
             self.current_file_path = file_path
             
-            # Enable sync checkbox if we have timestamps and audio
+            # Only enable auto-sync checkbox if we have timestamps AND audio is loaded
             self.auto_sync_check.setEnabled(self.file_has_timestamps and self.audio_file_path is not None)
+            # Auto-pause is always enabled when audio is loaded
+            self.auto_pause_check.setEnabled(self.audio_file_path is not None)
+            
+            # Ensure checkboxes reflect the actual state
+            self.auto_sync_check.setChecked(self.auto_sync_enabled)
+            self.auto_pause_check.setChecked(self.auto_pause_enabled)
             
             self.update_display()
             self.mark_unsaved_changes()
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Could not load file: {str(e)}")
-            
-    def toggle_playback(self):
-        """Toggle play/pause of audio"""
-        if self.media_player.state() == QMediaPlayer.PlayingState:
-            self.media_player.pause()
-            self.btn_play.setText("⏯ End")
-            self.is_playing = False
-        else:
-            # NEW: Check autopause and pause if needed when starting playback with dialog open
-            if self.auto_pause_enabled and self.is_playing:
-                self.media_player.pause()
-            else:
-                self.media_player.play()
-                self.btn_play.setText("⏯ End")
-                self.is_playing = True
-            
-    def stop_audio(self):
-        """Stop audio playback"""
-        self.media_player.stop()
-        self.btn_play.setText("⏯ End")
-        self.is_playing = False
-        self.update_time_display(0, self.media_player.duration())
-        
-    def seek_audio(self, position):
-        """Seek to a specific position in the audio"""
-        self.media_player.setPosition(position)
-        
-    def update_audio_progress(self, position):
-        """Update progress bar and time display"""
-        duration = self.media_player.duration()
-        if duration > 0:
-            self.audio_progress.setRange(0, duration)
-            self.audio_progress.setValue(position)
-            self.update_time_display(position, duration)
-            
-    def update_time_display(self, position, duration):
-        """Update the time display label"""
-        pos_sec = position // 1000
-        dur_sec = duration // 1000
-        self.time_label.setText(f"{pos_sec//60:02d}:{pos_sec%60:02d} / {dur_sec//60:02d}:{dur_sec%60:02d}")
-        
-    def audio_duration_changed(self, duration):
-        """Handle when audio duration is known"""
-        if duration > 0:
-            self.audio_progress.setRange(0, duration)
-            
-    def media_status_changed(self, status):
-        """Handle media status changes"""
-        if status == QMediaPlayer.EndOfMedia:
-            self.btn_play.setText("⏯ End")
-            self.is_playing = False
-            
-    def auto_sync_with_audio(self):
-        """Auto-sync transcript with audio position during playback"""
-        if self.auto_sync_enabled and self.is_playing and self.srt_blocks and self.file_has_timestamps:
-            current_pos = self.media_player.position()
-            
-            # Find the block that corresponds to current audio position
-            for i, block in enumerate(self.srt_blocks):
-                if block.get('start_time'):
-                    # Convert SRT time to milliseconds
-                    time_parts = block['start_time'].split(':')
-                    if len(time_parts) == 3:
-                        hours = int(time_parts[0])
-                        minutes = int(time_parts[1])
-                        seconds_ms = time_parts[2].split(',')
-                        seconds = int(seconds_ms[0])
-                        milliseconds = int(seconds_ms[1]) if len(seconds_ms) > 1 else 0
-                        
-                        block_start_ms = (hours * 3600 + minutes * 60 + seconds) * 1000 + milliseconds
-                        
-                        # Check if this block is the current one based on audio position
-                        if i < len(self.srt_blocks) - 1:
-                            next_block = self.srt_blocks[i + 1]
-                            if next_block.get('start_time'):
-                                next_time_parts = next_block['start_time'].split(':')
-                                if len(next_time_parts) == 3:
-                                    next_hours = int(next_time_parts[0])
-                                    next_minutes = int(next_time_parts[1])
-                                    next_seconds_ms = next_time_parts[2].split(',')
-                                    next_seconds = int(next_seconds_ms[0])
-                                    next_milliseconds = int(next_seconds_ms[1]) if len(next_seconds_ms) > 1 else 0
-                                    
-                                    block_end_ms = (next_hours * 3600 + next_minutes * 60 + next_seconds) * 1000 + next_milliseconds
-                                    
-                                    if block_start_ms <= current_pos < block_end_ms and i != self.current_block_index:
-                                        self.current_block_index = i
-                                        self.update_display()
-                                        break
-                        else:
-                            # Last block - just check if we're past its start
-                            if block_start_ms <= current_pos and i != self.current_block_index:
-                                self.current_block_index = i
-                                self.update_display()
-                                break
-        
+
     def create_speaker_widgets(self):
         for i in reversed(range(self.speaker_layout.count())): 
             self.speaker_layout.itemAt(i).widget().setParent(None)
         
-        # Reduce vertical spacing in the main speaker layout
-        self.speaker_layout.setSpacing(5)  # Reduced from default
-        self.speaker_layout.setContentsMargins(0, 0, 0, 0)  # Remove margins
+        self.speaker_layout.setSpacing(5)
+        self.speaker_layout.setContentsMargins(0, 0, 0, 0)
         
         self.speaker_widgets = []
         for i, speaker in enumerate(self.speakers):
             speaker_widget = QWidget()
             speaker_layout = QHBoxLayout(speaker_widget)
-            speaker_layout.setSpacing(10)  # Set consistent horizontal spacing
+            speaker_layout.setSpacing(10)
             speaker_layout.setContentsMargins(5, 2, 5, 2)
             
             color_label = QLabel("■")
@@ -2066,13 +2662,12 @@ Engineered with DeepSeek-V3.2
             
             speaker_name_edit = QLineEdit(speaker)
             speaker_name_edit.textChanged.connect(lambda text, idx=i: self.rename_speaker(idx, text))
-            speaker_name_edit.setFixedWidth(120)  # Slightly narrower
+            speaker_name_edit.setFixedWidth(120)
             
             speaker_btn = QPushButton(f"{i+1}. Assign")
             speaker_btn.clicked.connect(lambda checked, idx=i: self.assign_speaker(idx))
             
-            # Theme-aware button styling
-            if hasattr(self, 'current_theme') and self.current_theme == "dark":
+            if self.current_theme == "dark":
                 speaker_btn.setStyleSheet(f"""
                     QPushButton {{ 
                         background-color: {self.speaker_colors[i].name()}; 
@@ -2101,22 +2696,20 @@ Engineered with DeepSeek-V3.2
                     }}
                 """)
             
-            # Add widgets with strategic stretching
             speaker_layout.addWidget(color_label)
             speaker_layout.addWidget(QLabel("Name:"))
             speaker_layout.addWidget(speaker_name_edit)
-            speaker_layout.addStretch(1)  # This will push the button to the right
+            speaker_layout.addStretch(1)
             speaker_layout.addWidget(speaker_btn)
             
-            # Center the entire speaker widget in the container
             centered_widget = QWidget()
             centered_widget.setMinimumHeight(40)
             centered_layout = QHBoxLayout(centered_widget)
             centered_layout.setSpacing(0)
             centered_layout.setContentsMargins(0, 0, 0, 0)
-            centered_layout.addStretch(1)  # Add stretch before
+            centered_layout.addStretch(1)
             centered_layout.addWidget(speaker_widget)
-            centered_layout.addStretch(1)  # Add stretch after
+            centered_layout.addStretch(1)
             
             self.speaker_layout.addWidget(centered_widget)
             self.speaker_widgets.append({
@@ -2124,52 +2717,6 @@ Engineered with DeepSeek-V3.2
                 'button': speaker_btn
             })
         
-    def setup_shortcuts(self):
-        for i in range(len(self.speakers)):
-            QShortcut(QKeySequence(str(i+1)), self).activated.connect(
-                lambda idx=i: self.assign_speaker(idx))
-        QShortcut(QKeySequence("N"), self).activated.connect(self.next_block)
-        QShortcut(QKeySequence("P"), self).activated.connect(self.previous_block)
-        QShortcut(QKeySequence("Right"), self).activated.connect(self.next_block)
-        QShortcut(QKeySequence("Left"), self).activated.connect(self.previous_block)
-        QShortcut(QKeySequence("Space"), self).activated.connect(self.split_current_block)
-        QShortcut(QKeySequence("Delete"), self).activated.connect(self.merge_with_next)
-        QShortcut(QKeySequence("E"), self).activated.connect(self.edit_current_block)
-        QShortcut(QKeySequence("*"), self).activated.connect(self.open_pause_dialog)
-        #QShortcut(QKeySequence("P"), self).activated.connect(self.open_pause_dialog)
-        QShortcut(QKeySequence("U"), self).activated.connect(self.unassign_current)
-        QShortcut(QKeySequence("Return"), self).activated.connect(self.insert_empty_line)
-        # FIXED: Changed shortcuts to use placement dialog
-        QShortcut(QKeySequence("."), self).activated.connect(lambda: self.handle_pause("(.)"))
-        QShortcut(QKeySequence("H"), self).activated.connect(lambda: self.handle_pause("°h"))
-        QShortcut(QKeySequence("Shift+H"), self).activated.connect(lambda: self.handle_pause("h°"))
-        
-        # NEW: Audio control shortcuts
-        QShortcut(QKeySequence("PgUp"), self).activated.connect(self.rewind_audio)
-        QShortcut(QKeySequence("End"), self).activated.connect(self.toggle_playback)
-        QShortcut(QKeySequence("PgDown"), self).activated.connect(self.forward_audio)
-        QShortcut(QKeySequence("Ctrl+J"), self).activated.connect(self.jump_to_time)
-               
-        # Add playback speed shortcuts
-        QShortcut(QKeySequence("+"), self).activated.connect(self.increase_speed)
-        QShortcut(QKeySequence("-"), self).activated.connect(self.decrease_speed)
-        QShortcut(QKeySequence("0"), self).activated.connect(self.reset_speed)
-        
-        # Add search navigation shortcuts
-        QShortcut(QKeySequence("Ctrl+F"), self).activated.connect(self.open_search_dialog)
-        QShortcut(QKeySequence("F3"), self).activated.connect(self.find_next)
-        QShortcut(QKeySequence("Shift+F3"), self).activated.connect(self.find_previous)
-
-    def find_next(self):
-        """Find next occurrence (for F3 shortcut)"""
-        if hasattr(self, 'search_dialog') and self.search_dialog and self.search_dialog.isVisible():
-            self.search_dialog.next_match()
-            
-    def find_previous(self):
-        """Find previous occurrence (for Shift+F3 shortcut)"""
-        if hasattr(self, 'search_dialog') and self.search_dialog and self.search_dialog.isVisible():
-            self.search_dialog.previous_match()
-
     def rename_speaker(self, speaker_idx, new_name):
         if speaker_idx < len(self.speakers):
             self.speakers[speaker_idx] = new_name
@@ -2211,15 +2758,17 @@ Engineered with DeepSeek-V3.2
                 try:
                     index = int(lines[0].strip())
                     time_line = lines[1].strip()
+                    # Fixed regex to properly capture milliseconds
                     time_match = re.match(r'(\d{2}):(\d{2}):(\d{2}),(\d{3}) --> (\d{2}):(\d{2}):(\d{2}),(\d{3})', time_line)
                     
                     if time_match:
                         text = '\n'.join(lines[2:]).strip()
+                        # Include milliseconds in the time string
                         block_data = {
                             'index': index,
-                            'start_time': f"{time_match.group(1)}:{time_match.group(2)}:{time_match.group(3)}",
+                            'start_time': f"{time_match.group(1)}:{time_match.group(2)}:{time_match.group(3)},{time_match.group(4)}",
                             'start_ms': int(time_match.group(4)),
-                            'end_time': f"{time_match.group(5)}:{time_match.group(6)}:{time_match.group(7)}",
+                            'end_time': f"{time_match.group(5)}:{time_match.group(6)}:{time_match.group(7)},{time_match.group(8)}",
                             'end_ms': int(time_match.group(8)),
                             'text': text,
                             'speaker': None,
@@ -2264,7 +2813,6 @@ Engineered with DeepSeek-V3.2
                 end_ms = int(parts[1])
                 text = parts[2]
                 
-                # Convert milliseconds to SRT time format
                 start_time = self.ms_to_srt_time(start_ms)
                 end_time = self.ms_to_srt_time(end_ms)
                 
@@ -2296,15 +2844,13 @@ Engineered with DeepSeek-V3.2
         if len(tokens) != len(timestamps) or len(tokens) < 2:
             return [{'text': ''.join(tokens), 'start_time': '', 'end_time': ''}]
         
-        # Calculate gaps between tokens
         gaps = []
         for i in range(1, len(timestamps)):
             gap = timestamps[i] - timestamps[i-1]
             gaps.append(gap)
         
-        # Calculate average gap and threshold for segmentation
         avg_gap = sum(gaps) / len(gaps)
-        threshold = avg_gap * 2.5  # Segment when gap is 2.5x average
+        threshold = avg_gap * 2.5
         
         segments = []
         current_segment = []
@@ -2313,11 +2859,9 @@ Engineered with DeepSeek-V3.2
         for i, (token, timestamp) in enumerate(zip(tokens, timestamps)):
             current_segment.append(token)
             
-            # Check if we should segment after this token
             if i < len(timestamps) - 1:
                 gap = timestamps[i+1] - timestamp
                 if gap > threshold:
-                    # Create segment
                     segment_text = ''.join(current_segment)
                     segments.append({
                         'text': segment_text,
@@ -2328,7 +2872,6 @@ Engineered with DeepSeek-V3.2
                     if i < len(timestamps) - 1:
                         current_start = timestamps[i+1]
         
-        # Add final segment
         if current_segment:
             segment_text = ''.join(current_segment)
             segments.append({
@@ -2352,18 +2895,15 @@ Engineered with DeepSeek-V3.2
         blocks = []
         
         try:
-            # Handle the specific format from your transcription software
             if isinstance(content, dict) and 'tokens' in content and 'timestamps' in content:
                 tokens = content['tokens']
                 timestamps = content['timestamps']
                 
-                # Show import options dialog
                 dialog = JsonImportDialog(has_tokens=True, parent=self)
                 if dialog.exec_() == QDialog.Accepted:
                     option = dialog.get_import_option()
                     
                     if option == "one_block":
-                        # Join tokens to form the text
                         text = ''.join(tokens) if tokens else ""
                         block_data = {
                             'index': 1,
@@ -2376,7 +2916,6 @@ Engineered with DeepSeek-V3.2
                         blocks.append(block_data)
                         
                     elif option == "tokens":
-                        # Create a block for each token
                         for i, (token, timestamp) in enumerate(zip(tokens, timestamps)):
                             block_data = {
                                 'index': i + 1,
@@ -2389,7 +2928,6 @@ Engineered with DeepSeek-V3.2
                             blocks.append(block_data)
                             
                     elif option == "auto_segment":
-                        # Auto-segment based on pauses
                         segments = self.auto_segment_tokens(tokens, timestamps)
                         for i, segment in enumerate(segments):
                             block_data = {
@@ -2402,10 +2940,8 @@ Engineered with DeepSeek-V3.2
                             }
                             blocks.append(block_data)
                 else:
-                    # User canceled
                     return []
                 
-            # Handle Whisper-style JSON with segments
             elif isinstance(content, dict) and 'segments' in content:
                 segments = content['segments']
                 for i, segment in enumerate(segments):
@@ -2419,7 +2955,6 @@ Engineered with DeepSeek-V3.2
                     }
                     blocks.append(block_data)
                     
-            # Handle simple text JSON
             elif isinstance(content, dict) and 'text' in content:
                 block_data = {
                     'index': 1,
@@ -2431,7 +2966,6 @@ Engineered with DeepSeek-V3.2
                 }
                 blocks.append(block_data)
                 
-            # Handle other JSON structures
             elif isinstance(content, list):
                 for i, item in enumerate(content):
                     if isinstance(item, dict):
@@ -2473,26 +3007,19 @@ Engineered with DeepSeek-V3.2
         if not self.srt_blocks:
             return
             
-        # Determine the file path for saving
         file_path = None
         
-        # If we have a current file path, check if it's already a .capsgat project file
         if not force_save_as and self.current_file_path:
             if self.current_file_path.endswith('.capsgat'):
-                # It's already a project file, use it
                 file_path = self.current_file_path
             else:
-                # It's an imported transcript file, force "Save As" behavior
                 force_save_as = True
         
-        # If we need to get a new file path (first save or Save As)
         if force_save_as or not file_path:
-            # Suggest a default filename based on project name or original file
             default_name = ""
             if self.project_name:
                 default_name = self.project_name.replace(" ", "_") + ".capsgat"
             elif self.current_file_path:
-                # Use the original filename but change extension
                 original_stem = Path(self.current_file_path).stem
                 default_name = f"{original_stem}.capsgat"
             else:
@@ -2505,10 +3032,9 @@ Engineered with DeepSeek-V3.2
                 "CapsGAT Project Files (*.capsgat)"
             )
             
-            if not file_path:  # User canceled
+            if not file_path:
                 return
                 
-            # Ensure the file has the correct extension
             if not file_path.endswith('.capsgat'):
                 file_path += '.capsgat'
         
@@ -2518,7 +3044,7 @@ Engineered with DeepSeek-V3.2
                     'srt_blocks': self.srt_blocks,
                     'current_block_index': self.current_block_index,
                     'speakers': self.speakers,
-                    'source_file': self.current_file_path,  # Keep reference to original transcript
+                    'source_file': self.current_file_path,
                     'file_has_timestamps': self.file_has_timestamps,
                     'audio_file_path': self.audio_file_path,
                     'project_name': self.project_name,
@@ -2527,13 +3053,14 @@ Engineered with DeepSeek-V3.2
                         'family': self.text_display_font.family(),
                         'size': self.text_display_font.pointSize()
                     },
-                    'viewer_theme': getattr(self, 'current_theme', 'light')
+                    'viewer_theme': self.current_theme,
+                    'playback_speed': self.playback_speed
                 }
                 
                 with open(file_path, 'w', encoding='utf-8') as f:
                     json.dump(project_data, f, indent=2, ensure_ascii=False)
                     
-                self.current_file_path = file_path  # Update to the project file path
+                self.current_file_path = file_path
                 self.clear_unsaved_changes()
                 QMessageBox.information(self, "Success", f"Project saved to {file_path}")
             except Exception as e:
@@ -2556,30 +3083,32 @@ Engineered with DeepSeek-V3.2
                 self.file_has_timestamps = project_data.get('file_has_timestamps', True)
                 self.project_name = project_data.get('project_name', '')
                 self.project_memo = project_data.get('project_memo', '')
+                self.playback_speed = project_data.get('playback_speed', 1.0)
                 
-                # Load font settings
                 font_data = project_data.get('text_display_font')
                 if font_data:
                     self.text_display_font = QFont(font_data['family'], font_data['size'])
                     self.text_display.setFont(self.text_display_font)
                 
-                # Load audio file if path exists
                 audio_path = project_data.get('audio_file_path')
                 if audio_path and Path(audio_path).exists():
                     self.audio_file_path = audio_path
-                    self.media_player.setMedia(QMediaContent(QUrl.fromLocalFile(audio_path)))
-                    self.audio_info_label.setText(f"Audio: {Path(audio_path).name}")
-                    self.btn_play.setEnabled(True)
-                    #self.btn_stop.setEnabled(True)
-                    self.btn_rewind.setEnabled(True)
-                    self.btn_forward.setEnabled(True)
-                    self.btn_jump_to.setEnabled(True)
-                    self.auto_sync_check.setEnabled(True)
-                    self.auto_pause_check.setEnabled(True)
-                    self.audio_progress.setEnabled(True)
+                    # Get original duration
+                    try:
+                        info = sf.info(audio_path)
+                        self.original_audio_duration = info.duration
+                    except:
+                        self.original_audio_duration = 0
+                    
+                    # Load audio at saved speed
+                    self.load_audio_file_for_project(audio_path, self.playback_speed)
                     
                 viewer_theme = project_data.get('viewer_theme', 'light')
                 self.apply_viewer_theme(viewer_theme)
+                
+                # Update speed display
+                self.speed_knob.value = self.playback_speed
+                self.speed_knob.update()
                 
                 self.update_display()
                 self.clear_unsaved_changes()
@@ -2588,14 +3117,55 @@ Engineered with DeepSeek-V3.2
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Could not load project: {str(e)}")
 
+    def load_audio_file_for_project(self, audio_path, speed):
+        """Load audio file for a project (without showing file dialog)"""
+        # Stop any existing audio
+        if self.audio_player:
+            self.audio_player.cleanup()
+            self.audio_player = None
+        
+        # Create new streaming player
+        self.audio_player = StreamingAudioPlayer()
+        self.audio_player.playback_started.connect(self.on_playback_started)
+        self.audio_player.playback_stopped.connect(self.on_playback_stopped)
+        self.audio_player.position_changed.connect(self.on_position_changed)
+        
+        try:
+            # Get original duration
+            info = sf.info(audio_path)
+            self.original_audio_duration = info.duration
+            
+            # Load audio file at project speed
+            self.audio_player.load_file(audio_path, speed)
+            self.audio_file_path = audio_path
+            
+            # Update UI
+            audio_name = Path(audio_path).name
+            self.audio_info_label.setText(f"Audio: {audio_name}")
+            
+            # Enable controls
+            self.btn_play.setEnabled(True)
+            self.btn_rewind.setEnabled(True)
+            self.btn_forward.setEnabled(True)
+            self.btn_jump_to.setEnabled(True)
+            self.auto_sync_check.setEnabled(self.file_has_timestamps)
+            self.auto_pause_check.setEnabled(True)
+            self.audio_progress.setEnabled(True)
+            
+            logger.info(f"Audio loaded for project at {speed:.1f}x speed: {audio_name}")
+            
+        except Exception as e:
+            logger.error(f"Failed to load audio for project: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to load audio: {str(e)}")
+            self.audio_player = None
+
     def apply_viewer_theme(self, theme):
         self.current_theme = theme
         if theme == "dark":
-            # Dark theme styles
             self.text_display.setStyleSheet("""
                 QTextEdit {
                     background-color: #2b2b2b;
-                    color: #ffffff;  /* White text for dark theme */
+                    color: #ffffff;
                     border: 2px solid #555;
                     border-radius: 5px;
                     padding: 10px;
@@ -2604,26 +3174,24 @@ Engineered with DeepSeek-V3.2
             self.current_info_label.setStyleSheet("""
                 QLabel {
                     background-color: #3a3a3a;
-                    color: #ffffff;  /* White text */
+                    color: #ffffff;
                     padding: 10px;
                     border: 2px solid #555;
                     border-radius: 5px;
                     font-weight: bold;
                 }
             """)
-            # Dark theme speaker colors - lighter versions for better contrast with white text
             self.speaker_colors = [
-                QColor(60, 80, 100),   # Dark blue (lighter)
-                QColor(100, 60, 60),   # Dark red (lighter)
-                QColor(60, 100, 60),   # Dark green (lighter)
-                QColor(100, 100, 60)   # Dark yellow (lighter)
+                QColor(60, 80, 100),
+                QColor(100, 60, 60),
+                QColor(60, 100, 60),
+                QColor(100, 100, 60)
             ]
-        else:  # light theme
-            # Light theme styles
+        else:
             self.text_display.setStyleSheet("""
                 QTextEdit {
                     background-color: #fafafa;
-                    color: #000000;  /* Black text for light theme */
+                    color: #000000;
                     border: 2px solid #ddd;
                     border-radius: 5px;
                     padding: 10px;
@@ -2632,24 +3200,21 @@ Engineered with DeepSeek-V3.2
             self.current_info_label.setStyleSheet("""
                 QLabel {
                     background-color: #f0f0f0;
-                    color: #000000;  /* Black text */
+                    color: #000000;
                     padding: 10px;
                     border: 2px solid #ccc;
                     border-radius: 5px;
                     font-weight: bold;
                 }
             """)
-            # Light theme speaker colors (original colors)
             self.speaker_colors = [
-                QColor(220, 240, 255),  # Light blue
-                QColor(255, 220, 220),  # Light red
-                QColor(220, 255, 220),  # Light green
-                QColor(255, 255, 200)   # Light yellow
+                QColor(220, 240, 255),
+                QColor(255, 220, 220),
+                QColor(220, 255, 220),
+                QColor(255, 255, 200)
             ]
         
-        # Update speaker widget colors
         self.create_speaker_widgets()
-        # Refresh the display to apply new colors
         self.update_display()
     
     def update_display(self):
@@ -2695,7 +3260,6 @@ Engineered with DeepSeek-V3.2
         cursor = self.text_display.textCursor()
         cursor.select(cursor.Document)
         
-        # Reset to default formatting
         format_normal = QTextCharFormat()
         cursor.setCharFormat(format_normal)
         
@@ -2725,11 +3289,10 @@ Engineered with DeepSeek-V3.2
         
         cursor.movePosition(cursor.Down, cursor.KeepAnchor)
         current_format = QTextCharFormat()
-        # Current block highlighting
-        if hasattr(self, 'current_theme') and self.current_theme == "dark":
-            current_format.setBackground(QColor(120, 120, 200))  # Subtle dark highlight
+        if self.current_theme == "dark":
+            current_format.setBackground(QColor(120, 120, 200))
         else:
-            current_format.setBackground(QColor(255, 240, 200))  # Original light yellow
+            current_format.setBackground(QColor(255, 240, 200))
         current_format.setFontWeight(QFont.Bold)
         cursor.setCharFormat(current_format)
         
@@ -2779,7 +3342,6 @@ Engineered with DeepSeek-V3.2
             else:
                 break
         
-        # FIXED: Only auto-advance if audio is not playing with sync enabled
         if not (self.is_playing and self.auto_sync_enabled):
             self.find_next_unassigned()
             
@@ -2819,11 +3381,11 @@ Engineered with DeepSeek-V3.2
         if not self.srt_blocks:
             return
             
-        # NEW: Auto-pause if enabled
         was_playing = False
         if self.auto_pause_enabled and self.is_playing:
             was_playing = True
-            self.media_player.pause()
+            if self.audio_player:
+                self.audio_player.pause()
             
         current_block = self.srt_blocks[self.current_block_index]
         dialog = BlockSplitDialog(current_block['text'], self)
@@ -2835,161 +3397,151 @@ Engineered with DeepSeek-V3.2
                 text_after = current_block['text'][split_pos:].strip()
                 
                 if text_before and text_after:
-                    # Calculate proportional timestamps if they exist
                     if current_block.get('start_time') and current_block.get('end_time'):
-                        # Save original end time before modifying
                         original_end_time = current_block['end_time']
                         original_end_ms = self.time_to_ms(original_end_time)
                         
-                        # Convert timestamps to milliseconds
                         start_ms = self.time_to_ms(current_block['start_time'])
                         end_ms = original_end_ms
                         total_duration = end_ms - start_ms
                         
-                        # Calculate proportion based on text length
                         total_chars = len(text_before) + len(text_after)
                         before_proportion = len(text_before) / total_chars
-                        
-                        # Calculate split time
+
                         split_ms = start_ms + int(total_duration * before_proportion)
-                        
-                        # Ensure split_ms is between start_ms and end_ms
                         split_ms = max(start_ms + 100, min(end_ms - 100, split_ms))
-                        
-                        # Update current block's end time
+
                         current_block['text'] = text_before
                         current_block['end_time'] = self.ms_to_time(split_ms)
-                        
-                        # Create new block with adjusted start and end times
+
                         new_block = current_block.copy()
                         new_block['text'] = text_after
                         new_block['index'] = max(block['index'] for block in self.srt_blocks) + 1
                         new_block['start_time'] = self.ms_to_time(split_ms)
-                        new_block['end_time'] = original_end_time  # Use the original end time
+                        new_block['end_time'] = original_end_time
                         new_block['speaker'] = None
                         new_block['is_turn_start'] = False
-                        
+
                         if current_block['speaker'] is not None:
                             new_block['speaker'] = current_block['speaker']
                             new_block['is_turn_start'] = False
                     else:
-                        # No timestamps available
                         current_block['text'] = text_before
-                        
+
                         new_block = current_block.copy()
                         new_block['text'] = text_after
                         new_block['index'] = max(block['index'] for block in self.srt_blocks) + 1
                         new_block['speaker'] = None
                         new_block['is_turn_start'] = False
-                        
+
                         if current_block['speaker'] is not None:
                             new_block['speaker'] = current_block['speaker']
                             new_block['is_turn_start'] = False
-                    
+
                     self.srt_blocks.insert(self.current_block_index + 1, new_block)
                     self.update_display()
                     self.mark_unsaved_changes()
-                    
-        # NEW: Resume playback if was playing and autopause enabled
+
         if was_playing and self.auto_pause_enabled:
-            self.media_player.play()
-    
+            if self.audio_player:
+                self.audio_player.play()
+
     def merge_with_next(self):
         if self.current_block_index >= len(self.srt_blocks) - 1:
             return
-            
+
         current_block = self.srt_blocks[self.current_block_index]
         next_block = self.srt_blocks[self.current_block_index + 1]
-        
+
         if current_block['speaker'] is None or current_block['speaker'] == next_block['speaker']:
             current_block['text'] += " " + next_block['text']
             current_block['end_time'] = next_block['end_time']
-            
+
             if next_block.get('is_turn_start', False):
                 current_block['is_turn_start'] = True
-            
+
             del self.srt_blocks[self.current_block_index + 1]
             self.update_display()
             self.mark_unsaved_changes()
-    
+
     def edit_current_block(self):
         if not self.srt_blocks:
             return
-            
-        # NEW: Auto-pause if enabled
+
         was_playing = False
         if self.auto_pause_enabled and self.is_playing:
             was_playing = True
-            self.media_player.pause()
-            
+            if self.audio_player:
+                self.audio_player.pause()
+
         current_block = self.srt_blocks[self.current_block_index]
         dialog = EditDialog(current_block['text'], self)
-        
+
         if dialog.exec_() == QDialog.Accepted:
             new_text = dialog.get_text()
             current_block['text'] = new_text
             self.update_display()
             self.mark_unsaved_changes()
-            
-        # NEW: Resume playback if was playing and autopause enabled
+
         if was_playing and self.auto_pause_enabled:
-            self.media_player.play()
-    
+            if self.audio_player:
+                self.audio_player.play()
+
     def open_pause_dialog(self):
         if not self.srt_blocks:
             return
-            
-        # NEW: Auto-pause if enabled
+
         was_playing = False
         if self.auto_pause_enabled and self.is_playing:
             was_playing = True
-            self.media_player.pause()
-            
+            if self.audio_player:
+                self.audio_player.pause()
+
         dialog = EnhancedPauseDialog(self)
         if dialog.exec_() == QDialog.Accepted:
             option_index = dialog.selected_option
             self.handle_gat2_symbol(option_index)
-            
-        # NEW: Resume playback if was playing and autopause enabled
+
         if was_playing and self.auto_pause_enabled:
-            self.media_player.play()
-    
+            if self.audio_player:
+                self.audio_player.play()
+
     def handle_gat2_symbol(self, option_index):
         symbols = ["(.)", "(-)", "(--)", "(---)", "(_._)", "(())", "<<>>", "[ ]", "°h", "°hh", "°hhh", "h°", "hh°", "hhh°"]
-        
-        if option_index == 4:  # Measured pause
+
+        if option_index == 4:
             self.handle_measured_pause()
-        elif option_index == 5:  # Comment
+        elif option_index == 5:
             self.handle_comment()
-        elif option_index == 6:  # Action
+        elif option_index == 6:
             self.handle_action()
-        elif option_index == 7:  # Overlap
+        elif option_index == 7:
             self.handle_overlap()
-        else:  # Pauses and breath sounds
+        else:
             symbol = symbols[option_index]
             self.handle_pause(symbol)
-    
+
     def handle_measured_pause(self):
-        # NEW: Auto-pause if enabled
         was_playing = False
         if self.auto_pause_enabled and self.is_playing:
             was_playing = True
-            self.media_player.pause()
-            
+            if self.audio_player:
+                self.audio_player.pause()
+
         time_ms, ok = QInputDialog.getInt(
-            self, 
-            "Measured Pause", 
+            self,
+            "Measured Pause",
             "Enter pause length in 100 milliseconds (e.g., 8 for 0.8 seconds):",
             value=5, min=1, max=50, step=1
         )
-        
+
         if ok:
             seconds = time_ms / 10.0
             symbol = f"({seconds:.1f})"
-            
+
             current_block = self.srt_blocks[self.current_block_index]
             dialog = PlacementDialog(current_block['text'], symbol, self)
-            
+
             if dialog.exec_() == QDialog.Accepted:
                 if dialog.create_new_line:
                     new_block = {
@@ -3004,29 +3556,29 @@ Engineered with DeepSeek-V3.2
                     self.srt_blocks.insert(self.current_block_index + 1, new_block)
                 else:
                     pos = dialog.placement_position
-                    current_block['text'] = (current_block['text'][:pos] + " " + symbol + 
+                    current_block['text'] = (current_block['text'][:pos] + " " + symbol +
                                            " " + current_block['text'][pos:]).strip()
-                
+
                 self.update_display()
                 self.mark_unsaved_changes()
-                
-        # NEW: Resume playback if was playing and autopause enabled
+
         if was_playing and self.auto_pause_enabled:
-            self.media_player.play()
-    
+            if self.audio_player:
+                self.audio_player.play()
+
     def handle_pause(self, symbol):
         if not self.srt_blocks:
             return
-            
-        # NEW: Auto-pause if enabled
+
         was_playing = False
         if self.auto_pause_enabled and self.is_playing:
             was_playing = True
-            self.media_player.pause()
-            
+            if self.audio_player:
+                self.audio_player.pause()
+
         current_block = self.srt_blocks[self.current_block_index]
         dialog = PlacementDialog(current_block['text'], symbol, self)
-        
+
         if dialog.exec_() == QDialog.Accepted:
             if dialog.create_new_line:
                 new_block = {
@@ -3041,30 +3593,30 @@ Engineered with DeepSeek-V3.2
                 self.srt_blocks.insert(self.current_block_index + 1, new_block)
             else:
                 pos = dialog.placement_position
-                current_block['text'] = (current_block['text'][:pos] + " " + symbol + 
+                current_block['text'] = (current_block['text'][:pos] + " " + symbol +
                                        " " + current_block['text'][pos:]).strip()
-            
+
             self.update_display()
             self.mark_unsaved_changes()
-            
-        # NEW: Resume playback if was playing and autopause enabled
+
         if was_playing and self.auto_pause_enabled:
-            self.media_player.play()
-    
+            if self.audio_player:
+                self.audio_player.play()
+
     def handle_comment(self):
-        # NEW: Auto-pause if enabled
         was_playing = False
         if self.auto_pause_enabled and self.is_playing:
             was_playing = True
-            self.media_player.pause()
-            
+            if self.audio_player:
+                self.audio_player.pause()
+
         dialog = CommentDialog(self)
         if dialog.exec_() == QDialog.Accepted:
             comment = dialog.get_comment()
             if comment:
                 current_block = self.srt_blocks[self.current_block_index]
                 placement_dialog = PlacementDialog(current_block['text'], comment, self)
-                
+
                 if placement_dialog.exec_() == QDialog.Accepted:
                     if placement_dialog.create_new_line:
                         new_block = {
@@ -3079,33 +3631,33 @@ Engineered with DeepSeek-V3.2
                         self.srt_blocks.insert(self.current_block_index + 1, new_block)
                     else:
                         pos = placement_dialog.placement_position
-                        current_block['text'] = (current_block['text'][:pos] + " " + comment + 
+                        current_block['text'] = (current_block['text'][:pos] + " " + comment +
                                                " " + current_block['text'][pos:]).strip()
-                    
+
                     self.update_display()
                     self.mark_unsaved_changes()
-                    
-        # NEW: Resume playback if was playing and autopause enabled
+
         if was_playing and self.auto_pause_enabled:
-            self.media_player.play()
-    
+            if self.audio_player:
+                self.audio_player.play()
+
     def handle_action(self):
         if not self.srt_blocks:
             return
-            
-        # NEW: Auto-pause if enabled
+
         was_playing = False
         if self.auto_pause_enabled and self.is_playing:
             was_playing = True
-            self.media_player.pause()
-            
+            if self.audio_player:
+                self.audio_player.pause()
+
         current_block = self.srt_blocks[self.current_block_index]
         dialog = TextSelectionDialog(current_block['text'], self)
-        
+
         if dialog.exec_() == QDialog.Accepted:
             start_pos, end_pos, selected_text = dialog.get_selection()
             if selected_text:
-                action_text, ok = QInputDialog.getText(self, "Action Description", 
+                action_text, ok = QInputDialog.getText(self, "Action Description",
                                                      f"Describe the action for '{selected_text}':")
                 if ok and action_text:
                     before_text = current_block['text'][:start_pos]
@@ -3113,26 +3665,26 @@ Engineered with DeepSeek-V3.2
                     current_block['text'] = f"{before_text}<<{action_text}> {selected_text}>{after_text}"
                     self.update_display()
                     self.mark_unsaved_changes()
-                    
-        # NEW: Resume playback if was playing and autopause enabled
+
         if was_playing and self.auto_pause_enabled:
-            self.media_player.play()
-    
+            if self.audio_player:
+                self.audio_player.play()
+
     def handle_overlap(self):
         if not self.srt_blocks or self.current_block_index == 0:
-            QMessageBox.information(self, "Overlap Feature", 
+            QMessageBox.information(self, "Overlap Feature",
                                    "Overlap requires at least two consecutive blocks.")
             return
-            
-        # NEW: Auto-pause if enabled
+
         was_playing = False
         if self.auto_pause_enabled and self.is_playing:
             was_playing = True
-            self.media_player.pause()
-            
+            if self.audio_player:
+                self.audio_player.pause()
+
         current_block = self.srt_blocks[self.current_block_index]
         prev_block = self.srt_blocks[self.current_block_index - 1]
-        
+
         dialog = TextSelectionDialog(current_block['text'], self)
         if dialog.exec_() == QDialog.Accepted:
             start_pos, end_pos, selected_text = dialog.get_selection()
@@ -3142,29 +3694,28 @@ Engineered with DeepSeek-V3.2
                 if prev_dialog.exec_() == QDialog.Accepted:
                     prev_start, prev_end, prev_selected = prev_dialog.get_selection()
                     if prev_selected:
-                        # Calculate indentation for the second line
                         chars_before_overlap = prev_start
                         indent_spaces = " " * chars_before_overlap
-                        
+
                         before_text = current_block['text'][:start_pos]
                         after_text = current_block['text'][end_pos:]
                         current_block['text'] = f"{before_text}{indent_spaces}[{selected_text}]{after_text}"
-                        
+
                         prev_before = prev_block['text'][:prev_start]
                         prev_after = prev_block['text'][prev_end:]
                         prev_block['text'] = f"{prev_before}[{prev_selected}]{prev_after}"
-                        
+
                         self.update_display()
                         self.mark_unsaved_changes()
-                        
-        # NEW: Resume playback if was playing and autopause enabled
+
         if was_playing and self.auto_pause_enabled:
-            self.media_player.play()
-    
+            if self.audio_player:
+                self.audio_player.play()
+
     def insert_empty_line(self):
         if not self.srt_blocks:
             return
-            
+
         new_block = {
             'index': max(block['index'] for block in self.srt_blocks) + 1,
             'start_time': '',
@@ -3178,7 +3729,7 @@ Engineered with DeepSeek-V3.2
         self.current_block_index += 1
         self.update_display()
         self.mark_unsaved_changes()
-    
+
     def jump_to_block(self, item):
         text = item.text()
         match = re.match(r'(\d+):', text)
@@ -3187,71 +3738,79 @@ Engineered with DeepSeek-V3.2
             if 0 <= block_idx < len(self.srt_blocks):
                 self.current_block_index = block_idx
                 self.update_display()
-    
+
     def export_transcript(self):
         if not self.srt_blocks:
             return
-            
+
         project_info = {
             'name': self.project_name,
             'memo': self.project_memo
         }
-        
+
         preview_dialog = ExportPreviewDialog(self, self.file_has_timestamps, project_info, self.audio_file_path)
         if preview_dialog.exec_() == QDialog.Accepted:
             settings = preview_dialog.get_export_settings()
-            
-            # For SRT export, ask about unassigned segments
-            unassigned_handling = "skip"  # Default
+
+            unassigned_handling = "skip"
             if settings['format'] == 'srt':
-                # Count unassigned segments
-                unassigned_count = sum(1 for block in self.srt_blocks 
-                                     if block['speaker'] is None and not block.get('is_pause') 
+                unassigned_count = sum(1 for block in self.srt_blocks
+                                     if block['speaker'] is None and not block.get('is_pause')
                                      and not block.get('is_comment') and not block.get('is_empty'))
-                
+
                 if unassigned_count > 0:
                     dialog = UnassignedSegmentsDialog(unassigned_count, self)
                     if dialog.exec_() == QDialog.Accepted:
                         unassigned_handling = dialog.get_selected_option()
                     else:
-                        return  # User canceled
+                        return
                 else:
-                    # No unassigned segments, default to skip
                     unassigned_handling = "skip"
-            
-            # Generate transcript based on format
+
             if settings['format'] == 'srt':
                 transcript_text = self.generate_srt_text(
                     include_diarization=settings['include_diarization'],
                     unassigned_handling=unassigned_handling
                 )
             else:
-                transcript_text = self.generate_transcript_text(include_timestamps=settings['include_timestamps'])
-            
+                transcript_text = self.generate_transcript_text(
+                    include_timestamps=settings['include_timestamps'],
+                    convention=settings['convention'],
+                    include_diarization=settings['include_diarization']
+                )
+
             self.final_export(transcript_text, settings, project_info, unassigned_handling)
-    
-    def generate_transcript_text(self, include_timestamps=True):
+
+    def generate_transcript_text(self, include_timestamps=True, convention="gat2", include_diarization=True):
+        """Generate transcript text with different conventions."""
+        if convention == "dresing_pehl":
+            return self.generate_dresing_pehl_text(include_timestamps, include_diarization)
+        else:
+            return self.generate_gat2_text(include_timestamps, include_diarization)
+
+    def generate_gat2_text(self, include_timestamps=True, include_diarization=True):
+        """Generate GAT2 format transcript."""
         total_lines = len([b for b in self.srt_blocks if b.get('speaker') is not None or b.get('is_pause') or b.get('is_comment') or b.get('is_empty')])
         line_digits = len(str(total_lines))
-        
+
         max_speaker_length = 0
         for block in self.srt_blocks:
             if block['speaker'] is not None and block.get('is_turn_start', True):
                 speaker_label = self.speakers[block['speaker']] + ":"
                 max_speaker_length = max(max_speaker_length, len(speaker_label))
-        
+
         max_speaker_length = max(max_speaker_length, 2)
-        
+
         output_lines = []
         line_number = 1
-        
+
         output_lines.append("")
-    
+
         for block in self.srt_blocks:
             if block.get('is_pause') or block.get('is_comment') or block.get('is_empty'):
                 if block['text']:
                     padded_line_num = str(line_number).zfill(line_digits)
-                    
+
                     if include_timestamps:
                         timestamp_spaces = " " * 13
                         speaker_spaces = " " * (max_speaker_length + 3)
@@ -3259,24 +3818,23 @@ Engineered with DeepSeek-V3.2
                     else:
                         speaker_spaces = " " * (max_speaker_length + 3)
                         line = f"{padded_line_num}   {speaker_spaces}{block['text']}"
-                    
+
                     output_lines.append(line)
                     line_number += 1
             elif block['speaker'] is not None:
                 padded_line_num = str(line_number).zfill(line_digits)
-                
+
                 if include_timestamps and block.get('start_time'):
                     time_parts = block['start_time'].split(':')
                     seconds_part = time_parts[2].split(',')[0] if ',' in time_parts[2] else time_parts[2]
                     gat_time = f"{{{time_parts[0]}:{time_parts[1]}:{seconds_part}}}"
                 else:
                     gat_time = ""
-                
+
                 speaker_label = self.speakers[block['speaker']]
-                
+
                 if block.get('is_turn_start', True):
                     formatted_speaker = f"{speaker_label}:".ljust(max_speaker_length)
-                    # Fixed: Exactly 3 spaces after speaker name
                     if include_timestamps and gat_time:
                         line = f"{gat_time}   {padded_line_num}   {formatted_speaker}   {block['text']}"
                     else:
@@ -3284,41 +3842,129 @@ Engineered with DeepSeek-V3.2
                 else:
                     if include_timestamps:
                         timestamp_spaces = " " * 13
-                        # Fixed: Consistent indentation for continuation lines
                         speaker_spaces = " " * (max_speaker_length + 3)
                         line = f"{timestamp_spaces}{padded_line_num}   {speaker_spaces}{block['text']}"
                     else:
-                        # FIXED: Consistent indentation for continuation lines
                         speaker_spaces = " " * (max_speaker_length + 3)
                         line = f"{padded_line_num}   {speaker_spaces}{block['text']}"
-                
+
                 output_lines.append(line)
                 line_number += 1
-        
-        # Remove leading spaces from the very first line
+
         if output_lines:
-            # For HTML export, we need to ensure no leading spaces in the body
             output_lines[0] = output_lines[0].lstrip()
-        
+
         return '\n'.join(output_lines)
-    
+
+    def generate_dresing_pehl_text(self, include_timestamps=True, include_diarization=True):
+        """Generate Dresing & Pehl format transcript (sociological interviews)."""
+        if not self.srt_blocks:
+            return ""
+
+        turns = []
+        current_turn = None
+
+        for block in self.srt_blocks:
+            if block.get('is_pause') or block.get('is_comment') or block.get('is_empty'):
+                continue
+
+            if block['speaker'] is None:
+                continue
+
+            speaker_label = self.speakers[block['speaker']]
+
+            if current_turn is None or current_turn['speaker'] != speaker_label or block.get('is_turn_start', True):
+                if current_turn is not None:
+                    turns.append(current_turn)
+
+                current_turn = {
+                    'speaker': speaker_label,
+                    'blocks': [],
+                    'start_time': block['start_time'] if include_timestamps else None,
+                    'end_time': block['end_time'] if include_timestamps else None
+                }
+
+            current_turn['blocks'].append(block)
+            if include_timestamps and block['end_time']:
+                current_turn['end_time'] = block['end_time']
+
+        if current_turn is not None:
+            turns.append(current_turn)
+
+        output_lines = []
+        output_lines.append("")
+
+        for turn in turns:
+            turn_text = " ".join(block['text'].strip() for block in turn['blocks'])
+
+            if include_diarization:
+                line = f"{turn['speaker']}: {turn_text}"
+            else:
+                line = turn_text
+
+            if include_timestamps and turn['start_time'] and turn['end_time']:
+                start_seconds = self.time_to_seconds(turn['start_time'])
+                end_seconds = self.time_to_seconds(turn['end_time'])
+
+                start_hours = int(start_seconds // 3600)
+                start_minutes = int((start_seconds % 3600) // 60)
+                start_secs = int(start_seconds % 60)
+                start_tenths = int((start_seconds - int(start_seconds)) * 10)
+
+                end_hours = int(end_seconds // 3600)
+                end_minutes = int((end_seconds % 3600) // 60)
+                end_secs = int(end_seconds % 60)
+                end_tenths = int((end_seconds - int(end_seconds)) * 10)
+
+                timestamp = f"#{start_hours:02d}:{start_minutes:02d}:{start_secs:02d}-{start_tenths}#"
+
+                line += f" {timestamp}"
+
+            output_lines.append(line)
+            output_lines.append("")
+
+        return '\n'.join(output_lines)
+
+    def time_to_seconds(self, time_str):
+        """Convert time string to seconds with milliseconds as decimal."""
+        if not time_str:
+            return 0
+
+        if ',' in time_str:
+            time_part, ms_part = time_str.split(',')
+            ms = int(ms_part)
+        else:
+            time_part = time_str
+            ms = 0
+
+        parts = time_part.split(':')
+        if len(parts) == 3:
+            hours = int(parts[0])
+            minutes = int(parts[1])
+            seconds = int(parts[2])
+        elif len(parts) == 2:
+            hours = 0
+            minutes = int(parts[0])
+            seconds = int(parts[1])
+        else:
+            return 0
+
+        return hours * 3600 + minutes * 60 + seconds + ms / 1000.0
+
     def generate_srt_text(self, include_diarization=True, unassigned_handling="skip"):
         """Generate SRT format text with optional diarization."""
         if not self.file_has_timestamps:
             return "SRT export requires timestamp information. Original file does not contain timestamps.\n\nNote: SRT files require precise timing information for each subtitle."
-        
-        # First, ensure all blocks have proper timestamps
+
         blocks_with_timestamps = self.estimate_missing_timestamps()
-        
+
         srt_blocks = []
         subtitle_index = 1
-        
+
         for block in blocks_with_timestamps:
-            # Skip pause/comment/empty blocks that shouldn't be in SRT
             if block.get('is_pause') or block.get('is_comment') or block.get('is_empty'):
                 continue
-                
-            # Handle unassigned blocks based on user choice
+
             if block['speaker'] is None:
                 if unassigned_handling == "skip":
                     continue
@@ -3327,69 +3973,60 @@ Engineered with DeepSeek-V3.2
                 elif unassigned_handling == "unknown":
                     speaker_prefix = "Unknown: "
             else:
-                # Get speaker name if assigned
                 speaker_prefix = ""
                 if include_diarization:
                     speaker_prefix = f"{self.speakers[block['speaker']]}: "
-            
-            # Format the time
+
             start_time = self.format_srt_time(block['start_time'])
             end_time = self.format_srt_time(block['end_time'])
-            
-            # Create SRT block
+
             srt_block = f"{subtitle_index}\n{start_time} --> {end_time}\n{speaker_prefix}{block['text']}\n"
             srt_blocks.append(srt_block)
             subtitle_index += 1
-        
+
         return "\n".join(srt_blocks)
-    
+
     def format_srt_time(self, time_str):
         """Convert time string to SRT format (HH:MM:SS,mmm)."""
         if not time_str:
             return "00:00:00,000"
-        
-        # Handle different time formats
-        if ',' in time_str:  # Already in SRT format
+
+        if ',' in time_str:
             return time_str
-        elif ':' in time_str:  # Assume HH:MM:SS or MM:SS
+        elif ':' in time_str:
             parts = time_str.split(':')
-            if len(parts) == 2:  # MM:SS
+            if len(parts) == 2:
                 return f"00:{parts[0].zfill(2)}:{parts[1].zfill(2)},000"
-            elif len(parts) == 3:  # HH:MM:SS
-                # Check if there are milliseconds
+            elif len(parts) == 3:
                 time_part = parts[2]
                 if ',' in time_part:
                     time_part, ms_part = time_part.split(',')
                     return f"{parts[0].zfill(2)}:{parts[1].zfill(2)}:{time_part.zfill(2)},{ms_part.zfill(3)}"
                 else:
                     return f"{parts[0].zfill(2)}:{parts[1].zfill(2)}:{time_part.zfill(2)},000"
-        
+
         return "00:00:00,000"
-    
+
     def estimate_missing_timestamps(self):
         """Estimate timestamps for blocks that don't have them."""
         if not self.srt_blocks:
             return []
-        
+
         blocks = self.srt_blocks.copy()
-        
-        # Find blocks with timestamps to use as anchors
+
         timestamped_blocks = []
         for i, block in enumerate(blocks):
             if block.get('start_time') and block.get('end_time'):
                 timestamped_blocks.append((i, block))
-        
+
         if not timestamped_blocks:
-            # No timestamps at all, cannot estimate
             return blocks
-        
-        # Group blocks into segments between timestamped blocks
+
         segments = []
         last_timestamped_idx = -1
-        
+
         for i, block in timestamped_blocks:
             if last_timestamped_idx == -1:
-                # First segment (from start to first timestamped block)
                 segments.append({
                     'start_idx': 0,
                     'end_idx': i,
@@ -3398,7 +4035,6 @@ Engineered with DeepSeek-V3.2
                     'total_chars': sum(len(b['text']) for b in blocks[0:i])
                 })
             else:
-                # Segment between two timestamped blocks
                 segments.append({
                     'start_idx': last_timestamped_idx + 1,
                     'end_idx': i,
@@ -3407,8 +4043,7 @@ Engineered with DeepSeek-V3.2
                     'total_chars': sum(len(b['text']) for b in blocks[last_timestamped_idx + 1:i])
                 })
             last_timestamped_idx = i
-        
-        # Add final segment if needed
+
         if last_timestamped_idx < len(blocks) - 1:
             last_block = timestamped_blocks[-1][1] if timestamped_blocks else None
             segments.append({
@@ -3418,63 +4053,57 @@ Engineered with DeepSeek-V3.2
                 'end_time': None,
                 'total_chars': sum(len(b['text']) for b in blocks[last_timestamped_idx + 1:])
             })
-        
-        # Estimate timestamps for each segment
+
         for segment in segments:
             if segment['start_time'] and segment['end_time'] and segment['total_chars'] > 0:
-                # Convert times to milliseconds
                 start_ms = self.time_to_ms(segment['start_time'])
                 end_ms = self.time_to_ms(segment['end_time'])
                 total_duration = end_ms - start_ms
-                
+
                 current_time = start_ms
                 for i in range(segment['start_idx'], segment['end_idx'] + 1):
                     block = blocks[i]
-                    # Only estimate if block doesn't have timestamps
                     if not block.get('start_time') or not block.get('end_time'):
-                        # Calculate duration based on text length ratio
                         block_chars = len(block['text'])
                         if segment['total_chars'] > 0:
                             block_duration = (block_chars / segment['total_chars']) * total_duration
                         else:
-                            block_duration = 1000  # Default 1 second
-                        
-                        # Ensure minimum duration of 100ms
+                            block_duration = 1000
+
                         block_duration = max(100, block_duration)
-                        
+
                         block['start_time'] = self.ms_to_time(current_time)
                         block['end_time'] = self.ms_to_time(current_time + block_duration)
                         current_time += block_duration
-        
+
         return blocks
-    
+
     def time_to_ms(self, time_str):
         """Convert time string to milliseconds."""
         if not time_str:
             return 0
-        
-        # Handle different formats
-        if ',' in time_str:  # SRT format HH:MM:SS,mmm
+
+        if ',' in time_str:
             time_part, ms_part = time_str.split(',')
             ms = int(ms_part)
-        else:  # Assume HH:MM:SS
+        else:
             time_part = time_str
             ms = 0
-        
+
         parts = time_part.split(':')
-        if len(parts) == 3:  # HH:MM:SS
+        if len(parts) == 3:
             hours = int(parts[0])
             minutes = int(parts[1])
             seconds = int(parts[2])
-        elif len(parts) == 2:  # MM:SS
+        elif len(parts) == 2:
             hours = 0
             minutes = int(parts[0])
             seconds = int(parts[1])
         else:
             return 0
-        
+
         return (hours * 3600 + minutes * 60 + seconds) * 1000 + ms
-    
+
     def ms_to_time(self, ms):
         """Convert milliseconds to SRT time format."""
         hours = int(ms // 3600000)
@@ -3483,60 +4112,102 @@ Engineered with DeepSeek-V3.2
         ms %= 60000
         seconds = int(ms // 1000)
         milliseconds = int(ms % 1000)
-        
+
         return f"{hours:02d}:{minutes:02d}:{seconds:02d},{milliseconds:03d}"
-    
+
     def final_export(self, transcript_text, settings, project_info, unassigned_handling="skip"):
-        file_ext = ".html" if settings['format'] == 'html' else ".txt"
-        if settings['format'] == 'srt':
-            file_ext = ".srt"
-            
+        format_extensions = {
+            'html': '.html',
+            'txt': '.txt',
+            'srt': '.srt',
+            'docx': '.docx'
+        }
+
+        file_ext = format_extensions.get(settings['format'], '.txt')
+
+        default_name = ""
+        if project_info.get('name'):
+            default_name = project_info['name'].replace(" ", "_")
+        else:
+            default_name = "transcript"
+
+        if settings['convention'] != 'gat2':
+            default_name += f"_{settings['convention']}"
+
+        default_name += file_ext
+
         file_path, _ = QFileDialog.getSaveFileName(
-            self, f"Export Transcript", "", 
+            self, f"Export Transcript", default_name,
             f"{settings['format'].upper()} Files (*{file_ext})"
         )
-        
-        if file_path:
-            try:
-                if settings['format'] == 'srt':
-                    # SRT export
+
+        if not file_path:
+            return
+
+        try:
+            if settings['format'] == 'srt':
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(transcript_text)
+
+            elif settings['format'] == 'docx':
+                try:
+                    import docx
+                    from docx.shared import Pt
+                    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+                    doc = docx.Document()
+
+                    if settings.get('include_title', True) and project_info.get('name'):
+                        title = doc.add_heading(project_info['name'], 0)
+                        title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+                    if settings.get('include_memo', True) and project_info.get('memo'):
+                        doc.add_paragraph(f"Project Memo: {project_info['memo']}")
+
+                    if settings.get('include_audio', True) and self.audio_file_path:
+                        doc.add_paragraph(f"Audio File: {Path(self.audio_file_path).name}")
+
+                    doc.add_paragraph()
+
+                    for line in transcript_text.split('\n'):
+                        if line.strip():
+                            p = doc.add_paragraph(line)
+                            font_name = 'Courier New'
+                            if settings['convention'] == 'dresing_pehl':
+                                font_name = 'Times New Roman'
+                            for run in p.runs:
+                                run.font.name = font_name
+                                run.font.size = Pt(10)
+                        else:
+                            doc.add_paragraph()
+
+                    doc.save(file_path)
+
+                except ImportError:
+                    QMessageBox.warning(self, "DOCX Export",
+                        "python-docx library not found. Please install it with: pip install python-docx\n\n"
+                        "Exporting as plain text instead.")
                     with open(file_path, 'w', encoding='utf-8') as f:
                         f.write(transcript_text)
-                    
-                elif settings['format'] == 'html':
-                    # Build header content based on settings
-                    header_lines = []
-                    
-                    if settings.get('include_title', True) and project_info.get('name'):
-                        escaped_name = self.escape_html(project_info['name'])
-                        header_lines.append(f"<h1>{escaped_name}</h1>")
-                    
-                    if settings.get('include_memo', True) and project_info.get('memo'):
-                        escaped_memo = self.escape_html(project_info['memo'])
-                        header_lines.append(f"<p><strong>Project Memo:</strong> {escaped_memo}</p>")
-                    
-                    if settings.get('include_audio', True) and self.audio_file_path:
-                        audio_name = Path(self.audio_file_path).name
-                        escaped_audio = self.escape_html(audio_name)
-                        header_lines.append(f"<p><strong>Audio File:</strong> {escaped_audio}</p>")
-                    
-                    if header_lines:
-                        header_text = "\n".join(header_lines)
-                        escaped_transcript = self.escape_html(transcript_text)
-                        full_text = f"{header_text}\n{escaped_transcript}"
-                    else:
-                        full_text = self.escape_html(transcript_text)
-                    
-                    # HTML export
-                    clean_text = full_text.lstrip()
-                    html_content = f"""<!DOCTYPE html>
+
+            elif settings['format'] == 'html':
+                clean_text = transcript_text.lstrip()
+
+                # Choose font based on convention
+                font_family = "'Courier New', monospace"
+                if settings['convention'] == "dresing_pehl":
+                    font_family = "'Times New Roman', serif"
+
+                    clean_text = transcript_text.lstrip()
+
+                html_content = f"""<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
 <title>GAT2 Transcript - {self.escape_html(project_info.get('name', 'Untitled'))}</title>
 <style>
 body {{
-    font-family: 'Courier New', monospace;
+    font-family: {font_family};
     font-size: 10pt;
     line-height: 1.2;
     margin: 20px;
@@ -3554,46 +4225,27 @@ h1 {{
 {clean_text}
 </body>
 </html>"""
-                    with open(file_path, 'w', encoding='utf-8') as f:
-                        f.write(html_content)
-                else:
-                    # Plain text export
-                    # Build header content based on settings
-                    header_lines = []
-                    
-                    if settings.get('include_title', True) and project_info.get('name'):
-                        header_lines.append(project_info['name'])
-                        header_lines.append("=" * len(project_info['name']))
-                        header_lines.append("")
-                    
-                    if settings.get('include_memo', True) and project_info.get('memo'):
-                        header_lines.append(f"Project Memo: {project_info['memo']}")
-                        header_lines.append("")
-                    
-                    if settings.get('include_audio', True) and self.audio_file_path:
-                        audio_name = Path(self.audio_file_path).name
-                        header_lines.append(f"Audio File: {audio_name}")
-                        header_lines.append("")
-                    
-                    if header_lines:
-                        header_text = "\n".join(header_lines)
-                        full_text = f"{header_text}\n{transcript_text}"
-                    else:
-                        full_text = transcript_text
-                    
-                    with open(file_path, 'w', encoding='utf-8') as f:
-                        f.write(full_text)
-                
-                QMessageBox.information(self, "Success", f"Transcript exported to {file_path}")
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Could not export file: {str(e)}")
-                
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(html_content)
+            else:
+                # Plain text export
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(transcript_text)
+
+            QMessageBox.information(self, "Success", f"Transcript exported to {file_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Could not export file: {str(e)}")
+
     def closeEvent(self, event):
-        """Handle application close event"""
+        """Clean up on close"""
+        if self.audio_player:
+            self.audio_player.cleanup()
+
         if self.check_unsaved_changes():
             event.accept()
         else:
             event.ignore()
+
 
 def main():
     app = QApplication(sys.argv)
@@ -3603,3 +4255,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
