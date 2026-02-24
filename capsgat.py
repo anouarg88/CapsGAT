@@ -1283,64 +1283,7 @@ class CommentDialog(QDialog):
         
     def get_comment(self):
         return f"(({self.comment_edit.text()}))"
-
-# class EditDialog(QDialog):
-#     def __init__(self, current_text, parent=None):
-#         super().__init__(parent)
-#         self.current_text = current_text
-#         self.init_ui()
-#         
-#     def init_ui(self):
-#         self.setWindowTitle("Edit Segment Content")
-#         self.setGeometry(300, 300, 600, 150)
-#         
-#         layout = QVBoxLayout(self)
-#         
-#         instructions = QLabel("Edit the segment content (Enter to confirm, Escape to cancel):")
-#         instructions.setStyleSheet("font-weight: bold;")
-#         layout.addWidget(instructions)
-#         
-#         self.text_edit = QLineEdit()
-#         self.text_edit.setText(self.current_text)
-#         self.text_edit.setStyleSheet("""
-#             QLineEdit {
-#                 font-family: monospace;
-#                 font-size: 14px;
-#                 padding: 8px;
-#                 border: 2px solid #ccc;
-#                 border-radius: 5px;
-#             }
-#             QLineEdit:focus {
-#                 border: 2px solid #4a90e2;
-#             }
-#         """)
-#         
-#         self.text_edit.returnPressed.connect(self.accept)
-#         
-#         layout.addWidget(self.text_edit)
-#         
-#         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-#         button_box.accepted.connect(self.accept)
-#         button_box.rejected.connect(self.reject)
-#         
-#         for button in button_box.buttons():
-#             button.setFocusPolicy(Qt.NoFocus)
-#             
-#         layout.addWidget(button_box)
-#         
-#         self.text_edit.setFocus()
-#         self.text_edit.selectAll()
-#         
-#     def keyPressEvent(self, event):
-#         if event.key() == Qt.Key_Escape:
-#             self.reject()
-#             event.accept()
-#         else:
-#             super().keyPressEvent(event)
-#     
-#     def get_text(self):
-#         return self.text_edit.text()
-    
+   
 class RichEditDialog(QDialog):
     """Enhanced edit dialog with bold/italic/underline buttons and shortcuts."""
     def __init__(self, current_text, parent=None):
@@ -6604,3 +6547,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
