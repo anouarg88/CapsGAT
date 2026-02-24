@@ -611,7 +611,7 @@ class AddCustomSymbolDialog(QDialog):
         type_layout = QHBoxLayout()
         type_layout.addWidget(QLabel("Symbol type:"))
         self.type_combo = QComboBox()
-        self.type_combo.addItems(["Simple", "Segment Wrapper", "Comment Wrapper", "Comment with Reach"])
+        self.type_combo.addItems(["Simple", "Segment Wrapper", "Comment Wrapper", "Comment with Scope"])
         self.type_combo.currentTextChanged.connect(self.update_fields)
         type_layout.addWidget(self.type_combo)
         layout.addLayout(type_layout)
@@ -667,19 +667,19 @@ class AddCustomSymbolDialog(QDialog):
         comment_layout.addWidget(self.comment_desc_edit)
         self.stacked.addWidget(comment_page)
 
-        # ---- Page 3: Comment with Reach ----
+        # ---- Page 3: Comment with Scope ----
         reach_page = QWidget()
         reach_layout = QVBoxLayout(reach_page)
         self.reach_left_edit = QLineEdit()
-        self.reach_left_edit.setPlaceholderText("e.g., [at^=")
-        reach_layout.addWidget(QLabel("Action left side:"))
+        self.reach_left_edit.setPlaceholderText("e.g., <<")
+        reach_layout.addWidget(QLabel("Action/comment left side:"))
         reach_layout.addWidget(self.reach_left_edit)
         self.reach_right_action_edit = QLineEdit()
-        self.reach_right_action_edit.setPlaceholderText("e.g., ]")
-        reach_layout.addWidget(QLabel("Action right side:"))
+        self.reach_right_action_edit.setPlaceholderText("e.g., >")
+        reach_layout.addWidget(QLabel("Action/comment right side:"))
         reach_layout.addWidget(self.reach_right_action_edit)
         self.reach_right_segment_edit = QLineEdit()
-        self.reach_right_segment_edit.setPlaceholderText("e.g., ]")
+        self.reach_right_segment_edit.setPlaceholderText("e.g., >")
         reach_layout.addWidget(QLabel("Segment right side:"))
         reach_layout.addWidget(self.reach_right_segment_edit)
         self.reach_desc_edit = QLineEdit()
@@ -744,14 +744,14 @@ class AddCustomSymbolDialog(QDialog):
                 'right': right,
                 'description': self.comment_desc_edit.text().strip() or display
             }
-        else:  # Comment with Reach
+        else:  # Comment with Scope
             left = self.reach_left_edit.text().strip()
             right_action = self.reach_right_action_edit.text().strip()
             right_segment = self.reach_right_segment_edit.text().strip()
             if not left or not right_action or not right_segment:
                 QMessageBox.warning(self, "Missing Data", "All three sides are required.")
                 return None
-            display = f"{left}attitude{right_action}text{right_segment}"
+            display = f"{left}comment{right_action}text{right_segment}"
             data = {
                 'type': 'comment_reach',
                 'display': display,
@@ -783,8 +783,8 @@ class EnhancedSymbolDialog(QDialog):
             "GAT2",
             ["(.)", "(-)", "(--)", "(---)", "(_._)", "(())", "<<>>", "[ ]",
              "°h", "°hh", "°hhh", "h°", "hh°", "hhh°"],
-            ["micropause", "short pause", "medium pause", "long pause",
-             "measured pause", "comment", "action", "overlap",
+            ["micropause", "short estimated pause", "medium estimated pause", "long estimated pause",
+             "measured pause", "comment", "action/comment with scope", "overlap",
              "short inhale", "medium inhale", "long inhale",
              "short exhale", "medium exhale", "long exhale"]
         ))
@@ -792,7 +792,7 @@ class EnhancedSymbolDialog(QDialog):
         self.categories.append(SymbolCategory(
             "Dresing && Pehl",
             ["(.)", "(..)", "(...)", "(_)", "//", "(   )", "⏱️"],
-            ["short pause", "medium pause", "long pause",
+            ["short estimated pause", "medium estimated pause", "long estimated pause",
              "measured pause", "overlap", "comment", "insert timestamp"]
         ))
         # TiQ
@@ -1564,10 +1564,10 @@ class ExportPreviewDialog(QDialog):
         ts_format_layout = QHBoxLayout(self.ts_format_widget)
         ts_format_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.ts_curly_radio = QRadioButton("curly brackets")
-        self.ts_hash_radio = QRadioButton("hash")
-        self.ts_bracket_radio = QRadioButton("brackets")
-        self.ts_custom_radio = QRadioButton("custom")
+        self.ts_curly_radio = QRadioButton("Curly brackets")
+        self.ts_hash_radio = QRadioButton("Hashtags")
+        self.ts_bracket_radio = QRadioButton("Square brackets")
+        self.ts_custom_radio = QRadioButton("Custom format:")
 
         ts_format_layout.addWidget(self.ts_curly_radio)
         ts_format_layout.addWidget(self.ts_hash_radio)
@@ -5395,9 +5395,9 @@ Engineered wtih DeepSeek V3.2
             if select_dialog.exec_() == QDialog.Accepted:
                 start_pos, end_pos, selected_text = select_dialog.get_selection()
                 if selected_text:
-                    # Step 2: input the action/attitude description
+                    # Step 2: input the action/comment description
                     description, ok = QInputDialog.getText(self, "Action Description",
-                                                           f"Enter description for the action/attitude:")
+                                                           f"Enter description for the action/comment:")
                     if ok and description:
                         # Construct the wrapped result: left + description + right_action + selected_text + right_segment
                         wrapped = left + description + right_action + selected_text + right_segment
@@ -6351,3 +6351,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
