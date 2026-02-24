@@ -19,7 +19,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout
                              QGridLayout, QPlainTextEdit, QCheckBox, QTabWidget, QRadioButton,
                              QSlider, QProgressBar, QMenuBar, QMenu, QAction, QFontDialog,
                              QGroupBox, QScrollArea, QSizePolicy, QComboBox, QStackedWidget, QStyle, QSplashScreen)
-from PyQt5.QtCore import Qt, QTimer, QUrl, pyqtSignal, QPoint, QRect, QElapsedTimer, QThread, QSize
+from PyQt5.QtCore import Qt, QTimer, QUrl, pyqtSignal, QPoint, QRect, QElapsedTimer, QThread, QSize, QRegularExpression
 from PyQt5.QtGui import QFont, QKeySequence, QColor, QTextCharFormat, QSyntaxHighlighter, QIcon, QPixmap, QPainter, QPen, QBrush, QPainterPath
 
 # Configure logging
@@ -40,6 +40,66 @@ def resource_path(relative_path):
     except Exception:
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
+
+class FormattingMarkerHighlighter(QSyntaxHighlighter):
+    """Highlights formatting markers and applies bold/italic/underline to enclosed text."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        # Define formats for markers (nearly invisible)
+        self.marker_format = QTextCharFormat()
+        self.marker_format.setForeground(QColor(200, 200, 200))
+        self.marker_format.setFontPointSize(1)
+
+        # Formats for text inside markers
+        self.bold_format = QTextCharFormat()
+        self.bold_format.setFontWeight(QFont.Bold)
+
+        self.italic_format = QTextCharFormat()
+        self.italic_format.setFontItalic(True)
+
+        self.underline_format = QTextCharFormat()
+        self.underline_format.setFontUnderline(True)
+
+        # Combined formats for nested (though we'll handle simply by stacking)
+        # We'll use a state machine during highlightBlock
+
+    def highlightBlock(self, text):
+        # We'll scan through the text, tracking open markers.
+        # Simple approach: find all markers, then for each pair apply format.
+        # This works for non‑nested, correctly ordered markers.
+        import re
+        # Regex to find all markers (start or end)
+        pattern = re.compile(r'(#@[BIU]|#@/[BIU])')
+        pos = 0
+        stack = []  # list of (marker_type, start_pos)
+        while True:
+            m = pattern.search(text, pos)
+            if not m:
+                break
+            marker = m.group()
+            start, end = m.span()
+            # First, set the marker itself to invisible
+            self.setFormat(start, end - start, self.marker_format)
+
+            if marker in ('#@B', '#@I', '#@U'):  # opening
+                stack.append((marker, end))  # store end position as start of text after marker
+            else:  # closing
+                if stack and stack[-1][0] == marker.replace('/', ''):  # matching?
+                    open_marker, text_start = stack.pop()
+                    # Determine format based on open_marker
+                    fmt = None
+                    if open_marker == '#@B':
+                        fmt = self.bold_format
+                    elif open_marker == '#@I':
+                        fmt = self.italic_format
+                    elif open_marker == '#@U':
+                        fmt = self.underline_format
+                    if fmt:
+                        self.setFormat(text_start, start - text_start, fmt)
+                else:
+                    # unmatched closing marker – ignore or treat as normal text? ignore.
+                    pass
+            pos = end
 
 class SimpleAudioPlayer(QThread):
     """Simple fallback audio player using PyAudio (no speed control)"""
@@ -455,7 +515,9 @@ class TextSelectionDialog(QDialog):
         self.text_display.setReadOnly(True)
         self.text_display.setMaximumHeight(100)
         self.text_display.setStyleSheet("font-family: monospace; font-size: 14px;")
+        self.highlighter = FormattingMarkerHighlighter(self.text_display.document())
         layout.addWidget(self.text_display)
+        
         
         self.selection_label = QLabel("Selection: (none)")
         layout.addWidget(self.selection_label)
@@ -1222,22 +1284,103 @@ class CommentDialog(QDialog):
     def get_comment(self):
         return f"(({self.comment_edit.text()}))"
 
-class EditDialog(QDialog):
+# class EditDialog(QDialog):
+#     def __init__(self, current_text, parent=None):
+#         super().__init__(parent)
+#         self.current_text = current_text
+#         self.init_ui()
+#         
+#     def init_ui(self):
+#         self.setWindowTitle("Edit Segment Content")
+#         self.setGeometry(300, 300, 600, 150)
+#         
+#         layout = QVBoxLayout(self)
+#         
+#         instructions = QLabel("Edit the segment content (Enter to confirm, Escape to cancel):")
+#         instructions.setStyleSheet("font-weight: bold;")
+#         layout.addWidget(instructions)
+#         
+#         self.text_edit = QLineEdit()
+#         self.text_edit.setText(self.current_text)
+#         self.text_edit.setStyleSheet("""
+#             QLineEdit {
+#                 font-family: monospace;
+#                 font-size: 14px;
+#                 padding: 8px;
+#                 border: 2px solid #ccc;
+#                 border-radius: 5px;
+#             }
+#             QLineEdit:focus {
+#                 border: 2px solid #4a90e2;
+#             }
+#         """)
+#         
+#         self.text_edit.returnPressed.connect(self.accept)
+#         
+#         layout.addWidget(self.text_edit)
+#         
+#         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+#         button_box.accepted.connect(self.accept)
+#         button_box.rejected.connect(self.reject)
+#         
+#         for button in button_box.buttons():
+#             button.setFocusPolicy(Qt.NoFocus)
+#             
+#         layout.addWidget(button_box)
+#         
+#         self.text_edit.setFocus()
+#         self.text_edit.selectAll()
+#         
+#     def keyPressEvent(self, event):
+#         if event.key() == Qt.Key_Escape:
+#             self.reject()
+#             event.accept()
+#         else:
+#             super().keyPressEvent(event)
+#     
+#     def get_text(self):
+#         return self.text_edit.text()
+    
+class RichEditDialog(QDialog):
+    """Enhanced edit dialog with bold/italic/underline buttons and shortcuts."""
     def __init__(self, current_text, parent=None):
         super().__init__(parent)
         self.current_text = current_text
         self.init_ui()
-        
+
     def init_ui(self):
         self.setWindowTitle("Edit Segment Content")
-        self.setGeometry(300, 300, 600, 150)
-        
+        self.setGeometry(300, 300, 600, 150)  # shorter height
+
         layout = QVBoxLayout(self)
-        
-        instructions = QLabel("Edit the segment content (Enter to confirm, Escape to cancel):")
-        instructions.setStyleSheet("font-weight: bold;")
-        layout.addWidget(instructions)
-        
+
+        # Toolbar with formatting buttons
+        toolbar = QHBoxLayout()
+        self.btn_bold = QPushButton("B")
+        self.btn_bold.setToolTip("Bold (Ctrl+B)")
+        self.btn_bold.setFixedSize(30, 30)
+        self.btn_bold.setStyleSheet("font-weight: bold; font-size: 14px;")
+        self.btn_bold.clicked.connect(self.insert_bold)
+
+        self.btn_italic = QPushButton("I")
+        self.btn_italic.setToolTip("Italic (Ctrl+I)")
+        self.btn_italic.setFixedSize(30, 30)
+        self.btn_italic.setStyleSheet("font-style: italic; font-size: 14px;")
+        self.btn_italic.clicked.connect(self.insert_italic)
+
+        self.btn_underline = QPushButton("U")
+        self.btn_underline.setToolTip("Underline (Ctrl+U)")
+        self.btn_underline.setFixedSize(30, 30)
+        self.btn_underline.setStyleSheet("text-decoration: underline; font-size: 14px;")
+        self.btn_underline.clicked.connect(self.insert_underline)
+
+        toolbar.addWidget(self.btn_bold)
+        toolbar.addWidget(self.btn_italic)
+        toolbar.addWidget(self.btn_underline)
+        toolbar.addStretch()
+        layout.addLayout(toolbar)
+
+        # Single‑line text edit
         self.text_edit = QLineEdit()
         self.text_edit.setText(self.current_text)
         self.text_edit.setStyleSheet("""
@@ -1252,30 +1395,54 @@ class EditDialog(QDialog):
                 border: 2px solid #4a90e2;
             }
         """)
-        
-        self.text_edit.returnPressed.connect(self.accept)
-        
+        self.text_edit.returnPressed.connect(self.accept)  # Enter closes with OK
         layout.addWidget(self.text_edit)
-        
+
+        # OK/Cancel buttons
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
-        
-        for button in button_box.buttons():
-            button.setFocusPolicy(Qt.NoFocus)
-            
         layout.addWidget(button_box)
-        
+
+        # Shortcuts
+        self.shortcut_bold = QShortcut(QKeySequence("Ctrl+B"), self)
+        self.shortcut_bold.activated.connect(self.insert_bold)
+        self.shortcut_italic = QShortcut(QKeySequence("Ctrl+I"), self)
+        self.shortcut_italic.activated.connect(self.insert_italic)
+        self.shortcut_underline = QShortcut(QKeySequence("Ctrl+U"), self)
+        self.shortcut_underline.activated.connect(self.insert_underline)
+
         self.text_edit.setFocus()
         self.text_edit.selectAll()
-        
-    def keyPressEvent(self, event):
-        if event.key() == Qt.Key_Escape:
-            self.reject()
-            event.accept()
+
+    def insert_format(self, start_marker, end_marker):
+        """Wrap selected text with markers."""
+        cursor_pos = self.text_edit.cursorPosition()
+        selected_text = self.text_edit.selectedText()
+        if selected_text:
+            new_text = self.text_edit.text()[:self.text_edit.selectionStart()] + \
+                       start_marker + selected_text + end_marker + \
+                       self.text_edit.text()[self.text_edit.selectionEnd():]
+            self.text_edit.setText(new_text)
+            # Restore selection around the just‑wrapped text
+            new_start = self.text_edit.selectionStart()
+            self.text_edit.setSelection(new_start, len(selected_text))
         else:
-            super().keyPressEvent(event)
-    
+            # Insert markers and place cursor between them
+            text = self.text_edit.text()
+            new_text = text[:cursor_pos] + start_marker + end_marker + text[cursor_pos:]
+            self.text_edit.setText(new_text)
+            self.text_edit.setCursorPosition(cursor_pos + len(start_marker))
+
+    def insert_bold(self):
+        self.insert_format("#@B", "#@/B")
+
+    def insert_italic(self):
+        self.insert_format("#@I", "#@/I")
+
+    def insert_underline(self):
+        self.insert_format("#@U", "#@/U")
+
     def get_text(self):
         return self.text_edit.text()
 
@@ -1575,7 +1742,7 @@ class ExportPreviewDialog(QDialog):
         ts_format_layout.addWidget(self.ts_custom_radio)
 
         self.ts_custom_edit = QLineEdit()
-        self.ts_custom_edit.setPlaceholderText("e.g. <HH:MM:SS-xx>")
+        self.ts_custom_edit.setPlaceholderText("e.g. <HH:MM:SS,x>")
         self.ts_custom_edit.setEnabled(False)
         ts_format_layout.addWidget(self.ts_custom_edit)
         ts_format_layout.addStretch()
@@ -1776,6 +1943,7 @@ class ExportPreviewDialog(QDialog):
                 include_diarization=self.diarization_check.isChecked(),
                 unassigned_handling="skip"
             )
+            # generate_srt_text now strips markers internally
             self.preview_text.setPlainText(srt_text)
             return
 
@@ -1783,7 +1951,7 @@ class ExportPreviewDialog(QDialog):
             self.preview_text.setPlainText("Preview not available for this format. The exported file will contain the full transcript with selected options.")
             return
 
-        # Generate transcript text
+        # Generate transcript text (includes markers)
         transcript_text = main.generate_transcript_text(
             include_timestamps=self.current_include_timestamps,
             timestamp_style=ts_style,
@@ -1821,42 +1989,48 @@ class ExportPreviewDialog(QDialog):
         header = "\n".join(header_lines) + "\n" if header_lines else ""
 
         if self.export_format == "html":
+            # For HTML, escape then convert markers
+            escaped_text = main.escape_html(transcript_text)
+            formatted = main.convert_markup_to_html(escaped_text)
+
             font_family = "'Courier New', monospace"
             if self.transcript_convention == "dresing_pehl":
                 font_family = "'Times New Roman', serif"
 
             full_html = f"""<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<style>
-body {{
-    font-family: {font_family};
-    font-size: 10pt;
-    line-height: 1.2;
-    margin: 0;
-    padding: 10px;
-    white-space: pre-wrap;
-}}
-h1 {{
-    font-family: Arial, sans-serif;
-    color: #333;
-    padding-bottom: 10px;
-    margin-top: 0;
-}}
-.headerstyle {{
-    font-family: Arial, sans-serif;
-    color: #333;
-}}
-</style>
-</head>
-<body>
-{header}<br>{main.escape_html(transcript_text)}
-</body>
-</html>"""
+    <html>
+    <head>
+    <meta charset="UTF-8">
+    <style>
+    body {{
+        font-family: {font_family};
+        font-size: 10pt;
+        line-height: 1.2;
+        margin: 0;
+        padding: 10px;
+        white-space: pre-wrap;
+    }}
+    h1 {{
+        font-family: Arial, sans-serif;
+        color: #333;
+        padding-bottom: 10px;
+        margin-top: 0;
+    }}
+    .headerstyle {{
+        font-family: Arial, sans-serif;
+        color: #333;
+    }}
+    </style>
+    </head>
+    <body>
+    {header}<br>{formatted}
+    </body>
+    </html>"""
             self.preview_text.setHtml(full_html)
         else:  # TXT
-            self.preview_text.setPlainText(header + transcript_text)
+            # For plain text, strip markers
+            stripped_text = main.strip_markup(transcript_text)
+            self.preview_text.setPlainText(header + stripped_text)
 
     def get_export_settings(self):
         if self.ts_curly_radio.isChecked():
@@ -2595,6 +2769,7 @@ class SRTEditor(QMainWindow):
             }
         """)
         left_panel.addWidget(self.text_display)
+        self.highlighter = FormattingMarkerHighlighter(self.text_display.document())
         
         # Navigation buttons
         nav_layout = QHBoxLayout()
@@ -3231,6 +3406,82 @@ class SRTEditor(QMainWindow):
         QShortcut(QKeySequence("Shift+F3"), self).activated.connect(self.find_previous)
         
         self.update_splash("Loading user interface...")
+    
+    def convert_markup_to_html(self, text):
+        """Convert #@B #@/B, #@I #@/I, #@U #@/U to HTML tags."""
+        import re
+        # Bold
+        text = re.sub(r'#@B(.*?)#@/B', r'<b>\1</b>', text, flags=re.DOTALL)
+        # Italic
+        text = re.sub(r'#@I(.*?)#@/I', r'<i>\1</i>', text, flags=re.DOTALL)
+        # Underline
+        text = re.sub(r'#@U(.*?)#@/U', r'<u>\1</u>', text, flags=re.DOTALL)
+        return text
+
+    def strip_markup(self, text):
+        """Remove formatting markers, leaving only the inner text."""
+        import re
+        text = re.sub(r'#@[BIU](.*?)#@/[BIU]', r'\1', text, flags=re.DOTALL)
+        # Also remove any leftover markers if they appear standalone (should not happen)
+        text = re.sub(r'#@[BIU]|#@/[BIU]', '', text)
+        return text
+
+    def add_formatted_paragraph(self, doc, text):
+        """Add a paragraph to a python-docx document with appropriate runs."""
+        if not text:
+            doc.add_paragraph()
+            return
+
+        import re
+        # We'll split on markers, but keep them as tokens.
+        # Pattern matches any marker (start or end)
+        pattern = re.compile(r'(#@[BIU]|#@/[BIU])')
+        parts = []
+        last_end = 0
+        for m in pattern.finditer(text):
+            start, end = m.span()
+            if start > last_end:
+                parts.append(('text', text[last_end:start]))
+            parts.append(('marker', m.group()))
+            last_end = end
+        if last_end < len(text):
+            parts.append(('text', text[last_end:]))
+
+        p = doc.add_paragraph()
+        bold = italic = underline = False
+        run_text = ""
+
+        # Stack for nested formatting (though unlikely, we'll handle basic)
+        for typ, content in parts:
+            if typ == 'text':
+                run_text += content
+            else:  # marker
+                # Flush current run
+                if run_text:
+                    run = p.add_run(run_text)
+                    run.bold = bold
+                    run.italic = italic
+                    run.underline = underline
+                    run_text = ""
+                # Toggle state
+                if content == '#@B':
+                    bold = True
+                elif content == '#@/B':
+                    bold = False
+                elif content == '#@I':
+                    italic = True
+                elif content == '#@/I':
+                    italic = False
+                elif content == '#@U':
+                    underline = True
+                elif content == '#@/U':
+                    underline = False
+        # Flush final text
+        if run_text:
+            run = p.add_run(run_text)
+            run.bold = bold
+            run.italic = italic
+            run.underline = underline
     
     def update_ui(self):
         """Update UI elements based on current state"""
@@ -4923,12 +5174,12 @@ Engineered wtih DeepSeek V3.2
                 self.audio_player.pause()
 
         current_block = self.srt_blocks[self.current_block_index]
-        dialog = EditDialog(current_block['raw_text'], self)   # use raw_text
+        dialog = RichEditDialog(current_block['raw_text'], self)   # use new dialog
 
         if dialog.exec_() == QDialog.Accepted:
             new_text = dialog.get_text()
             current_block['raw_text'] = new_text
-            current_block['text'] = new_text   # keep text in sync
+            current_block['text'] = new_text
             self.update_display()
             self.mark_unsaved_changes()
 
@@ -6044,6 +6295,9 @@ Engineered wtih DeepSeek V3.2
 
             # For SRT, we don't need indentation; replace placeholders with spaces (1 space each)
             formatted = self.replace_indent_placeholders(block['raw_text'], for_export=True).lstrip()
+            # Strip formatting markers for SRT
+            formatted = self.strip_markup(formatted)
+
             start_time = self.format_srt_time(block['start_time'])
             end_time = self.format_srt_time(block['end_time'])
 
@@ -6213,6 +6467,7 @@ Engineered wtih DeepSeek V3.2
 
         try:
             if settings['format'] == 'srt':
+                # generate_srt_text now returns marker‑stripped text
                 with open(file_path, 'w', encoding='utf-8') as f:
                     f.write(transcript_text)
 
@@ -6236,15 +6491,10 @@ Engineered wtih DeepSeek V3.2
 
                     doc.add_paragraph()
 
+                    # Process each line with formatting
                     for line in transcript_text.split('\n'):
                         if line.strip():
-                            p = doc.add_paragraph(line)
-                            font_name = 'Courier New'
-                            if settings['convention'] == 'dresing_pehl':
-                                font_name = 'Times New Roman'
-                            for run in p.runs:
-                                run.font.name = font_name
-                                run.font.size = Pt(10)
+                            self.add_formatted_paragraph(doc, line)
                         else:
                             doc.add_paragraph()
 
@@ -6254,11 +6504,16 @@ Engineered wtih DeepSeek V3.2
                     QMessageBox.warning(self, "DOCX Export",
                         "python-docx library not found. Please install it with: pip install python-docx\n\n"
                         "Exporting as plain text instead.")
+                    stripped = self.strip_markup(transcript_text)
                     with open(file_path, 'w', encoding='utf-8') as f:
-                        f.write(transcript_text)
+                        f.write(stripped)
 
             elif settings['format'] == 'html':
-                # Build header from settings
+                # First escape the raw transcript text, then convert markers to HTML tags
+                escaped_text = self.escape_html(transcript_text)
+                formatted = self.convert_markup_to_html(escaped_text)
+
+                # Build header
                 header_lines = []
                 if settings.get('include_title', True) and project_info.get('name'):
                     header_lines.append(f"<h1>{self.escape_html(project_info['name'])}</h1>")
@@ -6269,47 +6524,45 @@ Engineered wtih DeepSeek V3.2
                     header_lines.append(f"<p class=\"headerstyle\"><strong>Audio File:</strong> {self.escape_html(audio_name)}</p>")
                 header = "\n".join(header_lines) + "\n" if header_lines else ""
 
-                # Choose font based on convention
                 font_family = "'Courier New', monospace"
                 if settings['convention'] == "dresing_pehl":
                     font_family = "'Times New Roman', serif"
 
                 html_content = f"""<!DOCTYPE html>
-            <html>
-            <head>
-            <meta charset="UTF-8">
-            <title>Transcript - {self.escape_html(project_info.get('name', 'Untitled'))}</title>
-            <style>
-            body {{
-                font-family: {font_family};
-                font-size: 10pt;
-                line-height: 1.2;
-                margin: 20px;
-                white-space: pre-wrap;
-            }}
-            h1 {{
-                font-family: Arial, sans-serif;
-                color: #333;
-                padding-bottom: 10px;
-            }}
-            
-            .headerstyle
-                {{
-                font-family: Arial, sans-serif;
-                color: #333;
-                }}
-            </style>
-            </head>
-            <body>
-            {header}<br>{self.escape_html(transcript_text)}
-            </body>
-            </html>"""
+    <html>
+    <head>
+    <meta charset="UTF-8">
+    <title>Transcript - {self.escape_html(project_info.get('name', 'Untitled'))}</title>
+    <style>
+    body {{
+        font-family: {font_family};
+        font-size: 10pt;
+        line-height: 1.2;
+        margin: 20px;
+        white-space: pre-wrap;
+    }}
+    h1 {{
+        font-family: Arial, sans-serif;
+        color: #333;
+        padding-bottom: 10px;
+    }}
+    .headerstyle {{
+        font-family: Arial, sans-serif;
+        color: #333;
+    }}
+    </style>
+    </head>
+    <body>
+    {header}<br>{formatted}
+    </body>
+    </html>"""
                 with open(file_path, 'w', encoding='utf-8') as f:
                     f.write(html_content)
             else:
-                # Plain text export
+                # Plain text: strip markers
+                stripped = self.strip_markup(transcript_text)
                 with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(transcript_text)
+                    f.write(stripped)
 
             QMessageBox.information(self, "Success", f"Transcript exported to {file_path}")
         except Exception as e:
@@ -6351,4 +6604,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
