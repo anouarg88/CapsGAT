@@ -1622,7 +1622,7 @@ class ExportPreviewDialog(QDialog):
         self.convention_combo = QComboBox()
         self.convention_combo.addItems([
             "GAT2 (Conversation Analysis)",
-            "Dresing & Pehl (Semantic Transcription)",
+            "Dresing & Pehl, Kuckartz (Semantic Transcription)",
             "TiQ (Talk in Qualitative Research)"
         ])
         convention_layout.addWidget(self.convention_combo)
@@ -1685,7 +1685,7 @@ class ExportPreviewDialog(QDialog):
         ts_format_layout.addWidget(self.ts_custom_radio)
 
         self.ts_custom_edit = QLineEdit()
-        self.ts_custom_edit.setPlaceholderText("e.g. <HH:MM:SS,x>")
+        self.ts_custom_edit.setPlaceholderText("e.g. <HH:MM:SS,xx>")
         self.ts_custom_edit.setEnabled(False)
         ts_format_layout.addWidget(self.ts_custom_edit)
         ts_format_layout.addStretch()
@@ -4015,7 +4015,7 @@ You should have received a copy of the GNU General Public License along with thi
 <br><br>
 (c) 2026 Anouâr Gadermann
 <br>
-Engineered wtih DeepSeek V3.2
+Engineered with DeepSeek V3.2
 
 """
         QMessageBox.about(self, "About CapsGAT", about_text)
@@ -6547,4 +6547,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
