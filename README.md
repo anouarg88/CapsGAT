@@ -9,7 +9,7 @@ CapsQual (formerly CapsGAT) is a keyboard-first, lightweight UI-tool for editing
 <img width="1766" height="952" alt="preview v 1 4" src="https://github.com/user-attachments/assets/8d1a9ac5-9a58-4597-b8a5-5c9a3977b0fc" />
 
 
-Audio files can be imported and synced to the transcript. This is meant to reduce window-switching and simplify the formatting process. Playback speed can be adjusted (requires VLC Player to be installed). CapsGAT features basic transcript-editing functionality such as segment splitting and merging, customizable transcription of overlapping speech, pauses, comments and more.
+Audio files can be imported and synced to the transcript. This is meant to reduce window-switching and simplify the formatting process. Playback speed can be adjusted (requires VLC Player to be installed). CapsQual features basic transcript-editing functionality such as segment splitting and merging, customizable symbols, overlapping speech, pauses, comments and more.
 
 However, it is not meant as a replacement for professional manual transcription software (for full-fledged, professional transcription software, check out [EXMARaLDA](https://www.exmaralda.org)), nor as an all-in-one automated transcription worksuite (for AI-powered transcription with automatic diarization check out [noScribe](https://ai4culture.eu/resources/tools/172)), but more as a complementary formatting tool to be used with transcription AI models such as Whisper AI or CapsWriter, aimed at those who wish to efficiently tidy up their automatically transcribed interview-data in a user-friendly, intuitive environment.
 
