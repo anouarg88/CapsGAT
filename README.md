@@ -1,4 +1,4 @@
-# CapsQual - Subtitle-to-Transcript Workstation
+# CapsQual
 
 <img width="100" height="100" alt="CapsQual logo" src="https://github.com/user-attachments/assets/db350747-b876-45b8-b90d-341adc87b179" />
 
