@@ -5,6 +5,8 @@ on:
   release:
     types: [created]
   push:
+    branches:
+      - update
     tags:
       - 'v*'
 
@@ -131,3 +133,4 @@ jobs:
         with:
           name: CapsQual-macOS-AppleSilicon
           path: dist/CapsQual_MacOS_Arm64
+# Hope this works
