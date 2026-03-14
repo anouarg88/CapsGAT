@@ -91,8 +91,6 @@ jobs:
       - name: Build with PyInstaller
         run: |
           pyinstaller --icon "images/logo.icns" --add-data "images/*:images" -w -F main.py
-          # Output is dist/main (a macOS executable inside an .app bundle? Actually -F with -w on macOS creates a bundled app, but the executable is inside the .app. We need to locate it.)
-          # For a one-file app, PyInstaller creates dist/main (a Unix executable). With -w it still creates a single executable, not an .app bundle. So the output is dist/main.
 
       - name: Rename executable
         run: mv dist/main dist/CapsQual_MacOS_Intel
