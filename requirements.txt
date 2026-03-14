@@ -1,0 +1,6 @@
+PyQt5
+python-docx
+pyaudio
+soundfile
+numpy
+python-vlc
