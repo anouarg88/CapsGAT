@@ -34,14 +34,14 @@ jobs:
           # The output file is dist/main.exe
 
       - name: Rename executable
-        run: mv dist/main.exe dist/CapsQual_Windows_Portable.exe
+        run: mv dist/main.exe dist/CapsQual_1.5.exe
         shell: bash
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CapsQual-Windows
-          path: dist/CapsQual_Windows_Portable.exe
+          name: CapsQual-Windows-Portable
+          path: dist/CapsQual_1.5.exe
 
   build-ubuntu:
     runs-on: ubuntu-latest
@@ -70,16 +70,16 @@ jobs:
           # Output is dist/main
 
       - name: Rename executable
-        run: mv dist/main dist/CapsQual_Ubuntu
+        run: mv dist/main dist/CapsQual_1.5
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: CapsQual-Ubuntu
-          path: dist/CapsQual_Ubuntu
+          path: dist/CapsQual_1.5
 
   build-macos-intel:
-    runs-on: macos-13
+    runs-on: macos-15-intel
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -103,16 +103,16 @@ jobs:
           pyinstaller --icon "images/logo.icns" --add-data "images/*:images" -w -F main.py
 
       - name: Rename executable
-        run: mv dist/main dist/CapsQual_MacOS_Intel
+        run: mv dist/main dist/CapsQual_1.5
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: CapsQual-macOS-Intel
-          path: dist/CapsQual_MacOS_Intel
+          path: dist/CapsQual_1.5
 
   build-macos-arm64:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -136,11 +136,11 @@ jobs:
           pyinstaller --icon "images/logo.icns" --add-data "images/*:images" -w -F main.py
 
       - name: Rename executable
-        run: mv dist/main dist/CapsQual_MacOS_Arm64
+        run: mv dist/main dist/CapsQual_1.5
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: CapsQual-macOS-AppleSilicon
-          path: dist/CapsQual_MacOS_Arm64
+          path: dist/CapsQual_1.5
 # Hope this works
