@@ -100,10 +100,7 @@ jobs:
 
       - name: Build with PyInstaller
         run: |
-          pyinstaller --icon "images/logo.icns" --add-data "images/*:images" -w -F main.py
-
-      - name: Rename executable
-        run: mv dist/main dist/CapsQual_1.5
+          pyinstaller --icon "images/logo.icns" --add-data "images/*:images" -w -D --name "CapsQual_1.5" main.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -133,10 +130,7 @@ jobs:
 
       - name: Build with PyInstaller
         run: |
-          pyinstaller --icon "images/logo.icns" --add-data "images/*:images" -w -F main.py
-
-      - name: Rename executable
-        run: mv dist/main dist/CapsQual_1.5
+          pyinstaller --icon "images/logo.icns" --add-data "images/*:images" -w -D --name "CapsQual_1.5" main.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
