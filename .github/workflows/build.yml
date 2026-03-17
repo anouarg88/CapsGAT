@@ -31,17 +31,26 @@ jobs:
       - name: Build with PyInstaller
         run: |
           pyinstaller -i "images/logo.ico" --add-data "images/*;images" -w -F main.py
-          # The output file is dist/main.exe
+          # Output file is dist/main.exe
 
       - name: Rename executable
         run: mv dist/main.exe dist/CapsQual_1.5.exe
         shell: bash
 
-      - name: Upload artifact
+      - name: Upload artifact (Windows .exe for CI/debug)
         uses: actions/upload-artifact@v4
         with:
           name: CapsQual-Windows-Portable
           path: dist/CapsQual_1.5.exe
+
+      - name: Upload Windows exe as release asset
+        if: ${{ github.event_name == 'release' }}
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: dist/CapsQual_1.5.exe
+          asset_name: CapsQual_1.5.exe
+          asset_content_type: application/octet-stream
 
   build-ubuntu:
     runs-on: ubuntu-latest
@@ -52,12 +61,13 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-                python-version: '3.12'
+          python-version: '3.12'
+
       - name: Install system dependencies (Ubuntu)
         run: |
           sudo apt-get update
           sudo apt-get install -y portaudio19-dev python3-dev
-          
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -72,11 +82,24 @@ jobs:
       - name: Rename executable
         run: mv dist/main dist/CapsQual_1.5
 
-      - name: Upload artifact
+      - name: Upload artifact (Ubuntu binary for CI/debug)
         uses: actions/upload-artifact@v4
         with:
           name: CapsQual-Ubuntu
           path: dist/CapsQual_1.5
+
+      - name: Tar the Ubuntu binary for release
+        if: ${{ github.event_name == 'release' }}
+        run: tar -czf CapsQual_1.5-linux.tar.gz -C dist CapsQual_1.5
+
+      - name: Upload Linux tar as release asset
+        if: ${{ github.event_name == 'release' }}
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: CapsQual_1.5-linux.tar.gz
+          asset_name: CapsQual_1.5-linux.tar.gz
+          asset_content_type: application/gzip
 
   build-macos-intel:
     runs-on: macos-15-intel
@@ -88,10 +111,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          
+
       - name: Install system dependencies (macOS)
         run: brew install portaudio
-        
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -101,21 +124,25 @@ jobs:
       - name: Build with PyInstaller
         run: |
           pyinstaller --icon "images/logo.icns" --add-data "images/*:images" -w --name "CapsQual_1.5" main.py
+          # Output is dist/CapsQual_1.5.app
 
-      - name: List dist contents
-        run: ls -laR dist || true
+      - name: Zip .app bundle for release
+        run: cd dist && zip -r ../CapsQual_1.5.app.zip CapsQual_1.5.app
 
-      - name: Zip .app bundle
-        run: |
-          cd dist
-          zip -r ../CapsQual_1.5.app.zip CapsQual_1.5.app
-                
-      - name: Upload .app zip artifact
+      - name: Upload artifact (macOS Intel .app for CI/debug)
         uses: actions/upload-artifact@v4
         with:
           name: CapsQual-macOS-Intel
-          path: CapsQual_1.5.app.zip
+          path: dist/CapsQual_1.5.app
 
+      - name: Upload macOS .app.zip as release asset
+        if: ${{ github.event_name == 'release' }}
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: CapsQual_1.5.app.zip
+          asset_name: CapsQual_1.5-macOS-Intel.zip
+          asset_content_type: application/zip
 
   build-macos-arm64:
     runs-on: macos-15
@@ -127,10 +154,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          
+
       - name: Install system dependencies (macOS)
         run: brew install portaudio
-        
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -140,18 +167,22 @@ jobs:
       - name: Build with PyInstaller
         run: |
           pyinstaller --icon "images/logo.icns" --add-data "images/*:images" -w --name "CapsQual_1.5" main.py
+          # Output is dist/CapsQual_1.5.app
 
-      - name: List dist contents
-        run: ls -laR dist || true
+      - name: Zip .app bundle for release
+        run: cd dist && zip -r ../CapsQual_1.5.app.zip CapsQual_1.5.app
 
-      - name: Zip .app bundle
-        run: |
-          cd dist
-          zip -r ../CapsQual_1.5.app.zip CapsQual_1.5.app
-                
-      - name: Upload .app zip artifact
+      - name: Upload artifact (macOS ARM .app for CI/debug)
         uses: actions/upload-artifact@v4
         with:
           name: CapsQual-macOS-AppleSilicon
-          path: CapsQual_1.5.app.zip
-# Hope this works
+          path: dist/CapsQual_1.5.app
+
+      - name: Upload macOS .app.zip as release asset
+        if: ${{ github.event_name == 'release' }}
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: CapsQual_1.5.app.zip
+          asset_name: CapsQual_1.5-macOS-AppleSilicon.zip
+          asset_content_type: application/zip
