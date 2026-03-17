@@ -1,14 +1,8 @@
 name: Build CapsQual binaries
 
 on:
-  workflow_dispatch:
   release:
-    types: [created]
-  push:
-    branches:
-      - main
-    tags:
-      - 'v*'
+    types: [edited]
 
 jobs:
   build-windows:
