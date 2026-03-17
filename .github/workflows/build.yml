@@ -102,11 +102,14 @@ jobs:
         run: |
           pyinstaller --icon "images/logo.icns" --add-data "images/*:images" -w --name "CapsQual_1.5" main.py
 
+      - name: List dist contents
+        run: ls -laR dist || true
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: CapsQual-macOS-Intel
-          path: dist/CapsQual_1.5
+          path: dist/CapsQual_1.5.app
 
   build-macos-arm64:
     runs-on: macos-15
@@ -132,9 +135,12 @@ jobs:
         run: |
           pyinstaller --icon "images/logo.icns" --add-data "images/*:images" -w --name "CapsQual_1.5" main.py
 
+      - name: List dist contents
+        run: ls -laR dist || true
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: CapsQual-macOS-AppleSilicon
-          path: dist/CapsQual_1.5
+          path: dist/CapsQual_1.5.app
 # Hope this works
