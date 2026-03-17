@@ -10,7 +10,9 @@ from pathlib import Path
 from datetime import datetime
 from collections import deque
 import queue
+import copy
 import threading
+import string
 import time
 
 from PyQt5.QtWidgets import (
@@ -32,7 +34,7 @@ from dialogs import (
     TextSelectionDialog, BlockSplitDialog, EnhancedSymbolDialog, CommentDialog,
     RichEditDialog, EditTimestampsDialog, SettingsDialog, ProjectMemoDialog, JsonImportDialog,
     UnassignedSegmentsDialog, ExportPreviewDialog, SearchDialog, JumpToTimeDialog,
-    EnhancedPlacementDialog, PlacementDialog,
+    EnhancedPlacementDialog, PlacementDialog, InsertPausesDialog
 )
 from widgets import SpeedKnob
 
@@ -64,6 +66,10 @@ class SRTEditor(QMainWindow):
         self.max_recent = 10
         self.load_recent_files()
         
+        self.undo_stack = []
+        self.redo_stack = []
+        self.max_undo = 100
+        
         self.context_blocks = 5
         self.current_file_path = None
         self.file_has_timestamps = True
@@ -91,23 +97,113 @@ class SRTEditor(QMainWindow):
         self.ui_update_timer = QTimer()
         self.ui_update_timer.timeout.connect(self.update_ui)
         self.ui_update_timer.start(50)
-        
-        
-        # Check for VLC at startup
-#         self.vlc_available = self.check_vlc_available()      
-#         if not self.vlc_available:
-#             QTimer.singleShot(100, self.show_vlc_warning)
-            
+    
         
         self.update_splash("Creating user interface...")
         self.init_ui()
+        
+           
+        # Regex for pause symbols (atomic tokens)
+        self.pause_pattern = re.compile(
+            r'\(\.\)|\(-+\)|\(\d+(?:\.\d+)?\)|°h+|h+°|@\(\.\)@|@\(\d+s\)@|//|<<.*?>>|\[.*?\]|\(\(.*?\)\)|└'
+        )
+
+    def _tokenize_with_pauses(self, text):
+        """Split text into tokens, keeping pause symbols whole and spaces as separate tokens."""
+        tokens = []
+        last_end = 0
+        for match in self.pause_pattern.finditer(text):
+            start, end = match.span()
+            if start > last_end:
+                # Add preceding text, split by spaces
+                preceding = text[last_end:start]
+                # Split by spaces, preserving spaces as tokens
+                parts = re.split(r'(\s+)', preceding)
+                tokens.extend([p for p in parts if p])
+            tokens.append(match.group())  # pause token
+            last_end = end
+        if last_end < len(text):
+            remaining = text[last_end:]
+            parts = re.split(r'(\s+)', remaining)
+            tokens.extend([p for p in parts if p])
+        return tokens
     
     def update_splash(self, message):
         """Update splash screen message if splash exists."""
         if self.splash:
             self.splash.showMessage(message, Qt.AlignBottom | Qt.AlignCenter, Qt.black)
             QApplication.processEvents()  # ensure UI updates
+            
+        self.marker_pattern = re.compile(r'(#@[BIU]|#@/[BIU])')
+        self.punctuation_set = set(string.punctuation + "，。！？；：“”‘’（）【】《》……——·")
+        
+    def _apply_to_text_ignoring_markers(self, text, func):
+        """Apply function `func` to all non‑marker parts of `text`, leaving markers unchanged."""
+        parts = []
+        last_end = 0
+        for m in self.marker_pattern.finditer(text):
+            start, end = m.span()
+            if start > last_end:
+                # Apply func to the non‑marker part
+                parts.append(func(text[last_end:start]))
+            parts.append(m.group())   # marker remains unchanged
+            last_end = end
+        if last_end < len(text):
+            parts.append(func(text[last_end:]))
+        return ''.join(parts)
+
+    def strip_punctuation(self):
+        """Remove all punctuation marks from the transcript text (ignoring formatting markers)."""
+        if not self.srt_blocks:
+            return
+
+        reply = QMessageBox.warning(
+            self,
+            "Strip Punctuation",
+            "This will remove all punctuation marks from the transcript text.\n\n"
+            "Are you sure you want to continue?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        self.push_undo()
+
+        def remove_punct(s):
+            return ''.join(ch for ch in s if ch not in self.punctuation_set)
+
+        for block in self.srt_blocks:
+            block['raw_text'] = self._apply_to_text_ignoring_markers(block['raw_text'], remove_punct)
+            block['text'] = block['raw_text']
+
+        self.update_display()
+        self.mark_unsaved_changes()
+        
     
+    def convert_to_lowercase(self):
+        """Convert all transcript text to lowercase (ignoring formatting markers)."""
+        if not self.srt_blocks:
+            return
+
+        reply = QMessageBox.warning(
+            self,
+            "Convert to Lowercase",
+            "This will convert the entire transcript text to lowercase.\n\n"
+            "For non Latin‑based transcripts, this may have no effect.\n\n"
+            "Are you sure you want to continue?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        self.push_undo()
+
+        for block in self.srt_blocks:
+            block['raw_text'] = self._apply_to_text_ignoring_markers(block['raw_text'], str.lower)
+            block['text'] = block['raw_text']
+
+        self.update_display()
+        self.mark_unsaved_changes()
         
     def init_ui(self):
         self.setWindowTitle("CapsQual 1.5 - Subtitle-to-Transcript Workstation")
@@ -558,7 +654,213 @@ class SRTEditor(QMainWindow):
                 self.load_project_from_path(path)
             else:
                 self.load_file_from_path(path)
+               
+                
+    def push_undo(self):
+        """Save current state before a modification."""
+        state = {
+            'blocks': copy.deepcopy(self.srt_blocks),
+            'current_index': self.current_block_index,
+            'speakers': self.speakers.copy()
+        }
+        self.undo_stack.append(state)
+        self.redo_stack.clear()
+        if len(self.undo_stack) > self.max_undo:
+            self.undo_stack.pop(0)
+        self.update_undo_redo_actions()
+
+    def undo(self):
+        if not self.undo_stack:
+            return
+        # push current state to redo
+        current = {
+            'blocks': copy.deepcopy(self.srt_blocks),
+            'current_index': self.current_block_index,
+            'speakers': self.speakers.copy()
+        }
+        self.redo_stack.append(current)
+        # restore previous state
+        prev = self.undo_stack.pop()
+        self._restore_state(prev)
+        self.update_undo_redo_actions()
+
+    def redo(self):
+        if not self.redo_stack:
+            return
+        # push current state to undo
+        current = {
+            'blocks': copy.deepcopy(self.srt_blocks),
+            'current_index': self.current_block_index,
+            'speakers': self.speakers.copy()
+        }
+        self.undo_stack.append(current)
+        # restore next state
+        next_state = self.redo_stack.pop()
+        self._restore_state(next_state)
+        self.update_undo_redo_actions()
+
+    def _restore_state(self, state):
+        """Restore a saved state and refresh the UI."""
+        self.srt_blocks = state['blocks']
+        self.current_block_index = state['current_index']
+        self.speakers = state['speakers']
+        self.speaker_count_label.setText(str(len(self.speakers)))
+        self.update_display()
+        self.create_speaker_widgets()
+        self.setup_shortcuts()
+        self.update_speaker_buttons()
+        self.mark_unsaved_changes()
+
+    def update_undo_redo_actions(self):
+        """Enable/disable Undo/Redo menu items based on stack emptiness."""
+        if hasattr(self, 'undo_action'):
+            self.undo_action.setEnabled(len(self.undo_stack) > 0)
+        if hasattr(self, 'redo_action'):
+            self.redo_action.setEnabled(len(self.redo_stack) > 0)
             
+        
+    def insert_pauses_for_gaps(self):
+        if not self.srt_blocks or len(self.srt_blocks) < 2:
+            QMessageBox.information(self, "Cannot Insert Pauses",
+                "Need at least two segments to calculate gaps.")
+            return
+
+        # Check if we have timestamps
+        has_any_timestamp = any(block.get('start_time') for block in self.srt_blocks)
+        if not has_any_timestamp:
+            QMessageBox.warning(self, "No Timestamps",
+                "This transcript does not contain timestamp information.\n\n"
+                "Pause insertion requires start and end times for segments.")
+            return
+
+        dialog = InsertPausesDialog(self)
+        if dialog.exec_() != QDialog.Accepted:
+            return
+
+        settings = dialog.get_settings()
+        convention = settings['convention']
+        use_measured = settings['use_measured']
+        measured_threshold = settings['measured_threshold']
+        min_gap = settings['min_gap']
+        mode = settings['mode']
+        threshold = settings['threshold']  # used only if mode == "threshold"
+
+        self.push_undo()
+
+        blocks = self.srt_blocks
+        inserted_count = 0
+
+        # Work from last to first to avoid index shifting when inserting new blocks
+        for i in range(len(blocks) - 2, -1, -1):
+            current = blocks[i]
+            nxt = blocks[i+1]
+
+            # Get end time of current and start time of next
+            if not current.get('end_time') or not nxt.get('start_time'):
+                continue
+
+            end_sec = self.time_to_seconds(current['end_time'])
+            start_sec = self.time_to_seconds(nxt['start_time'])
+            gap = start_sec - end_sec
+
+            if gap < min_gap:
+                continue
+
+            # Generate pause symbol
+            symbol = self.gap_to_pause_symbol(gap, convention, use_measured, measured_threshold)
+            if not symbol:
+                continue
+
+            # Decide action based on mode
+            separate_this = False
+            if mode == "separate":
+                separate_this = True
+            elif mode == "attach":
+                separate_this = False
+            else:  # threshold
+                separate_this = (gap >= threshold)
+
+            if separate_this:
+                # Insert a new pause block after current
+                new_block = {
+                    'index': max(b['index'] for b in blocks) + 1,
+                    'start_time': current['end_time'],
+                    'end_time': nxt['start_time'],
+                    'text': symbol,
+                    'raw_text': symbol,
+                    'speaker': None,
+                    'is_turn_start': False,
+                    'is_pause': True,
+                }
+                blocks.insert(i+1, new_block)
+                inserted_count += 1
+            else:
+                # Prepend symbol to the next block's text (no timestamp change)
+                if self.cjk_mode:
+                    prefix = symbol
+                else:
+                    # Add a space after the symbol unless the next block already starts with space
+                    if nxt['raw_text'] and not nxt['raw_text'][0].isspace():
+                        prefix = symbol + " "
+                    else:
+                        prefix = symbol
+                nxt['raw_text'] = prefix + nxt['raw_text']
+                nxt['text'] = nxt['raw_text']
+                inserted_count += 1   # still count as a pause inserted
+
+        if inserted_count > 0:
+            self.update_display()
+            self.mark_unsaved_changes()
+            QMessageBox.information(self, "Pauses Inserted",
+                f"Inserted {inserted_count} pause(s).")
+        else:
+            QMessageBox.information(self, "No Pauses",
+                "No gaps meeting the criteria were found.")
+        
+    def gap_to_pause_symbol(self, gap_seconds, convention, use_measured, measured_threshold):
+        """Return the appropriate pause symbol for the given gap and convention."""
+        if convention == "gat2":
+            if gap_seconds < 0.2:
+                return "(.)"
+            elif gap_seconds < 0.5:
+                return "(-)"
+            elif gap_seconds < 0.8:
+                return "(--)"
+            elif gap_seconds < 1.0:
+                return "(---)"
+            else:
+                if use_measured and gap_seconds >= measured_threshold:
+                    # GAT2 measured pauses: one decimal
+                    return f"({gap_seconds:.1f})"
+                else:
+                    return "(---)"
+        elif convention == "dresing_pehl":
+            if gap_seconds < 1:
+                return "(.)"
+            elif gap_seconds < 2:
+                return "(..)"
+            elif gap_seconds < 3:
+                return "(...)"
+            else:
+                if use_measured and gap_seconds >= measured_threshold:
+                    # Dresing & Pehl measured pauses: whole seconds (rounded)
+                    return f"({int(round(gap_seconds))})"
+                else:
+                    return "(...)"
+        elif convention == "tiq":
+            if gap_seconds < 1.0:
+                return "(.)"
+            else:
+                if use_measured and gap_seconds >= measured_threshold:
+                    # TiQ measured pauses: whole seconds (rounded)
+                    return f"({int(round(gap_seconds))})"
+                else:
+                    # For TiQ, non‑measured pauses remain short
+                    return "(.)"
+        else:
+            return None
+                
+                
     def format_timestamp(self, seconds, style="curly", custom_pattern=None):
         """
         Format a timestamp (seconds) according to the chosen style.
@@ -665,7 +967,36 @@ class SRTEditor(QMainWindow):
         
         # Edit menu
         edit_menu = menubar.addMenu('Edit')
+        self.undo_action = QAction('Undo', self)
+        self.undo_action.setShortcut('Ctrl+Z')
+        self.undo_action.triggered.connect(self.undo)
+        self.undo_action.setEnabled(False)
+        edit_menu.addAction(self.undo_action)
+
+        self.redo_action = QAction('Redo', self)
+        self.redo_action.setShortcut('Ctrl+Y')   # also Ctrl+Shift+Z on some systems
+        self.redo_action.triggered.connect(self.redo)
+        self.redo_action.setEnabled(False)
+        edit_menu.addAction(self.redo_action)
+        edit_menu.addSeparator()
         
+        # Modify transcript submenu
+        modify_menu = edit_menu.addMenu('Modify transcript')
+        
+        insert_pauses_action = QAction('Insert pause symbols for gaps…', self)
+        insert_pauses_action.triggered.connect(self.insert_pauses_for_gaps)
+        self.insert_pauses_action = insert_pauses_action
+        modify_menu.addAction(insert_pauses_action)
+        
+        strip_punct_action = QAction('Strip punctuation', self)
+        strip_punct_action.triggered.connect(self.strip_punctuation)
+        modify_menu.addAction(strip_punct_action)
+
+        lowercase_action = QAction('Convert to lowercase', self)
+        lowercase_action.triggered.connect(self.convert_to_lowercase)
+        modify_menu.addAction(lowercase_action)
+        
+                
         search_action = QAction('Search...', self)
         search_action.triggered.connect(self.open_search_dialog)
         edit_menu.addAction(search_action)
@@ -785,6 +1116,7 @@ class SRTEditor(QMainWindow):
         """Increase number of speakers by 1"""
         current = len(self.speakers)
         if current < 8:  # Max 8 speakers
+            self.push_undo()
             self.update_speaker_count(current + 1)
             self.speaker_count_label.setText(str(current + 1))
             # Update button states
@@ -792,6 +1124,7 @@ class SRTEditor(QMainWindow):
 
     def decrease_speaker_count(self):
         """Decrease number of speakers by 1"""
+        self.push_undo()
         current = len(self.speakers)
         if current <= 2:  # Min 2 speakers
             return
@@ -963,6 +1296,41 @@ class SRTEditor(QMainWindow):
             run.bold = bold
             run.italic = italic
             run.underline = underline
+    
+    
+    def _build_ordered_segments(self, include_timestamps=False):
+        """
+        Walk through srt_blocks and return a list of segments in original order.
+        Each segment is a dict with keys:
+            'type': 'turn' or 'special'
+            For 'turn': 'speaker' (index), 'blocks' (list of blocks), 
+                        'start_time' (first block's start), 'end_time' (last block's end)
+            For 'special': 'block' (the whole block)
+        """
+        segments = []
+        i = 0
+        n = len(self.srt_blocks)
+        while i < n:
+            block = self.srt_blocks[i]
+            if block['speaker'] is not None:
+                # Start a turn – collect consecutive blocks with the same speaker
+                speaker = block['speaker']
+                turn_blocks = []
+                while i < n and self.srt_blocks[i]['speaker'] == speaker:
+                    turn_blocks.append(self.srt_blocks[i])
+                    i += 1
+                segments.append({
+                    'type': 'turn',
+                    'speaker': speaker,
+                    'blocks': turn_blocks,
+                    'start_time': turn_blocks[0].get('start_time') if include_timestamps else None,
+                    'end_time': turn_blocks[-1].get('end_time') if include_timestamps else None
+                })
+            else:
+                # Special block (empty, pause, comment)
+                segments.append({'type': 'special', 'block': block})
+                i += 1
+        return segments
     
     def update_ui(self):
         """Update UI elements based on current state"""
@@ -1303,11 +1671,13 @@ class SRTEditor(QMainWindow):
         logger.info(f"Auto-pause {'enabled' if checked else 'disabled'}")
               
 
+
     def wrap_text(self, text, max_width, character_wrap=False, first_line_only_indent=True):
         """
-        Wrap text to max_width characters, preserving internal spaces.
-        If character_wrap is True, break at exact character positions.
-        Otherwise, break at word boundaries without collapsing spaces.
+        Wrap text to max_width characters.
+        - If character_wrap: break at exact character positions.
+        - Otherwise, tokenize using _tokenize_with_pauses (keeps pause symbols atomic)
+          and then fill lines greedily, dropping leading spaces on new lines.
         """
         if not text or max_width <= 0:
             return [text]
@@ -1316,10 +1686,8 @@ class SRTEditor(QMainWindow):
             # Simple character‑based wrap
             return [text[i:i+max_width] for i in range(0, len(text), max_width)]
 
-        # Word‑based wrap that preserves spaces
-        # Use a regex that captures runs of spaces as separate tokens
-        tokens = re.split(r'(\s+)', text)
-        # tokens are alternating: word, space, word, space, ... (empty strings are filtered out)
+        # Use pause‑aware tokenization
+        tokens = self._tokenize_with_pauses(text)
 
         lines = []
         current_line = ''
@@ -1331,21 +1699,31 @@ class SRTEditor(QMainWindow):
             # If adding this token would exceed max_width
             if len(current_line + token) > max_width:
                 if current_line:
-                    lines.append(current_line.rstrip())   # remove trailing space if any
+                    lines.append(current_line)
                     current_line = ''
 
-                # If the token itself is longer than max_width, break it into chunks
+                # Skip leading space token
+                if token.isspace():
+                    continue
+
+                # If the token itself is longer than max_width, split it into chunks
                 if len(token) > max_width:
                     for i in range(0, len(token), max_width):
                         chunk = token[i:i+max_width]
                         if chunk:
-                            lines.append(chunk)
-                    continue
+                            if i == 0:
+                                current_line = chunk
+                            else:
+                                lines.append(chunk)
+                    current_line = ''
+                else:
+                    current_line = token
 
-            current_line += token
+            else:
+                current_line += token
 
         if current_line:
-            lines.append(current_line.rstrip())
+            lines.append(current_line)
 
         return lines
 
@@ -1361,6 +1739,8 @@ class SRTEditor(QMainWindow):
     
     def new_project(self):
         """Create new project"""
+        self.undo_stack.clear()
+        self.redo_stack.clear()
         if self.check_unsaved_changes():
             self.srt_blocks = []
             self.current_block_index = 0
@@ -1683,12 +2063,17 @@ Engineered with DeepSeek V3.2
             
             self.update_display()
             self.mark_unsaved_changes()
+            self.undo_stack.clear()
+            self.redo_stack.clear()
+            self.update_undo_redo_actions()
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Could not load file: {str(e)}")
             
     def load_project_from_path(self, file_path):
         """Load a CapsQual project file from the given path."""
+        self.undo_stack.clear()
+        self.redo_stack.clear()
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 project_data = json.load(f)
@@ -1755,7 +2140,7 @@ Engineered with DeepSeek V3.2
             color_label.setStyleSheet(f"color: {self.speaker_colors[i].name()}; font-size: 20px;")
             
             speaker_name_edit = QLineEdit(speaker)
-            speaker_name_edit.textChanged.connect(lambda text, idx=i: self.rename_speaker(idx, text))
+            speaker_name_edit.editingFinished.connect(lambda checked=False, idx=i: self.rename_speaker(idx))
             speaker_name_edit.setFixedWidth(120)
             
             speaker_btn = QPushButton(f"{i+1}. Assign")
@@ -1811,11 +2196,15 @@ Engineered with DeepSeek V3.2
                 'button': speaker_btn
             })
         
-    def rename_speaker(self, speaker_idx, new_name):
-        if speaker_idx < len(self.speakers):
+
+    def rename_speaker(self, speaker_idx):
+        new_name = self.speaker_widgets[speaker_idx]['name_edit'].text()
+        if speaker_idx < len(self.speakers) and self.speakers[speaker_idx] != new_name:
+            self.push_undo()
             self.speakers[speaker_idx] = new_name
             self.update_display()
             self.mark_unsaved_changes()
+        
     def count_blocks_for_speaker(self, speaker_idx):
         """Count how many blocks are assigned to a specific speaker"""
         count = 0
@@ -2490,6 +2879,7 @@ Engineered with DeepSeek V3.2
     def assign_speaker(self, speaker_idx):
         if not self.srt_blocks or speaker_idx >= len(self.speakers):
             return
+        self.push_undo()
             
         current_block = self.srt_blocks[self.current_block_index]
         current_block['speaker'] = speaker_idx
@@ -2534,6 +2924,7 @@ Engineered with DeepSeek V3.2
     def unassign_current(self):
         if not self.srt_blocks:
             return
+        self.push_undo()
             
         current_block = self.srt_blocks[self.current_block_index]
         current_block['speaker'] = None
@@ -2575,6 +2966,7 @@ Engineered with DeepSeek V3.2
         dialog = BlockSplitDialog(current_block['raw_text'], self)   # use raw_text
         
         if dialog.exec_() == QDialog.Accepted:
+            self.push_undo()
             split_pos = dialog.split_position
             if 0 < split_pos < len(current_block['raw_text']):
                 text_before = current_block['raw_text'][:split_pos].strip()
@@ -2637,6 +3029,7 @@ Engineered with DeepSeek V3.2
     def merge_with_next(self):
         if self.current_block_index >= len(self.srt_blocks) - 1:
             return
+        self.push_undo()
 
         current_block = self.srt_blocks[self.current_block_index]
         next_block = self.srt_blocks[self.current_block_index + 1]
@@ -2668,6 +3061,7 @@ Engineered with DeepSeek V3.2
         dialog = RichEditDialog(current_block['raw_text'], self)   # use new dialog
 
         if dialog.exec_() == QDialog.Accepted:
+            self.push_undo()
             new_text = dialog.get_text()
             current_block['raw_text'] = new_text
             current_block['text'] = new_text
@@ -2696,6 +3090,7 @@ Engineered with DeepSeek V3.2
 
         dialog = EditTimestampsDialog(start, end, self)
         if dialog.exec_() == QDialog.Accepted:
+            self.push_undo()
             new_start, new_end = dialog.get_times()
             # Update block
             block['start_time'] = new_start
@@ -2760,27 +3155,23 @@ Engineered with DeepSeek V3.2
             self.handle_gat2_symbol(symbol_info.get('index', 0))
 
     def handle_dresing_pehl_symbol(self, symbol_info):
-        """Handle Dresing & Pehl symbols"""
         display = symbol_info.get('display', '')
         current_block = self.srt_blocks[self.current_block_index]
-        
+
         if display in ["(.)", "(..)", "(...)"]:
-            # Simple pauses – use simple placement dialog
-            dialog = PlacementDialog(current_block['raw_text'], display, self)
+            dialog = PlacementDialog(current_block['raw_text'], display, self, cjk_mode=self.cjk_mode)
             if dialog.exec_() == QDialog.Accepted:
-                if dialog.create_new_line:
-                    self.create_new_block_with_symbol(display)
+                self.push_undo()
+                create_new, result = dialog.get_result()
+                if create_new:
+                    self.create_new_block_with_symbol(result)
                 else:
-                    pos = dialog.placement_position
-                    new_raw = (current_block['raw_text'][:pos] + " " + display +
-                                           " " + current_block['raw_text'][pos:]).strip()
-                    current_block['raw_text'] = new_raw
-                    current_block['text'] = new_raw
+                    current_block['raw_text'] = result
+                    current_block['text'] = result
                 self.update_display()
                 self.mark_unsaved_changes()
-        
+
         elif display == "(_)":
-            # Measured pause – input seconds, then simple placement
             seconds, ok = QInputDialog.getInt(
                 self, "Measured Pause",
                 "Enter pause length in seconds:",
@@ -2788,56 +3179,50 @@ Engineered with DeepSeek V3.2
             )
             if ok:
                 symbol = f"({seconds})"
-                dialog = PlacementDialog(current_block['raw_text'], symbol, self)
+                dialog = PlacementDialog(current_block['raw_text'], symbol, self, cjk_mode=self.cjk_mode)
                 if dialog.exec_() == QDialog.Accepted:
-                    if dialog.create_new_line:
-                        self.create_new_block_with_symbol(symbol)
+                    self.push_undo()
+                    create_new, result = dialog.get_result()
+                    if create_new:
+                        self.create_new_block_with_symbol(result)
                     else:
-                        pos = dialog.placement_position
-                        new_raw = (current_block['raw_text'][:pos] + " " + symbol +
-                                               " " + current_block['raw_text'][pos:]).strip()
-                        current_block['raw_text'] = new_raw
-                        current_block['text'] = new_raw
+                        current_block['raw_text'] = result
+                        current_block['text'] = result
                     self.update_display()
                     self.mark_unsaved_changes()
-        
+
+        # ... (overlap handler uses TextSelectionDialog, no change)
         elif display == "//":
-            # Overlap – use dedicated overlap handler (similar to GAT2)
             self.handle_dresing_overlap()
-        
+
         elif display == "(   )":
-            # Comment – input text, then simple placement
             comment, ok = QInputDialog.getText(self, "Comment", "Enter comment:")
             if ok and comment:
                 symbol = f"({comment})"
-                dialog = PlacementDialog(current_block['raw_text'], symbol, self)
+                dialog = PlacementDialog(current_block['raw_text'], symbol, self, cjk_mode=self.cjk_mode)
                 if dialog.exec_() == QDialog.Accepted:
-                    if dialog.create_new_line:
-                        self.create_new_block_with_symbol(symbol)
+                    self.push_undo()
+                    create_new, result = dialog.get_result()
+                    if create_new:
+                        self.create_new_block_with_symbol(result)
                     else:
-                        pos = dialog.placement_position
-                        new_raw = (current_block['raw_text'][:pos] + " " + symbol +
-                                               " " + current_block['raw_text'][pos:]).strip()
-                        current_block['raw_text'] = new_raw
-                        current_block['text'] = new_raw
+                        current_block['raw_text'] = result
+                        current_block['text'] = result
                     self.update_display()
                     self.mark_unsaved_changes()
-          
+
         elif display == "⏱":
-            # Pre‑fill timestamp with current block's start time (if available)
             default_time = ""
             if current_block.get('start_time'):
-                # Convert "HH:MM:SS,mmm" to "HH:MM:SS" or "MM:SS"
                 time_str = current_block['start_time']
                 if ',' in time_str:
-                    time_str = time_str.split(',')[0]  # remove milliseconds
+                    time_str = time_str.split(',')[0]
                 parts = time_str.split(':')
                 if len(parts) == 3 and parts[0] == '00':
-                    # drop hours if zero
                     default_time = f"{parts[1]}:{parts[2]}"
                 else:
                     default_time = time_str
-            
+
             timestamp, ok = QInputDialog.getText(
                 self, "Insert Timestamp",
                 "Enter timestamp (e.g., 01:23):",
@@ -2845,16 +3230,15 @@ Engineered with DeepSeek V3.2
             )
             if ok and timestamp:
                 symbol = f"#{timestamp}#"
-                dialog = PlacementDialog(current_block['raw_text'], symbol, self)
+                dialog = PlacementDialog(current_block['raw_text'], symbol, self, cjk_mode=self.cjk_mode)
                 if dialog.exec_() == QDialog.Accepted:
-                    if dialog.create_new_line:
-                        self.create_new_block_with_symbol(symbol)
+                    self.push_undo()
+                    create_new, result = dialog.get_result()
+                    if create_new:
+                        self.create_new_block_with_symbol(result)
                     else:
-                        pos = dialog.placement_position
-                        new_raw = (current_block['raw_text'][:pos] + " " + symbol +
-                                               " " + current_block['raw_text'][pos:]).strip()
-                        current_block['raw_text'] = new_raw
-                        current_block['text'] = new_raw
+                        current_block['raw_text'] = result
+                        current_block['text'] = result
                     self.update_display()
                     self.mark_unsaved_changes()
                     
@@ -2892,6 +3276,7 @@ Engineered with DeepSeek V3.2
                 if prev_dialog.exec_() == QDialog.Accepted:
                     prev_start, prev_end, prev_selected = prev_dialog.get_selection()
                     if prev_selected:
+                        self.push_undo()
                         # For Dresing & Pehl, we just insert // markers without indentation.
                         prev_before = prev_block['raw_text'][:prev_start]
                         prev_after = prev_block['raw_text'][prev_end:]
@@ -2935,6 +3320,7 @@ Engineered with DeepSeek V3.2
         if curr_dialog.exec_() == QDialog.Accepted:
             curr_start, curr_end, curr_selected = curr_dialog.get_selection()
             if curr_selected:
+                self.push_undo()
                 prev_dialog = TextSelectionDialog(prev_block['raw_text'], self)
                 prev_dialog.setWindowTitle("Select Overlapping Text in Earlier Block")
                 if prev_dialog.exec_() == QDialog.Accepted:
@@ -2958,26 +3344,23 @@ Engineered with DeepSeek V3.2
                 self.audio_player.play()
 
     def handle_tiq_symbol(self, symbol_info):
-        """Handle TiQ symbols"""
         display = symbol_info.get('display', '')
         current_block = self.srt_blocks[self.current_block_index]
-        
+
         if display == "(.)":
-            # Short pause – simple placement
-            dialog = PlacementDialog(current_block['raw_text'], "(.)", self)
+            dialog = PlacementDialog(current_block['raw_text'], "(.)", self, cjk_mode=self.cjk_mode)
             if dialog.exec_() == QDialog.Accepted:
-                if dialog.create_new_line:
-                    self.create_new_block_with_symbol("(.)")
+                self.push_undo()
+                create_new, result = dialog.get_result()
+                if create_new:
+                    self.create_new_block_with_symbol(result)
                 else:
-                    pos = dialog.placement_position
-                    new_raw = (current_block['raw_text'][:pos] + " (.) " + current_block['raw_text'][pos:]).strip()
-                    current_block['raw_text'] = new_raw
-                    current_block['text'] = new_raw
+                    current_block['raw_text'] = result
+                    current_block['text'] = result
                 self.update_display()
                 self.mark_unsaved_changes()
-        
+
         elif display == "(_)":
-            # Measured pause – input seconds, then simple placement
             seconds, ok = QInputDialog.getInt(
                 self, "Measured Pause",
                 "Enter pause length in seconds:",
@@ -2985,58 +3368,53 @@ Engineered with DeepSeek V3.2
             )
             if ok:
                 symbol = f"({seconds})"
-                dialog = PlacementDialog(current_block['raw_text'], symbol, self)
+                dialog = PlacementDialog(current_block['raw_text'], symbol, self, cjk_mode=self.cjk_mode)
                 if dialog.exec_() == QDialog.Accepted:
-                    if dialog.create_new_line:
-                        self.create_new_block_with_symbol(symbol)
+                    self.push_undo()
+                    create_new, result = dialog.get_result()
+                    if create_new:
+                        self.create_new_block_with_symbol(result)
                     else:
-                        pos = dialog.placement_position
-                        new_raw = (current_block['raw_text'][:pos] + " " + symbol +
-                                               " " + current_block['raw_text'][pos:]).strip()
-                        current_block['raw_text'] = new_raw
-                        current_block['text'] = new_raw
+                        current_block['raw_text'] = result
+                        current_block['text'] = result
                     self.update_display()
                     self.mark_unsaved_changes()
-        
+
         elif display == "(())":
-            # Comment – input text, then simple placement
             comment, ok = QInputDialog.getText(self, "Comment", "Enter comment:")
             if ok and comment:
                 symbol = f"(({comment}))"
-                dialog = PlacementDialog(current_block['raw_text'], symbol, self)
+                dialog = PlacementDialog(current_block['raw_text'], symbol, self, cjk_mode=self.cjk_mode)
                 if dialog.exec_() == QDialog.Accepted:
-                    if dialog.create_new_line:
-                        self.create_new_block_with_symbol(symbol)
+                    self.push_undo()
+                    create_new, result = dialog.get_result()
+                    if create_new:
+                        self.create_new_block_with_symbol(result)
                     else:
-                        pos = dialog.placement_position
-                        new_raw = (current_block['raw_text'][:pos] + " " + symbol +
-                                               " " + current_block['raw_text'][pos:]).strip()
-                        current_block['raw_text'] = new_raw
-                        current_block['text'] = new_raw
+                        current_block['raw_text'] = result
+                        current_block['text'] = result
                     self.update_display()
                     self.mark_unsaved_changes()
-        
+
         elif display == "└":
-                    self.handle_tiq_overlap()
-                    self.update_display()
-                    self.mark_unsaved_changes()
-        
+            self.handle_tiq_overlap()
+            self.update_display()
+            self.mark_unsaved_changes()
+
         elif display == "@(.)@":
-            # Short laughter – simple placement
-            dialog = PlacementDialog(current_block['raw_text'], "@(.)@", self)
+            dialog = PlacementDialog(current_block['raw_text'], "@(.)@", self, cjk_mode=self.cjk_mode)
             if dialog.exec_() == QDialog.Accepted:
-                if dialog.create_new_line:
-                    self.create_new_block_with_symbol("@(.)@")
+                self.push_undo()
+                create_new, result = dialog.get_result()
+                if create_new:
+                    self.create_new_block_with_symbol(result)
                 else:
-                    pos = dialog.placement_position
-                    new_raw = (current_block['raw_text'][:pos] + " @(.)@ " + current_block['raw_text'][pos:]).strip()
-                    current_block['raw_text'] = new_raw
-                    current_block['text'] = new_raw
+                    current_block['raw_text'] = result
+                    current_block['text'] = result
                 self.update_display()
                 self.mark_unsaved_changes()
-        
+
         elif display == "@(_)@":
-            # Laughing seconds – input, then simple placement
             seconds, ok = QInputDialog.getInt(
                 self, "Laughing Duration",
                 "Enter laughter duration in seconds:",
@@ -3044,26 +3422,25 @@ Engineered with DeepSeek V3.2
             )
             if ok:
                 symbol = f"@({seconds}s)@"
-                dialog = PlacementDialog(current_block['raw_text'], symbol, self)
+                dialog = PlacementDialog(current_block['raw_text'], symbol, self, cjk_mode=self.cjk_mode)
                 if dialog.exec_() == QDialog.Accepted:
-                    if dialog.create_new_line:
-                        self.create_new_block_with_symbol(symbol)
+                    self.push_undo()
+                    create_new, result = dialog.get_result()
+                    if create_new:
+                        self.create_new_block_with_symbol(result)
                     else:
-                        pos = dialog.placement_position
-                        new_raw = (current_block['raw_text'][:pos] + " " + symbol +
-                                               " " + current_block['raw_text'][pos:]).strip()
-                        current_block['raw_text'] = new_raw
-                        current_block['text'] = new_raw
+                        current_block['raw_text'] = result
+                        current_block['text'] = result
                     self.update_display()
                     self.mark_unsaved_changes()
-        
+
         elif display in ["@(   )@", "°   °", "//   //"]:
             was_playing = False
             if self.auto_pause_enabled and self.is_playing:
                 was_playing = True
                 if self.audio_player:
                     self.audio_player.pause()
-            
+
             # Determine left/right markers
             if display == "@(   )@":
                 left, right = "@(", ")@"
@@ -3071,27 +3448,27 @@ Engineered with DeepSeek V3.2
                 left, right = "°", "°"
             else:  # "//   //"
                 left, right = "//", "//"
-            
+
             dialog = TextSelectionDialog(current_block['raw_text'], self)
             dialog.setWindowTitle(f"Select text for {display}")
             if dialog.exec_() == QDialog.Accepted:
+                self.push_undo()
                 start_pos, end_pos, selected_text = dialog.get_selection()
                 if selected_text:
-                    new_raw = (current_block['raw_text'][:start_pos] + 
-                                            left + selected_text + right + 
-                                            current_block['raw_text'][end_pos:])
+                    new_raw = (current_block['raw_text'][:start_pos] +
+                               left + selected_text + right +
+                               current_block['raw_text'][end_pos:])
                     current_block['raw_text'] = new_raw
                     current_block['text'] = new_raw
                     self.update_display()
                     self.mark_unsaved_changes()
-            
+
             if was_playing and self.auto_pause_enabled:
                 if self.audio_player:
                     self.audio_player.play()
-                
+
 
     def handle_custom_symbol(self, symbol_info):
-        """Handle insertion of custom symbols according to their type"""
         symbol_type = symbol_info.get('type', 'simple')
         current_block = self.srt_blocks[self.current_block_index]
 
@@ -3101,86 +3478,77 @@ Engineered with DeepSeek V3.2
             if self.audio_player:
                 self.audio_player.pause()
 
-        # --- Simple symbol: use PlacementDialog ---
         if symbol_type == 'simple':
             symbol = symbol_info.get('display', '')
-            dialog = PlacementDialog(current_block['raw_text'], symbol, self)
+            dialog = PlacementDialog(current_block['raw_text'], symbol, self, cjk_mode=self.cjk_mode)
             if dialog.exec_() == QDialog.Accepted:
-                if dialog.create_new_line:
-                    self.create_new_block_with_symbol(symbol)
+                self.push_undo()
+                create_new, result = dialog.get_result()
+                if create_new:
+                    self.create_new_block_with_symbol(result)
                 else:
-                    pos = dialog.placement_position
-                    new_raw = (current_block['raw_text'][:pos] + " " + symbol +
-                                           " " + current_block['raw_text'][pos:]).strip()
-                    current_block['raw_text'] = new_raw
-                    current_block['text'] = new_raw
+                    current_block['raw_text'] = result
+                    current_block['text'] = result
                 self.update_display()
                 self.mark_unsaved_changes()
 
-        # --- Segment wrapper: select text, then wrap with left/right ---
         elif symbol_type == 'wrapper':
             left = symbol_info.get('left', '')
             right = symbol_info.get('right', '')
             dialog = TextSelectionDialog(current_block['raw_text'], self)
             dialog.setWindowTitle("Select text to wrap")
             if dialog.exec_() == QDialog.Accepted:
+                self.push_undo()
                 start_pos, end_pos, selected_text = dialog.get_selection()
                 if selected_text:
-                    new_raw = (current_block['raw_text'][:start_pos] + 
-                                            left + selected_text + right + 
-                                            current_block['raw_text'][end_pos:])
+                    new_raw = (current_block['raw_text'][:start_pos] +
+                               left + selected_text + right +
+                               current_block['raw_text'][end_pos:])
                     current_block['raw_text'] = new_raw
                     current_block['text'] = new_raw
                     self.update_display()
                     self.mark_unsaved_changes()
 
-        # --- Comment wrapper: input comment, then use PlacementDialog ---
         elif symbol_type == 'comment':
             left = symbol_info.get('left', '')
             right = symbol_info.get('right', '')
             comment, ok = QInputDialog.getText(self, "Comment", "Enter comment:")
             if ok and comment:
                 symbol = left + comment + right
-                # Use PlacementDialog to allow cursor positioning or new line
-                dialog = PlacementDialog(current_block['raw_text'], symbol, self)
+                dialog = PlacementDialog(current_block['raw_text'], symbol, self, cjk_mode=self.cjk_mode)
                 if dialog.exec_() == QDialog.Accepted:
-                    if dialog.create_new_line:
-                        self.create_new_block_with_symbol(symbol)
+                    self.push_undo()
+                    create_new, result = dialog.get_result()
+                    if create_new:
+                        self.create_new_block_with_symbol(result)
                     else:
-                        pos = dialog.placement_position
-                        new_raw = (current_block['raw_text'][:pos] + " " + symbol +
-                                               " " + current_block['raw_text'][pos:]).strip()
-                        current_block['raw_text'] = new_raw
-                        current_block['text'] = new_raw
+                        current_block['raw_text'] = result
+                        current_block['text'] = result
                     self.update_display()
                     self.mark_unsaved_changes()
 
-        # --- Comment wrapper with reach: select text, input description, then wrap ---
         elif symbol_type == 'comment_reach':
             left = symbol_info.get('left', '')
             right_action = symbol_info.get('right', '')
             right_segment = symbol_info.get('segment_right', '')
 
-            # Step 1: select the spoken text
             select_dialog = TextSelectionDialog(current_block['raw_text'], self)
             select_dialog.setWindowTitle("Select spoken text to annotate")
             if select_dialog.exec_() == QDialog.Accepted:
                 start_pos, end_pos, selected_text = select_dialog.get_selection()
                 if selected_text:
-                    # Step 2: input the action/comment description
                     description, ok = QInputDialog.getText(self, "Action Description",
-                                                           f"Enter description for the action/comment:")
+                                                           "Enter description for the action/comment:")
                     if ok and description:
-                        # Construct the wrapped result: left + description + right_action + selected_text + right_segment
                         wrapped = left + description + right_action + selected_text + right_segment
-                        new_raw = (current_block['raw_text'][:start_pos] + 
-                                                wrapped + 
-                                                current_block['raw_text'][end_pos:])
+                        new_raw = (current_block['raw_text'][:start_pos] +
+                                   wrapped +
+                                   current_block['raw_text'][end_pos:])
                         current_block['raw_text'] = new_raw
                         current_block['text'] = new_raw
                         self.update_display()
                         self.mark_unsaved_changes()
-                    
+
         if was_playing and self.auto_pause_enabled:
             if self.audio_player:
                 self.audio_player.play()
@@ -3225,18 +3593,16 @@ Engineered with DeepSeek V3.2
             symbol = f"({seconds:.1f})"
 
             current_block = self.srt_blocks[self.current_block_index]
-            dialog = PlacementDialog(current_block['raw_text'], symbol, self)
+            dialog = PlacementDialog(current_block['raw_text'], symbol, self, cjk_mode=self.cjk_mode)
 
             if dialog.exec_() == QDialog.Accepted:
-                if dialog.create_new_line:
-                    self.create_new_block_with_symbol(symbol)
+                self.push_undo()
+                create_new, result = dialog.get_result()
+                if create_new:
+                    self.create_new_block_with_symbol(result)
                 else:
-                    pos = dialog.placement_position
-                    new_raw = (current_block['raw_text'][:pos] + " " + symbol +
-                                           " " + current_block['raw_text'][pos:]).strip()
-                    current_block['raw_text'] = new_raw
-                    current_block['text'] = new_raw
-
+                    current_block['raw_text'] = result
+                    current_block['text'] = result
                 self.update_display()
                 self.mark_unsaved_changes()
 
@@ -3255,25 +3621,23 @@ Engineered with DeepSeek V3.2
                 self.audio_player.pause()
 
         current_block = self.srt_blocks[self.current_block_index]
-        dialog = PlacementDialog(current_block['raw_text'], symbol, self)
+        dialog = PlacementDialog(current_block['raw_text'], symbol, self, cjk_mode=self.cjk_mode)
 
         if dialog.exec_() == QDialog.Accepted:
-            if dialog.create_new_line:
-                self.create_new_block_with_symbol(symbol)
+            self.push_undo()
+            create_new, result = dialog.get_result()
+            if create_new:
+                self.create_new_block_with_symbol(result)
             else:
-                pos = dialog.placement_position
-                new_raw = (current_block['raw_text'][:pos] + " " + symbol +
-                                       " " + current_block['raw_text'][pos:]).strip()
-                current_block['raw_text'] = new_raw
-                current_block['text'] = new_raw
-
+                current_block['raw_text'] = result
+                current_block['text'] = result
             self.update_display()
             self.mark_unsaved_changes()
 
         if was_playing and self.auto_pause_enabled:
             if self.audio_player:
                 self.audio_player.play()
-                
+                    
     def handle_comment(self):
         was_playing = False
         if self.auto_pause_enabled and self.is_playing:
@@ -3286,18 +3650,16 @@ Engineered with DeepSeek V3.2
             comment = dialog.get_comment()
             if comment:
                 current_block = self.srt_blocks[self.current_block_index]
-                placement_dialog = PlacementDialog(current_block['raw_text'], comment, self)
+                placement_dialog = PlacementDialog(current_block['raw_text'], comment, self, cjk_mode=self.cjk_mode)
 
                 if placement_dialog.exec_() == QDialog.Accepted:
-                    if placement_dialog.create_new_line:
-                        self.create_new_block_with_symbol(comment)
+                    self.push_undo()
+                    create_new, result = placement_dialog.get_result()
+                    if create_new:
+                        self.create_new_block_with_symbol(result)
                     else:
-                        pos = placement_dialog.placement_position
-                        new_raw = (current_block['raw_text'][:pos] + " " + comment +
-                                               " " + current_block['raw_text'][pos:]).strip()
-                        current_block['raw_text'] = new_raw
-                        current_block['text'] = new_raw
-
+                        current_block['raw_text'] = result
+                        current_block['text'] = result
                     self.update_display()
                     self.mark_unsaved_changes()
 
@@ -3324,6 +3686,7 @@ Engineered with DeepSeek V3.2
                 action_text, ok = QInputDialog.getText(self, "Action Description",
                                                      f"Describe the action for '{selected_text}':")
                 if ok and action_text:
+                    self.push_undo()
                     before_text = current_block['raw_text'][:start_pos]
                     after_text = current_block['raw_text'][end_pos:]
                     new_raw = f"{before_text}<<{action_text}> {selected_text}>{after_text}"
@@ -3370,6 +3733,7 @@ Engineered with DeepSeek V3.2
                 if prev_dialog.exec_() == QDialog.Accepted:
                     prev_start, prev_end, prev_selected = prev_dialog.get_selection()
                     if prev_selected:
+                        self.push_undo()
                         # Modify previous block: insert brackets around the overlapping text
                         prev_before = prev_block['raw_text'][:prev_start]
                         prev_after = prev_block['raw_text'][prev_end:]
@@ -3397,6 +3761,7 @@ Engineered with DeepSeek V3.2
         """Insert an empty line after current block and try to set timestamps from neighbors."""
         if not self.srt_blocks:
             return
+        self.push_undo()
 
         current_idx = self.current_block_index
         current_block = self.srt_blocks[current_idx]
@@ -3504,7 +3869,10 @@ Engineered with DeepSeek V3.2
                     wrap_enabled=settings['wrap_enabled'],
                     wrap_length=settings['wrap_length'],
                     character_wrap=settings['character_wrap'],
-                    add_blank_line=settings.get('add_blank_line', False)
+                    add_blank_line=settings.get('add_blank_line', False),
+                    concatenate_turns=settings.get('concatenate_turns', False),
+                    delimiter_choice=settings.get('delimiter_choice', 'space'),
+                    custom_delimiter=settings.get('custom_delimiter', '')
                 )
 
             self.final_export(transcript_text, settings, project_info, unassigned_handling)
@@ -3514,172 +3882,247 @@ Engineered with DeepSeek V3.2
                                  timestamp_style="hash", custom_pattern=None,
                                  convention="gat2", include_diarization=True,
                                  wrap_enabled=False, wrap_length=80, character_wrap=False,
-                                 add_blank_line=False):   # new parameter
+                                 add_blank_line=False,
+                                 concatenate_turns=False, delimiter_choice="space", custom_delimiter=""):
         if convention == "dresing_pehl":
             return self.generate_dresing_pehl_text(
                 include_timestamps, timestamp_style, custom_pattern, include_diarization,
-                add_blank_line)                           # pass it
+                add_blank_line, concatenate_turns, delimiter_choice, custom_delimiter)
         elif convention == "tiq":
             return self.generate_tiq_text(
                 include_timestamps, timestamp_style, custom_pattern, include_diarization,
-                wrap_enabled, wrap_length, character_wrap, add_blank_line)
+                wrap_enabled, wrap_length, character_wrap, add_blank_line,
+                concatenate_turns, delimiter_choice, custom_delimiter)
         else:  # gat2
             return self.generate_gat2_text(
                 include_timestamps, timestamp_style, custom_pattern, include_diarization,
-                wrap_enabled, wrap_length, character_wrap, add_blank_line)
+                wrap_enabled, wrap_length, character_wrap, add_blank_line,
+                concatenate_turns, delimiter_choice, custom_delimiter)
         
     def generate_gat2_text(self, include_timestamps=True,
                            timestamp_style="curly", custom_pattern=None,
                            include_diarization=True,
                            wrap_enabled=False, wrap_length=80, character_wrap=False,
-                           add_blank_line=False):
+                           add_blank_line=False,
+                           concatenate_turns=False, delimiter_choice="default", custom_delimiter=""):
         if not self.srt_blocks:
             return ""
 
-        # Filter blocks: keep assigned or special
-        included_blocks = [b for b in self.srt_blocks
-                           if b['speaker'] is not None or b.get('is_pause')
-                           or b.get('is_comment') or b.get('is_empty')]
-        if not included_blocks:
-            return ""
+        # Determine delimiter
+        if delimiter_choice == "default":
+            delimiter = " " if not self.cjk_mode else ""
+        elif delimiter_choice == "custom":
+            delimiter = custom_delimiter
+        else:
+            delimiter = " "
 
-        # Determine max speaker label length
-        max_speaker_length = 2
-        for b in included_blocks:
-            if b['speaker'] is not None and b.get('is_turn_start', True):
-                speaker_label = self.speakers[b['speaker']] + ":"
+        # Helper to decide which blocks to include
+        def is_valid_block(b):
+            # Keep if assigned, or if it's a pause/comment block (even if unassigned)
+            return (b['speaker'] is not None) or b.get('is_pause') or b.get('is_comment')
+
+        if concatenate_turns:
+            # Group into turns – this automatically only includes speaker blocks
+            turns = self._group_into_turns(include_timestamps)
+            if not turns:
+                return ""
+
+            # Determine max speaker label length
+            max_speaker_length = 2
+            for turn in turns:
+                speaker_label = self.speakers[turn['speaker']] + ":"
                 max_speaker_length = max(max_speaker_length, len(speaker_label))
 
-        total_lines = len(included_blocks)
-        line_digits = len(str(total_lines))
+            total_turns = len(turns)
+            line_digits = len(str(total_turns))
 
-        # Pre‑compute timestamp width only if timestamps are included
-        if include_timestamps:
-            ts_width = self.get_timestamp_width(timestamp_style, custom_pattern)
-            timestamp_padding = " " * (ts_width + 3)   # three spaces after timestamp
-        else:
-            timestamp_padding = ""   # not used when timestamps disabled
-
-        output_lines = []
-
-        for i, block in enumerate(included_blocks):
-            line_num = i + 1
-            line_number_part = f"{line_num:0{line_digits}d}   "
-
-            # Speaker part
-            if block.get('is_turn_start', True) and block['speaker'] is not None:
-                speaker_part = self.speakers[block['speaker']] + ":"
-                speaker_part = speaker_part.ljust(max_speaker_length) + "   "
-            else:
-                speaker_part = " " * (max_speaker_length + 3)
-
-            # Timestamp part
+            # Pre‑compute timestamp width if needed
             if include_timestamps:
-                if block.get('is_turn_start', True) and block['speaker'] is not None:
-                    if block.get('start_time'):
-                        seconds = self.time_to_seconds(block['start_time'])
+                ts_width = self.get_timestamp_width(timestamp_style, custom_pattern)
+                timestamp_padding = " " * (ts_width + 3)
+            else:
+                timestamp_padding = ""
+
+            output_lines = []
+
+            for turn_idx, turn in enumerate(turns, start=1):
+                # Build turn text from all blocks in the turn
+                turn_text = delimiter.join(
+                    self.replace_indent_placeholders(b['raw_text'], for_export=True).strip()
+                    for b in turn['blocks'] if b['text'].strip()
+                )
+                if not turn_text:
+                    continue
+
+                line_num_part = f"{turn_idx:0{line_digits}d}   "
+
+                # Timestamp part
+                if include_timestamps:
+                    if turn.get('start_time'):
+                        seconds = self.time_to_seconds(turn['start_time'])
                         ts = self.format_timestamp(seconds, timestamp_style, custom_pattern)
                         timestamp = f"{ts}   "
                     else:
-                        timestamp = timestamp_padding   # missing timestamp placeholder
+                        timestamp = timestamp_padding
                 else:
-                    timestamp = timestamp_padding       # continuation lines align
-            else:
-                timestamp = ""   # no timestamp at all
+                    timestamp = ""
 
-            left_part = timestamp + line_number_part + speaker_part
+                speaker_part = self.speakers[turn['speaker']] + ":"
+                speaker_part = speaker_part.ljust(max_speaker_length) + "   "
+                left_part = timestamp + line_num_part + speaker_part
 
-            # Replace placeholders for export
-            text = self.replace_indent_placeholders(block['raw_text'], for_export=True)
+                if wrap_enabled and wrap_length > 0:
+                    available_width = wrap_length - len(left_part)
+                    if available_width < 10:
+                        available_width = 40
+                    lines = self.wrap_text(turn_text, available_width, character_wrap, first_line_only_indent=True)
+                    for idx, line in enumerate(lines):
+                        if idx == 0:
+                            output_lines.append(left_part + line)
+                        else:
+                            output_lines.append(' ' * len(left_part) + line)
+                else:
+                    output_lines.append(left_part + turn_text)
 
-            # Add block text (possibly wrapped)
-            if wrap_enabled and wrap_length > 0:
-                available_width = wrap_length - len(left_part)
-                if available_width < 10:
-                    available_width = 40
-                lines = self.wrap_text(text, available_width, character_wrap, first_line_only_indent=True)
-                for idx, line in enumerate(lines):
-                    if idx == 0:
-                        output_lines.append(left_part + line)
-                    else:
-                        output_lines.append(' ' * len(left_part) + line)
-            else:
-                output_lines.append(left_part + text)
-
-            # Check for turn end and add blank line if requested
-            is_last = (i == len(included_blocks) - 1)
-            next_block = included_blocks[i+1] if not is_last else None
-            if not is_last and next_block and next_block.get('speaker') != block.get('speaker'):
                 if add_blank_line:
-                    output_lines.append("")   # blank line, no numbering
+                    output_lines.append("")
 
-        return '\n'.join(output_lines)
+            return '\n'.join(output_lines)
 
+        else:
+            # Original block‑by‑block output, but skip unassigned non‑pause blocks
+            included_blocks = [b for b in self.srt_blocks if is_valid_block(b)]
+            if not included_blocks:
+                return ""
+
+            # Determine max speaker label length
+            max_speaker_length = 2
+            for b in included_blocks:
+                if b['speaker'] is not None and b.get('is_turn_start', True):
+                    speaker_label = self.speakers[b['speaker']] + ":"
+                    max_speaker_length = max(max_speaker_length, len(speaker_label))
+
+            total_lines = len(included_blocks)
+            line_digits = len(str(total_lines))
+
+            if include_timestamps:
+                ts_width = self.get_timestamp_width(timestamp_style, custom_pattern)
+                timestamp_padding = " " * (ts_width + 3)
+            else:
+                timestamp_padding = ""
+
+            output_lines = []
+
+            for i, block in enumerate(included_blocks):
+                line_num = i + 1
+                line_number_part = f"{line_num:0{line_digits}d}   "
+
+                if block.get('is_turn_start', True) and block['speaker'] is not None:
+                    speaker_part = self.speakers[block['speaker']] + ":"
+                    speaker_part = speaker_part.ljust(max_speaker_length) + "   "
+                else:
+                    speaker_part = " " * (max_speaker_length + 3)
+
+                if include_timestamps:
+                    if block.get('is_turn_start', True) and block['speaker'] is not None:
+                        if block.get('start_time'):
+                            seconds = self.time_to_seconds(block['start_time'])
+                            ts = self.format_timestamp(seconds, timestamp_style, custom_pattern)
+                            timestamp = f"{ts}   "
+                        else:
+                            timestamp = timestamp_padding
+                    else:
+                        timestamp = timestamp_padding
+                else:
+                    timestamp = ""
+
+                left_part = timestamp + line_number_part + speaker_part
+                text = self.replace_indent_placeholders(block['raw_text'], for_export=True)
+
+                if wrap_enabled and wrap_length > 0:
+                    available_width = wrap_length - len(left_part)
+                    if available_width < 10:
+                        available_width = 40
+                    lines = self.wrap_text(text, available_width, character_wrap, first_line_only_indent=True)
+                    for idx, line in enumerate(lines):
+                        if idx == 0:
+                            output_lines.append(left_part + line)
+                        else:
+                            output_lines.append(' ' * len(left_part) + line)
+                else:
+                    output_lines.append(left_part + text)
+
+                # Check for turn end and add blank line if requested (only in block mode)
+                is_last = (i == len(included_blocks) - 1)
+                next_block = included_blocks[i+1] if not is_last else None
+                if not is_last and next_block and next_block.get('speaker') != block.get('speaker'):
+                    if add_blank_line:
+                        output_lines.append("")
+
+            return '\n'.join(output_lines)
+    
     def generate_dresing_pehl_text(self, include_timestamps=True,
                                    timestamp_style="hash", custom_pattern=None,
-                                   include_diarization=True, add_blank_line=False):
-        """Generate Dresing & Pehl format transcript (sociological interviews)."""
+                                   include_diarization=True, add_blank_line=False,
+                                   concatenate_turns=True,   # ignored
+                                   delimiter_choice="space", custom_delimiter=""):
         if not self.srt_blocks:
             return ""
 
-        turns = []
-        current_turn = None
-
-        for block in self.srt_blocks:
-            if block.get('is_pause') or block.get('is_comment') or block.get('is_empty'):
-                continue
-            if block['speaker'] is None:
-                continue
-
-            speaker_label = self.speakers[block['speaker']]
-
-            if current_turn is None or current_turn['speaker'] != speaker_label or block.get('is_turn_start', True):
-                if current_turn is not None:
-                    turns.append(current_turn)
-
-                current_turn = {
-                    'speaker': speaker_label,
-                    'blocks': [],
-                    'start_time': block['start_time'] if include_timestamps else None,
-                    'end_time': block['end_time'] if include_timestamps else None
-                }
-
-            current_turn['blocks'].append(block)
-            if include_timestamps and block['end_time']:
-                current_turn['end_time'] = block['end_time']
-
-        if current_turn is not None:
-            turns.append(current_turn)
-
+        if delimiter_choice == "default":
+            delimiter = " " if not self.cjk_mode else ""
+        elif delimiter_choice == "custom":
+            delimiter = " "
+            
+        # Use ordered segments
+        segments = self._build_ordered_segments(include_timestamps)
         output_lines = []
         output_lines.append("")  # blank line at top
 
-        for turn in turns:
-            # Concatenate all block texts, replacing placeholders with spaces for export
-            turn_text = " ".join(
-                self.replace_indent_placeholders(b['raw_text'], for_export=True).strip()
-                for b in turn['blocks']
-            )
+        for seg in segments:
+            if seg['type'] == 'turn':
+                # Concatenate all block texts in the turn using delimiter
+                turn_text = delimiter.join(
+                    self.replace_indent_placeholders(b['raw_text'], for_export=True).strip()
+                    for b in seg['blocks'] if b['text'].strip()
+                )
+                if not turn_text:
+                    continue
 
-            if include_diarization:
-                line = f"{turn['speaker']}: {turn_text}"
-            else:
-                line = turn_text
+                if include_diarization:
+                    line = f"{self.speakers[seg['speaker']]}: {turn_text}"
+                else:
+                    line = turn_text
 
-            if include_timestamps and turn['start_time']:
-                seconds = self.time_to_seconds(turn['start_time'])
-                ts = self.format_timestamp(seconds, timestamp_style, custom_pattern)
-                line += f" {ts}"
+                if include_timestamps and seg['start_time']:
+                    seconds = self.time_to_seconds(seg['start_time'])
+                    ts = self.format_timestamp(seconds, timestamp_style, custom_pattern)
+                    line += f" {ts}"
 
-            output_lines.append(line)
-            if add_blank_line:
-                output_lines.append("")   # blank line after turn
+                output_lines.append(line)
+                if add_blank_line:
+                    output_lines.append("")
+
+            else:  # special block
+                block = seg['block']
+                # Skip unassigned blocks that are not pause/comment
+                if block['speaker'] is None and not block.get('is_pause') and not block.get('is_comment'):
+                    continue
+                if block.get('is_empty'):
+                    output_lines.append("")
+                    continue
+                text = self.replace_indent_placeholders(block['raw_text'], for_export=True).strip()
+                if text:
+                    output_lines.append(text)
+                    if add_blank_line:
+                        output_lines.append("")
 
         return '\n'.join(output_lines)
     
     def _group_into_turns(self, include_timestamps=False):
-        """Group blocks by speaker turns, ignoring pause/comment blocks.
-        Returns list of turns with keys: speaker, blocks, start_time, end_time."""
+        """Group consecutive blocks with the same speaker into turns.
+        Returns list of turns, each with keys: speaker (index), blocks, start_time, end_time.
+        """
         turns = []
         current_turn = None
         for block in self.srt_blocks:
@@ -3688,12 +4131,12 @@ Engineered with DeepSeek V3.2
             if block['speaker'] is None:
                 continue
 
-            speaker_label = self.speakers[block['speaker']]
-            if current_turn is None or current_turn['speaker'] != speaker_label or block.get('is_turn_start', True):
+            speaker_idx = block['speaker']   # integer, not the label string
+            if current_turn is None or current_turn['speaker'] != speaker_idx or block.get('is_turn_start', True):
                 if current_turn is not None:
                     turns.append(current_turn)
                 current_turn = {
-                    'speaker': speaker_label,
+                    'speaker': speaker_idx,
                     'blocks': [],
                     'start_time': block['start_time'] if include_timestamps else None
                 }
@@ -3703,37 +4146,28 @@ Engineered with DeepSeek V3.2
         if current_turn is not None:
             turns.append(current_turn)
         return turns
-    
+
+
     def generate_tiq_text(self, include_timestamps=True,
                           timestamp_style="hash", custom_pattern=None,
                           include_diarization=True,
                           wrap_enabled=False, wrap_length=80, character_wrap=False,
-                          add_blank_line=False):
-        """Generate TiQ format transcript.
-        - Each speaker turn is a single logical line (concatenated blocks).
-        - After wrapping, each physical display line gets a line number.
-        - Speaker label only on the first display line of a turn.
-        - Timestamp only on the last display line of a turn.
-        - Special blocks (pauses, comments) are separate logical lines.
-        """
+                          add_blank_line=False,
+                          concatenate_turns=True,   # ignored
+                          delimiter_choice="space", custom_delimiter=""):
+        """Generate TiQ format transcript – pause symbols are atomic except when character wrap is forced."""
         if not self.srt_blocks:
             return ""
 
-        # Filter blocks: keep assigned or special
-        included_blocks = []
-        for block in self.srt_blocks:
-            if block['speaker'] is not None or block.get('is_pause') or block.get('is_comment') or block.get('is_empty'):
-                included_blocks.append(block)
-        if not included_blocks:
-            return ""
+        # Determine delimiter
+        if delimiter_choice == "default":
+            delimiter = " " if not self.cjk_mode else ""
+        elif delimiter_choice == "custom":
+            delimiter = custom_delimiter
+        else:
+            delimiter = " "
 
-        # Group speaker blocks into turns
-        turns = self._group_into_turns(include_timestamps)  # returns list of dicts with 'speaker', 'blocks', 'start_time'
-
-        # Separate special blocks (pauses, comments, empty) – they will be handled individually
-        special_blocks = [b for b in included_blocks if b['speaker'] is None]
-
-        # Determine max speaker label width (for padding)
+        # Max speaker label width
         max_speaker_width = 0
         if include_diarization:
             for speaker in self.speakers:
@@ -3742,85 +4176,189 @@ Engineered with DeepSeek V3.2
         else:
             max_speaker_width = 0
 
-        # First pass: generate content lines (without line numbers)
-        content_lines = []  # list of strings (actual text, with prefixes and timestamps)
+        segments = self._build_ordered_segments(include_timestamps)
+        content_lines = []
 
-        # Process turns
-        for turn in turns:
-            turn_text = " ".join(
-                self.replace_indent_placeholders(b['raw_text'], for_export=True)
-                for b in turn['blocks'] if b['text'].strip()
-            )
-            if not turn_text:
-                continue
+        for seg in segments:
+            if seg['type'] == 'turn':
+                # Build turn text using delimiter
+                turn_text = delimiter.join(
+                    self.replace_indent_placeholders(b['raw_text'], for_export=True)
+                    for b in seg['blocks'] if b['text'].strip()
+                )
+                if not turn_text:
+                    continue
 
-            # Prepare speaker prefix for first line
-            if include_diarization:
-                speaker_prefix = f"{turn['speaker']}: ".ljust(max_speaker_width)
-            else:
-                speaker_prefix = " " * max_speaker_width
+                # Timestamp token (including leading space)
+                ts_token = ""
+                if include_timestamps and seg.get('start_time'):
+                    seconds = self.time_to_seconds(seg['start_time'])
+                    ts = self.format_timestamp(seconds, timestamp_style, custom_pattern)
+                    ts_token = " " + ts
 
-            # Wrap the turn text (without timestamp)
-            if wrap_enabled and wrap_length > 0:
-                text_width = wrap_length - len(speaker_prefix) - 5
-                if text_width < 10:
-                    text_width = 40
-                wrapped_lines = self.wrap_text(turn_text, text_width, character_wrap, first_line_only_indent=True)
-            else:
-                wrapped_lines = [turn_text]
-
-            # Build display lines
-            for idx, line in enumerate(wrapped_lines):
-                if idx == 0:
-                    display_line = speaker_prefix + line
+                # Speaker prefix for first line
+                if include_diarization:
+                    speaker_prefix = f"{self.speakers[seg['speaker']]}: ".ljust(max_speaker_width)
                 else:
-                    display_line = " " * len(speaker_prefix) + line
-                content_lines.append(display_line)
+                    speaker_prefix = " " * max_speaker_width
 
-            # Add timestamp to the last line of this turn
-            if include_timestamps and turn.get('start_time'):
-                seconds = self.time_to_seconds(turn['start_time'])
-                ts = self.format_timestamp(seconds, timestamp_style, custom_pattern)
-                content_lines[-1] += " " + ts
-                
-            # After turn, optionally add a blank line (which will be numbered later)
-            if add_blank_line:
-                content_lines.append("")   # will receive a line number in the final pass
-                
-        # Process special blocks (each gets its own line, no speaker label)
-        for block in special_blocks:
-            text = self.replace_indent_placeholders(block['raw_text'], for_export=True).strip()
-            if not text:
-                continue
-            # No speaker label, just spaces for alignment
-            speaker_padding = " " * max_speaker_width
-            if wrap_enabled and wrap_length > 0:
-                placeholder_width = 5
-                text_width = wrap_length - placeholder_width - len(speaker_padding)
-                if text_width < 10:
-                    text_width = 40
-                wrapped = self.wrap_text(text, text_width, character_wrap)
-                for idx, line in enumerate(wrapped):
-                    if idx == 0:
-                        display_line = speaker_padding + line
+                # Estimate line number width (safe maximum)
+                line_num_width = 4  # up to 9999 lines
+                line_num_padding = line_num_width + 1  # space after number
+
+                # Available width for content (text + timestamp) on a line
+                content_width = wrap_length - line_num_padding - len(speaker_prefix)
+
+                if wrap_enabled and wrap_length > 0 and content_width > 10:
+                    # Choose tokenization strategy
+                    if character_wrap:
+                        # Character‑based: treat every character as a token (pause symbols will split)
+                        tokens = list(turn_text)
+                    elif self.cjk_mode:
+                        # CJK mode: characters are atomic, but pause symbols should remain whole
+                        tokens = self._tokenize_cjk_with_pauses(turn_text)
                     else:
-                        display_line = " " * len(speaker_padding) + line
-                    content_lines.append(display_line)
-            else:
-                display_line = speaker_padding + text
-                content_lines.append(display_line)
+                        # Latin mode: word‑based with pause symbols atomic
+                        tokens = self._tokenize_with_pauses(turn_text)
 
-        # Now we have all content lines. Determine required line number width
+                    if ts_token:
+                        tokens.append(ts_token)
+
+                    # Greedy line filling with leading space skipping
+                    lines = []
+                    current_line = ""
+                    for token in tokens:
+                        if not token:
+                            continue
+                        if len(current_line + token) > content_width:
+                            if current_line:
+                                lines.append(current_line)
+                                current_line = ""
+                            # Skip leading space token
+                            if token.isspace():
+                                continue
+                            # If token too long, split
+                            if len(token) > content_width:
+                                for i in range(0, len(token), content_width):
+                                    chunk = token[i:i+content_width]
+                                    if chunk:
+                                        if i == 0:
+                                            current_line = chunk
+                                        else:
+                                            lines.append(chunk)
+                                current_line = ""
+                            else:
+                                current_line = token
+                        else:
+                            current_line += token
+
+                    if current_line:
+                        lines.append(current_line)
+
+                    # Apply speaker prefix
+                    for idx, line in enumerate(lines):
+                        if idx == 0:
+                            content_lines.append(speaker_prefix + line)
+                        else:
+                            content_lines.append(" " * len(speaker_prefix) + line)
+                else:
+                    # No wrapping: one line with timestamp appended
+                    line = speaker_prefix + turn_text
+                    if ts_token:
+                        line += ts_token
+                    content_lines.append(line)
+
+                if add_blank_line:
+                    content_lines.append("")
+
+            else:  # special block
+                block = seg['block']
+                if block['speaker'] is None and not block.get('is_pause') and not block.get('is_comment'):
+                    continue
+                if block.get('is_empty'):
+                    content_lines.append("")
+                    continue
+                text = self.replace_indent_placeholders(block['raw_text'], for_export=True).strip()
+                if not text:
+                    continue
+
+                speaker_padding = " " * max_speaker_width
+                if wrap_enabled and wrap_length > 0:
+                    line_num_width = 4
+                    line_num_padding = line_num_width + 1
+                    content_width = wrap_length - line_num_padding - len(speaker_padding)
+                    if content_width > 10:
+                        # Tokenize special block similarly
+                        if character_wrap:
+                            tokens = list(text)
+                        elif self.cjk_mode:
+                            tokens = self._tokenize_cjk_with_pauses(text)
+                        else:
+                            tokens = self._tokenize_with_pauses(text)
+
+                        lines = []
+                        current_line = ""
+                        for token in tokens:
+                            if not token:
+                                continue
+                            if len(current_line + token) > content_width:
+                                if current_line:
+                                    lines.append(current_line)
+                                    current_line = ""
+                                if token.isspace():
+                                    continue
+                                if len(token) > content_width:
+                                    for i in range(0, len(token), content_width):
+                                        chunk = token[i:i+content_width]
+                                        if chunk:
+                                            if i == 0:
+                                                current_line = chunk
+                                            else:
+                                                lines.append(chunk)
+                                    current_line = ""
+                                else:
+                                    current_line = token
+                            else:
+                                current_line += token
+                        if current_line:
+                            lines.append(current_line)
+
+                        for idx, line in enumerate(lines):
+                            if idx == 0:
+                                content_lines.append(speaker_padding + line)
+                            else:
+                                content_lines.append(" " * len(speaker_padding) + line)
+                    else:
+                        content_lines.append(speaker_padding + text)
+                else:
+                    content_lines.append(speaker_padding + text)
+
+        # Add line numbers
         total_lines = len(content_lines)
         line_digits = len(str(total_lines))
-
-        # Second pass: add line numbers to each content line
         output_lines = []
         for idx, line in enumerate(content_lines, start=1):
             line_num = f"{idx:0{line_digits}d}"
             output_lines.append(f"{line_num} {line}")
 
         return '\n'.join(output_lines)
+        
+
+    def _tokenize_cjk_with_pauses(self, text):
+        """Split CJK text into tokens: either a single character, or a whole pause symbol."""
+        tokens = []
+        i = 0
+        while i < len(text):
+            # Try to match a pause symbol starting at i
+            m = self.pause_pattern.match(text, i)
+            if m:
+                tokens.append(m.group())
+                i = m.end()
+            else:
+                tokens.append(text[i])
+                i += 1
+        return tokens
+
 
     def time_to_seconds(self, time_str):
         """Convert time string to seconds with milliseconds as decimal."""

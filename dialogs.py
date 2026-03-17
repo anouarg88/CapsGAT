@@ -8,7 +8,7 @@ from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QDialogButtonBox,
     QPushButton, QLineEdit, QWidget, QMessageBox, QComboBox, QStackedWidget,
     QScrollArea, QFrame, QSizePolicy, QGridLayout, QFileDialog, QCheckBox,
-    QRadioButton, QGroupBox, QSpinBox, QPlainTextEdit, QShortcut, QFontDialog, QFormLayout
+    QRadioButton, QGroupBox, QSpinBox, QDoubleSpinBox, QPlainTextEdit, QShortcut, QFontDialog, QFormLayout
 )
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QFont, QKeySequence
@@ -358,6 +358,107 @@ class EditTimestampsDialog(QDialog):
         end = f"{self.end_h.value():02d}:{self.end_m.value():02d}:{self.end_s.value():02d},{self.end_ms.value():03d}"
         return start, end
     
+class InsertPausesDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.init_ui()
+
+    def init_ui(self):
+        self.setWindowTitle("Insert Pause Symbols for Gaps")
+        self.setGeometry(300, 300, 500, 300)
+
+        layout = QVBoxLayout(self)
+
+        # Convention
+        form_layout = QFormLayout()
+        self.convention_combo = QComboBox()
+        self.convention_combo.addItems(["GAT2", "Dresing & Pehl", "TiQ"])
+        form_layout.addRow("Transcription convention:", self.convention_combo)
+
+        # Measured pauses
+        self.measured_check = QCheckBox("Use measured pauses for gaps longer than")
+        self.measured_spin = QSpinBox()
+        self.measured_spin.setRange(1, 60)
+        self.measured_spin.setValue(2)
+        self.measured_spin.setSuffix(" seconds")
+        self.measured_check.toggled.connect(self.measured_spin.setEnabled)
+        self.measured_spin.setEnabled(False)
+
+        measured_layout = QHBoxLayout()
+        measured_layout.addWidget(self.measured_check)
+        measured_layout.addWidget(self.measured_spin)
+        measured_layout.addStretch()
+        form_layout.addRow(measured_layout)
+
+        # Minimum gap
+        self.min_gap_spin = QDoubleSpinBox()
+        self.min_gap_spin.setRange(0.0, 10.0)
+        self.min_gap_spin.setSingleStep(0.1)
+        self.min_gap_spin.setValue(0.1)
+        self.min_gap_spin.setSuffix(" seconds")
+        form_layout.addRow("Minimum gap to consider:", self.min_gap_spin)
+
+        # Insert mode
+        mode_group = QGroupBox("Insert pauses")
+        mode_layout = QVBoxLayout()
+
+        self.separate_radio = QRadioButton("On separate lines")
+        self.attach_radio = QRadioButton("At the beginning of the following segment")
+        self.threshold_radio = QRadioButton("Separately if gap ≥")
+        self.threshold_spin = QDoubleSpinBox()
+        self.threshold_spin.setRange(0.1, 60.0)
+        self.threshold_spin.setValue(4.0)
+        self.threshold_spin.setSuffix(" seconds")
+        self.threshold_radio.toggled.connect(self.threshold_spin.setEnabled)
+        self.threshold_spin.setEnabled(False)
+
+        self.separate_radio.setChecked(True)
+
+        mode_layout.addWidget(self.separate_radio)
+        mode_layout.addWidget(self.attach_radio)
+        threshold_row = QHBoxLayout()
+        threshold_row.addWidget(self.threshold_radio)
+        threshold_row.addWidget(self.threshold_spin)
+        threshold_row.addStretch()
+        mode_layout.addLayout(threshold_row)
+
+        mode_group.setLayout(mode_layout)
+        form_layout.addRow(mode_group)
+
+        layout.addLayout(form_layout)
+
+        # Info label
+        info = QLabel("Pauses will be inserted between existing segments based on gaps in timestamps.")
+        info.setWordWrap(True)
+        info.setStyleSheet("color: #555; font-size: 11px;")
+        layout.addWidget(info)
+
+        # Buttons
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+    def get_settings(self):
+        if self.separate_radio.isChecked():
+            mode = "separate"
+            threshold = 0
+        elif self.attach_radio.isChecked():
+            mode = "attach"
+            threshold = 0
+        else:
+            mode = "threshold"
+            threshold = self.threshold_spin.value()
+
+        return {
+            'convention': self.convention_combo.currentText().lower().replace(' & ', '_'),
+            'use_measured': self.measured_check.isChecked(),
+            'measured_threshold': self.measured_spin.value(),
+            'min_gap': self.min_gap_spin.value(),
+            'mode': mode,
+            'threshold': threshold
+        }
+
 class SymbolCategory:
     def __init__(self, name, symbols, descriptions=None):
         self.name = name
@@ -986,63 +1087,6 @@ class CommentDialog(QDialog):
         
     def get_comment(self):
         return f"(({self.comment_edit.text()}))"
-
-# class EditDialog(QDialog):
-#     def __init__(self, current_text, parent=None):
-#         super().__init__(parent)
-#         self.current_text = current_text
-#         self.init_ui()
-#         
-#     def init_ui(self):
-#         self.setWindowTitle("Edit Segment Content")
-#         self.setGeometry(300, 300, 600, 150)
-#         
-#         layout = QVBoxLayout(self)
-#         
-#         instructions = QLabel("Edit the segment content (Enter to confirm, Escape to cancel):")
-#         instructions.setStyleSheet("font-weight: bold;")
-#         layout.addWidget(instructions)
-#         
-#         self.text_edit = QLineEdit()
-#         self.text_edit.setText(self.current_text)
-#         self.text_edit.setStyleSheet("""
-#             QLineEdit {
-#                 font-family: monospace;
-#                 font-size: 14px;
-#                 padding: 8px;
-#                 border: 2px solid #ccc;
-#                 border-radius: 5px;
-#             }
-#             QLineEdit:focus {
-#                 border: 2px solid #4a90e2;
-#             }
-#         """)
-#         
-#         self.text_edit.returnPressed.connect(self.accept)
-#         
-#         layout.addWidget(self.text_edit)
-#         
-#         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-#         button_box.accepted.connect(self.accept)
-#         button_box.rejected.connect(self.reject)
-#         
-#         for button in button_box.buttons():
-#             button.setFocusPolicy(Qt.NoFocus)
-#             
-#         layout.addWidget(button_box)
-#         
-#         self.text_edit.setFocus()
-#         self.text_edit.selectAll()
-#         
-#     def keyPressEvent(self, event):
-#         if event.key() == Qt.Key_Escape:
-#             self.reject()
-#             event.accept()
-#         else:
-#             super().keyPressEvent(event)
-#     
-#     def get_text(self):
-#         return self.text_edit.text()
     
 class RichEditDialog(QDialog):
     """Enhanced edit dialog with bold/italic/underline buttons and shortcuts."""
@@ -1388,52 +1432,13 @@ class ExportPreviewDialog(QDialog):
         convention_layout.addWidget(self.convention_combo)
         convention_layout.addStretch()
 
-        # ----- Line wrapping group -----
-        self.wrap_group = QGroupBox("Line Wrapping")
-        wrap_layout = QHBoxLayout()
+        # ---------- Create all widgets first ----------
 
-        self.wrap_check = QCheckBox("Wrap lines at:")
-        self.wrap_spin = QSpinBox()
-        self.wrap_spin.setRange(30, 200)
-        self.wrap_spin.setValue(60)
-        self.wrap_spin.setSuffix(" characters")
-        self.wrap_spin.setEnabled(False)
-
-        self.character_wrap_check = QCheckBox("Force character‑based wrapping")
-        self.character_wrap_check.setEnabled(False)
-
-        wrap_layout.addWidget(self.wrap_check)
-        wrap_layout.addWidget(self.wrap_spin)
-        wrap_layout.addWidget(self.character_wrap_check)
-        wrap_layout.addStretch()
-        self.wrap_group.setLayout(wrap_layout)
-
-        # ----- Options group -----
-        options_group = QGroupBox("Export Options")
-        options_layout = QVBoxLayout()
-
-        # First, create all option checkboxes
+        # Timestamp widgets
         self.timestamp_check = QCheckBox("Include timestamps")
         self.timestamp_check.setChecked(self.include_timestamps)
         self.timestamp_check.setEnabled(self.include_timestamps)
 
-        self.diarization_check = QCheckBox("Include diarization (speaker labels)")
-        self.diarization_check.setChecked(True)
-
-        self.blank_line_check = QCheckBox("Add empty line after every speaker turn")
-        self.blank_line_check.setChecked(False)  # default, will be overridden by convention
-        
-
-        self.title_check = QCheckBox("Include project title")
-        self.title_check.setChecked(True)
-
-        self.memo_check = QCheckBox("Include project memo")
-        self.memo_check.setChecked(True)
-
-        self.audio_check = QCheckBox("Include audio file path")
-        self.audio_check.setChecked(True)
-
-        # ----- Timestamp format widgets (placed inside a container widget) -----
         self.ts_format_widget = QWidget()
         ts_format_layout = QHBoxLayout(self.ts_format_widget)
         ts_format_layout.setContentsMargins(0, 0, 0, 0)
@@ -1449,47 +1454,125 @@ class ExportPreviewDialog(QDialog):
         ts_format_layout.addWidget(self.ts_custom_radio)
 
         self.ts_custom_edit = QLineEdit()
-        self.ts_custom_edit.setPlaceholderText("e.g.<HH:mm:ss-xx>")
+        self.ts_custom_edit.setPlaceholderText("e.g. <HH:mm:ss-xx>")
         self.ts_custom_edit.setEnabled(False)
         ts_format_layout.addWidget(self.ts_custom_edit)
         ts_format_layout.addStretch()
 
-        # ----- Assemble the timestamp line (checkbox + format widget) -----
         ts_line_layout = QHBoxLayout()
         ts_line_layout.addWidget(self.timestamp_check)
         ts_line_layout.addWidget(self.ts_format_widget)
         ts_line_layout.addStretch()
 
-        # Add everything to options layout
-        options_layout.addLayout(ts_line_layout)
-        options_layout.addWidget(self.diarization_check)
-        options_layout.addWidget(self.blank_line_check)
-        options_layout.addWidget(self.title_check)
-        options_layout.addWidget(self.memo_check)
-        options_layout.addWidget(self.audio_check)
+        # Concatenation widgets
+        self.concat_check = QCheckBox("Concatenate segments")
 
-        options_group.setLayout(options_layout)
+        self.delimiter_default = QRadioButton("Default delimiter")
+        self.delimiter_custom = QRadioButton("Custom delimiter:")
+        self.delimiter_default.setChecked(True)
 
-        # ----- Preview area -----
+        self.custom_delimiter_edit = QLineEdit()
+        self.custom_delimiter_edit.setPlaceholderText("e.g., |")
+        self.custom_delimiter_edit.setEnabled(False)
+
+        self.delimiter_widget = QWidget()
+        inner_layout = QHBoxLayout(self.delimiter_widget)
+        inner_layout.setContentsMargins(0, 0, 0, 0)
+        inner_layout.addWidget(self.delimiter_default)
+        inner_layout.addWidget(self.delimiter_custom)
+        inner_layout.addWidget(self.custom_delimiter_edit)
+        inner_layout.addStretch()
+
+        self.blank_line_check = QCheckBox("Append empty line")
+        self.blank_line_check.setChecked(False)
+
+        self.diarization_check = QCheckBox("Include diarization")
+        self.diarization_check.setChecked(True)
+
+        # Line wrapping widgets
+        self.wrap_check = QCheckBox("Wrap lines at:")
+        self.wrap_spin = QSpinBox()
+        self.wrap_spin.setRange(30, 200)
+        self.wrap_spin.setValue(60)
+        self.wrap_spin.setSuffix(" characters")
+        self.wrap_spin.setEnabled(False)
+
+        self.character_wrap_check = QCheckBox("Force character‑based wrapping")
+        self.character_wrap_check.setEnabled(False)
+
+        wrap_layout = QHBoxLayout()
+        wrap_layout.addWidget(self.wrap_check)
+        wrap_layout.addWidget(self.wrap_spin)
+        wrap_layout.addWidget(self.character_wrap_check)
+        wrap_layout.addStretch()
+
+        # Header widgets
+        self.title_check = QCheckBox("Include project title")
+        self.title_check.setChecked(True)
+        self.memo_check = QCheckBox("Include project memo")
+        self.memo_check.setChecked(True)
+        self.audio_check = QCheckBox("Include audio file path")
+        self.audio_check.setChecked(True)
+
+        # Preview area and buttons
         preview_label = QLabel("Preview:")
         preview_label.setFont(QFont("Arial", 12, QFont.Bold))
 
         self.preview_text = QTextEdit()
         self.preview_text.setReadOnly(True)
 
-        # ----- Buttons -----
         button_box = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
 
-        # ----- Assemble main layout -----
+        # ---------- Create group boxes ----------
+
+        # Timestamp Options group
+        timestamp_group = QGroupBox("Timestamp Options")
+        timestamp_layout = QVBoxLayout()
+        timestamp_layout.addLayout(ts_line_layout)
+        timestamp_group.setLayout(timestamp_layout)
+
+        # Concatenation group
+        concat_group = QGroupBox("Concatenation")
+        concat_layout = QVBoxLayout()
+
+        # Single row: concat_check, delimiter_widget, blank_line_check, diarization_check
+        main_row = QHBoxLayout()
+        main_row.addWidget(self.concat_check)
+        main_row.addWidget(self.delimiter_widget)
+        main_row.addWidget(self.blank_line_check)
+        main_row.addWidget(self.diarization_check)
+        main_row.addStretch()
+        concat_layout.addLayout(main_row)
+
+        concat_group.setLayout(concat_layout)
+
+        # Line Wrapping group
+        wrapping_group = QGroupBox("Line Wrapping")
+        wrapping_layout_group = QVBoxLayout()  # avoid name conflict with earlier wrap_layout
+        wrapping_layout_group.addLayout(wrap_layout)
+        wrapping_group.setLayout(wrapping_layout_group)
+
+        # Header Options group
+        header_group = QGroupBox("Header Options")
+        header_layout = QHBoxLayout()
+        header_layout.addWidget(self.title_check)
+        header_layout.addWidget(self.memo_check)
+        header_layout.addWidget(self.audio_check)
+        header_layout.addStretch()
+        header_group.setLayout(header_layout)
+
+        # ---------- Assemble main layout ----------
         layout.addLayout(format_layout)
         layout.addLayout(convention_layout)
-        layout.addWidget(self.wrap_group)
-        layout.addWidget(options_group)
+        layout.addWidget(timestamp_group)
+        layout.addWidget(concat_group)
+        layout.addWidget(wrapping_group)
+        layout.addWidget(header_group)
         layout.addWidget(preview_label)
         layout.addWidget(self.preview_text)
         layout.addWidget(button_box)
 
-        # ----- Connect signals (all widgets now exist) -----
+        # ---------- Connect signals ----------
         self.html_radio.toggled.connect(self.on_format_changed)
         self.docx_radio.toggled.connect(self.on_format_changed)
         self.txt_radio.toggled.connect(self.on_format_changed)
@@ -1510,17 +1593,23 @@ class ExportPreviewDialog(QDialog):
         self.ts_custom_radio.toggled.connect(self.on_timestamp_format_changed)
         self.ts_custom_edit.textChanged.connect(self.update_preview)
 
+        self.delimiter_custom.toggled.connect(self.on_custom_delimiter_toggled)
+        self.concat_check.toggled.connect(self.update_preview)
+        self.delimiter_default.toggled.connect(self.update_preview)
+        self.delimiter_custom.toggled.connect(self.update_preview)
+        self.custom_delimiter_edit.textChanged.connect(self.update_preview)
+
         self.diarization_check.toggled.connect(self.update_preview)
         self.blank_line_check.toggled.connect(self.update_preview)
         self.title_check.toggled.connect(self.update_preview)
         self.memo_check.toggled.connect(self.update_preview)
         self.audio_check.toggled.connect(self.update_preview)
+        self.concat_check.toggled.connect(self.update_export_options_state)
 
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
 
         # ----- Set initial states -----
-        # Timestamp style from saved settings
         if self.timestamp_style == "curly":
             self.ts_curly_radio.setChecked(True)
         elif self.timestamp_style == "hash":
@@ -1533,7 +1622,67 @@ class ExportPreviewDialog(QDialog):
 
         # Initial format update
         self.on_format_changed()
+        
+        
+    def update_export_options_state(self):
+        """Enable/disable options based on format, convention, and concatenation state."""
+        is_srt = (self.export_format == "srt")
+        is_gat2 = ("GAT2" in self.convention_combo.currentText())
+        concat_enabled = self.concat_check.isChecked()
 
+        # ----- SRT disables most options -----
+        if is_srt:
+            # Transcript Setup
+            self.timestamp_check.setEnabled(False)
+            self.ts_format_widget.setEnabled(False)
+            self.diarization_check.setEnabled(True)   # SRT always has diarization
+            self.diarization_check.setChecked(True)
+            self.concat_check.setEnabled(False)
+            self.delimiter_default.setEnabled(False)
+            self.delimiter_custom.setEnabled(False)
+            self.custom_delimiter_edit.setEnabled(False)
+            self.blank_line_check.setEnabled(False)
+            # Wrap controls
+            self.wrap_check.setEnabled(False)
+            self.wrap_spin.setEnabled(False)
+            self.character_wrap_check.setEnabled(False)
+
+            # Header Options
+            self.title_check.setEnabled(False)
+            self.memo_check.setEnabled(False)
+            self.audio_check.setEnabled(False)
+        else:
+            # ----- Non‑SRT: enable appropriately -----
+
+            # Timestamp controls
+            self.timestamp_check.setEnabled(self.include_timestamps)
+            self.ts_format_widget.setEnabled(self.timestamp_check.isChecked())
+            self.ts_custom_edit.setEnabled(self.ts_custom_radio.isChecked() and self.timestamp_check.isChecked())
+
+            # Diarization – always enabled but not user‑changeable (forced on)
+            self.diarization_check.setEnabled(False)
+            self.diarization_check.setChecked(True)
+
+            # Concatenation checkbox – enabled only for GAT2
+            self.concat_check.setEnabled(is_gat2)
+
+            # Delimiter options – enabled only if concatenation is checked
+            self.delimiter_default.setEnabled(concat_enabled)
+            self.delimiter_custom.setEnabled(concat_enabled)
+            self.custom_delimiter_edit.setEnabled(concat_enabled and self.delimiter_custom.isChecked())
+
+            # Blank line after turn – always enabled (but may be forced on by convention)
+            self.blank_line_check.setEnabled(True)
+
+            # Wrap controls: spin and character wrap are enabled if wrap_check is checked,
+            # regardless of whether the checkbox itself is enabled (e.g., TiQ where it's disabled but checked).
+            # The checkbox's own enabled state is set by convention (on_convention_changed) and format.
+            self.wrap_spin.setEnabled(self.wrap_check.isChecked())
+            self.character_wrap_check.setEnabled(self.wrap_check.isChecked())       
+
+    def on_custom_delimiter_toggled(self, checked):
+        self.custom_delimiter_edit.setEnabled(checked)
+        
     def on_wrap_toggled(self, checked):
         self.wrap_spin.setEnabled(checked)
         self.character_wrap_check.setEnabled(checked)
@@ -1548,34 +1697,23 @@ class ExportPreviewDialog(QDialog):
         else:
             self.export_format = "srt"
 
+        # Determine if we are in SRT mode
         is_srt = (self.export_format == "srt")
 
-        # Project info options
+        # Explicitly set header options enabled state
         self.title_check.setEnabled(not is_srt)
         self.memo_check.setEnabled(not is_srt)
         self.audio_check.setEnabled(not is_srt)
-        self.blank_line_check.setEnabled(not is_srt)
 
-        # Timestamp controls
-        self.timestamp_check.setEnabled(not is_srt and self.include_timestamps)
+        # Update all other controls via the state method
+        self.update_export_options_state()
 
-        # Diarization
-        if is_srt:
-            self.diarization_check.setEnabled(True)
-            self.diarization_check.setChecked(True)
-        else:
-            self.diarization_check.setEnabled(False)
-            self.diarization_check.setChecked(True)
+        # Force a repaint of the header widgets (ensures they visually update)
+        self.title_check.update()
+        self.memo_check.update()
+        self.audio_check.update()
 
-        # Timestamp format widget: disabled for SRT, otherwise depends on timestamp checkbox
-        if is_srt:
-            self.ts_format_widget.setEnabled(False)
-        else:
-            self.ts_format_widget.setEnabled(self.timestamp_check.isChecked())
-
-        # Line wrapping group: disabled for SRT, otherwise enabled (individual widgets controlled by convention)
-        self.wrap_group.setEnabled(not is_srt)
-
+        # Refresh the preview
         self.update_preview()
 
     def on_convention_changed(self, convention_text):
@@ -1586,26 +1724,30 @@ class ExportPreviewDialog(QDialog):
             self.wrap_spin.setEnabled(False)
             self.set_timestamp_style("hash")
             self.blank_line_check.setChecked(True)
+            self.concat_check.setChecked(True)
+            self.concat_check.setEnabled(False)   # forced on, disabled
         elif "TiQ" in convention_text:
             self.transcript_convention = "tiq"
-            self.wrap_check.setChecked(True)
+            self.wrap_check.setChecked(True)      # TiQ uses wrapping by default
             self.wrap_check.setEnabled(False)
             self.wrap_spin.setEnabled(True)
             self.set_timestamp_style("hash")
             self.blank_line_check.setChecked(False)
-        else:
+            self.concat_check.setChecked(True)
+            self.concat_check.setEnabled(False)   # forced on, disabled
+        else:  # GAT2
             self.transcript_convention = "gat2"
+            self.wrap_check.setChecked(False)     # default off
             self.wrap_check.setEnabled(True)
             self.wrap_spin.setEnabled(self.wrap_check.isChecked())
             self.set_timestamp_style("curly")
             self.blank_line_check.setChecked(False)
-            
+            self.concat_check.setChecked(False)   # default off
+            self.concat_check.setEnabled(True)    # user can toggle
+
         self.on_wrap_toggled(self.wrap_check.isChecked())
-
-        if self.export_format != "srt":
-            self.diarization_check.setEnabled(False)
-            self.diarization_check.setChecked(True)
-
+        # Update delimiter widget enabled state (but not its checked state)
+        self.update_export_options_state()
         self.update_preview()
 
     def set_timestamp_style(self, style):
@@ -1626,10 +1768,10 @@ class ExportPreviewDialog(QDialog):
 
     def on_timestamp_changed(self, checked):
         self.current_include_timestamps = checked
-        # Enable/disable the format widget only if not SRT
         if self.export_format != "srt":
             self.ts_format_widget.setEnabled(checked)
         self.ts_custom_edit.setEnabled(checked and self.ts_custom_radio.isChecked() and self.export_format != "srt")
+        self.update_export_options_state()
         QTimer.singleShot(100, self.update_preview)
 
     def update_preview(self):
@@ -1674,7 +1816,10 @@ class ExportPreviewDialog(QDialog):
             wrap_enabled=self.wrap_check.isChecked(),
             wrap_length=self.wrap_spin.value(),
             character_wrap=self.character_wrap_check.isChecked(),
-            add_blank_line=self.blank_line_check.isChecked()
+            add_blank_line=self.blank_line_check.isChecked(),
+            concatenate_turns=self.concat_check.isChecked(),
+            delimiter_choice=self.get_delimiter_choice(),
+            custom_delimiter=self.custom_delimiter_edit.text()
         )
 
         # Build header
@@ -1761,6 +1906,9 @@ class ExportPreviewDialog(QDialog):
             ts_style = "custom"
 
         custom_pattern = self.ts_custom_edit.text() if ts_style == "custom" else ""
+        
+        delim_choice = self.get_delimiter_choice()
+        custom = self.custom_delimiter_edit.text() if delim_choice == "custom" else ""
 
         return {
             'format': self.export_format,
@@ -1775,9 +1923,17 @@ class ExportPreviewDialog(QDialog):
             'character_wrap': self.character_wrap_check.isChecked(),
             'timestamp_style': ts_style,
             'custom_timestamp_pattern': custom_pattern,
-            'add_blank_line': self.blank_line_check.isChecked()
+            'add_blank_line': self.blank_line_check.isChecked(),
+            'delimiter_choice': delim_choice,
+            'custom_delimiter': custom
         }
     
+    def get_delimiter_choice(self):
+        if self.delimiter_default.isChecked():
+            return "default"
+        else:
+            return "custom"
+        
 class SearchDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -2185,14 +2341,15 @@ class EnhancedPlacementDialog(QDialog):
             pos = cursor.position()
             new_text = current_text[:pos] + " " + display + " " + current_text[pos:]
             return {'action': 'replace', 'text': new_text}
-    
+        
 class PlacementDialog(QDialog):
-    def __init__(self, current_text, symbol, parent=None):
+    def __init__(self, current_text, symbol, parent=None, cjk_mode=False):
         super().__init__(parent)
         self.current_text = current_text
         self.symbol = symbol
         self.placement_position = 0
         self.create_new_line = False
+        self.cjk_mode = cjk_mode
         self.init_ui()
         
     def init_ui(self):
@@ -2246,6 +2403,26 @@ class PlacementDialog(QDialog):
         else:
             super().keyPressEvent(event)
     
+    def get_inserted_text(self, pos):
+        """Return new text after inserting symbol at pos with proper spacing."""
+        left = self.current_text[:pos]
+        right = self.current_text[pos:]
+        
+        if self.cjk_mode:
+            # No spaces around symbol
+            return left + self.symbol + right
+        else:
+            # Latin: add spaces but avoid double spaces
+            # Check if left ends with space
+            if left and not left[-1].isspace():
+                left += ' '
+            # Check if right starts with space
+            if right and not right[0].isspace():
+                symbol = self.symbol + ' '
+            else:
+                symbol = self.symbol
+            return left + symbol + right
+    
     def update_display(self):
         if self.create_new_line:
             html_content = f"""
@@ -2258,6 +2435,8 @@ class PlacementDialog(QDialog):
         else:
             before_text = self.current_text[:self.placement_position]
             after_text = self.current_text[self.placement_position:]
+            # For display we show the current text and the symbol at the cursor, but we don't modify it yet.
+            # We'll just indicate the position.
             html_content = f"""
             <div style="font-family: monospace; font-size: 14px; padding: 10px;">
                 <span style="background-color: #e0e0e0; padding: 5px; border-radius: 3px;">{before_text}</span>
@@ -2268,3 +2447,10 @@ class PlacementDialog(QDialog):
             self.option_label.setText("Placement: Insert in current line (Press N to create new line)")
         
         self.text_display.setHtml(html_content)
+
+    def get_result(self):
+        """Return (create_new_line, new_text_for_inline) if not new line, else (True, symbol)"""
+        if self.create_new_line:
+            return True, self.symbol
+        else:
+            return False, self.get_inserted_text(self.placement_position)
