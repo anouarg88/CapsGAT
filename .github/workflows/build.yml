@@ -6,7 +6,7 @@ on:
     types: [created]
   push:
     branches:
-      - update
+      - main
     tags:
       - 'v*'
 
