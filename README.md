@@ -1,19 +1,19 @@
-# CapsGAT
+# CapsQual
 
-<img width="100" height="100" alt="capsgat_logo" src="https://github.com/user-attachments/assets/0f409c41-55a9-427d-9516-05532cc728be" />
+<img width="100" height="100" alt="CapsQual logo" src="https://github.com/user-attachments/assets/db350747-b876-45b8-b90d-341adc87b179" />
 
 
-CapsGAT is a keyboard-first, lightweight UI-tool for editing and reformatting subtitle files (.SRT, .JSON, .TSV, .TXT) into qualitative interview transcripts based on different conventions such as the minimal version of GAT2 ([Gesprächsanalytisches Transkriptionssystem 2](https://gat-to.uni-jena.de/)), TiQ (Talk in Qualitative Research) and those suggested by Dresing & Pehl and by Kuckartz. It enables users to assign speakers to segments quickly using keyboard shortcuts.
+CapsQual (formerly CapsGAT) is a keyboard-first, lightweight UI-tool for editing and reformatting subtitle files (.SRT, .JSON, .TSV, .TXT) into qualitative interview transcripts based on different conventions such as the minimal version of GAT2 ([Gesprächsanalytisches Transkriptionssystem 2](https://gat-to.uni-jena.de/)), TiQ (Talk in Qualitative Research) and those suggested by Dresing & Pehl and by Kuckartz. It enables users to assign speakers to segments quickly using keyboard shortcuts.
 
 
 <img width="1766" height="952" alt="preview v 1 4" src="https://github.com/user-attachments/assets/8d1a9ac5-9a58-4597-b8a5-5c9a3977b0fc" />
 
 
-Audio files can be imported and synced to the transcript. This is meant to reduce window-switching and simplify the formatting process. Playback speed can be adjusted (requires VLC Player to be installed). CapsGAT features basic transcript-editing functionality such as segment splitting and merging, customizable transcription of overlapping speech, pauses, comments and more.
+Audio files can be imported and synced to the transcript. This is meant to reduce window-switching and simplify the formatting process. Playback speed can be adjusted (requires VLC Player to be installed). CapsQual features basic transcript-editing functionality such as segment splitting and merging, customizable symbols, overlapping speech, pauses, comments and more.
 
 However, it is not meant as a replacement for professional manual transcription software (for full-fledged, professional transcription software, check out [EXMARaLDA](https://www.exmaralda.org)), nor as an all-in-one automated transcription worksuite (for AI-powered transcription with automatic diarization check out [noScribe](https://ai4culture.eu/resources/tools/172)), but more as a complementary formatting tool to be used with transcription AI models such as Whisper AI or CapsWriter, aimed at those who wish to efficiently tidy up their automatically transcribed interview-data in a user-friendly, intuitive environment.
 
-CapsGAT projects can be loaded or saved. Transcripts can be exported as .HTML, .DOC, .TXT or .SRT files. With the exceptions of segments containing unassigned pauses and .SRT exports, only segments that have been assigned are included in the transcripts that are exported. 
+CapsQual projects can be loaded or saved. Transcripts can be exported as .HTML, .DOC, .TXT or .SRT files. With the exceptions of segments containing unassigned pauses and .SRT exports, only segments that have been assigned are included in the transcripts that are exported. 
 
-Please note that official CapsGAT releases are only available from this GitHub repository's ([releases page](https://github.com/anouarg88/CapsGAT/releases)). 
-CapsGAT was developed using AI.
+Please note that official CapsQual releases are only available from this GitHub repository's [releases page](https://github.com/anouarg88/CapsGAT/releases). 
+CapsQual was developed using AI.
