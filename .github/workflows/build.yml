@@ -105,11 +105,15 @@ jobs:
       - name: List dist contents
         run: ls -laR dist || true
 
-      - name: Upload artifact
+      - name: Zip .app bundle
+        run: cd dist && zip -r ../CapsQual_1.5.app.zip CapsQual_1.5.app
+                
+      - name: Upload .app zip artifact
         uses: actions/upload-artifact@v4
         with:
           name: CapsQual-macOS-Intel
-          path: dist/CapsQual_1.5.app
+          path: CapsQual_1.5.app.zip
+
 
   build-macos-arm64:
     runs-on: macos-15
@@ -138,9 +142,12 @@ jobs:
       - name: List dist contents
         run: ls -laR dist || true
 
-      - name: Upload artifact
+      - name: Zip .app bundle
+        run: cd dist && zip -r ../CapsQual_1.5.app.zip CapsQual_1.5.app
+                
+      - name: Upload .app zip artifact
         uses: actions/upload-artifact@v4
         with:
           name: CapsQual-macOS-AppleSilicon
-          path: dist/CapsQual_1.5.app
+          path: dist/CapsQual_1.5.app.zip
 # Hope this works
