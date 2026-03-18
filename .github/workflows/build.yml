@@ -180,7 +180,7 @@ jobs:
         with:
           name: CapsQual-macOS-AppleSilicon
           path: dist/CapsQual_1.5.app
-
+          
       - name: Upload macOS .app.zip as release asset
         if: ${{ github.event_name == 'release' }}
         uses: actions/upload-release-asset@v1
