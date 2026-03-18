@@ -2,7 +2,7 @@ name: Build CapsQual binaries
 
 on:
   release:
-    types: [edited]
+    types: [published]
 
 jobs:
   build-windows:
