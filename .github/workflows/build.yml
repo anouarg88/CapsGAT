@@ -91,7 +91,7 @@ jobs:
         if: ${{ github.event_name == 'release' }}
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/CapsQual_1.5-linux.tar.gz
+          files: CapsQual_1.5-linux.tar.gz
 
   build-macos-intel:
     runs-on: macos-15-intel
