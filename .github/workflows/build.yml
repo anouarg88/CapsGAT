@@ -42,14 +42,10 @@ jobs:
 
       - name: Upload Windows exe as release asset
         if: ${{ github.event_name == 'release' }}
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v2
         with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: dist/CapsQual_1.5.exe
-          asset_name: CapsQual_1.5.exe
-          asset_content_type: application/octet-stream
+          files: dist/CapsQual_1.5.exe
+
 
   build-ubuntu:
     runs-on: ubuntu-latest
@@ -93,14 +89,9 @@ jobs:
 
       - name: Upload Linux tar as release asset
         if: ${{ github.event_name == 'release' }}
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v2
         with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: CapsQual_1.5-linux.tar.gz
-          asset_name: CapsQual_1.5-linux.tar.gz
-          asset_content_type: application/gzip
+          files: dist/CapsQual_1.5-linux.tar.gz
 
   build-macos-intel:
     runs-on: macos-15-intel
@@ -128,7 +119,7 @@ jobs:
           # Output is dist/CapsQual_1.5.app
 
       - name: Zip .app bundle for release
-        run: cd dist && zip -r ../CapsQual_1.5.app.zip CapsQual_1.5.app
+        run: cd dist && zip -r ../CapsQual_1.5-macOS-Intel.zip CapsQual_1.5.app
 
       - name: Upload artifact (macOS Intel .app for CI/debug)
         uses: actions/upload-artifact@v4
@@ -138,14 +129,9 @@ jobs:
 
       - name: Upload macOS .app.zip as release asset
         if: ${{ github.event_name == 'release' }}
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v2
         with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: CapsQual_1.5.app.zip
-          asset_name: CapsQual_1.5-macOS-Intel.zip
-          asset_content_type: application/zip
+          files: CapsQual_1.5-macOS-Intel.zip
 
   build-macos-arm64:
     runs-on: macos-15
@@ -173,7 +159,7 @@ jobs:
           # Output is dist/CapsQual_1.5.app
 
       - name: Zip .app bundle for release
-        run: cd dist && zip -r ../CapsQual_1.5.app.zip CapsQual_1.5.app
+        run: cd dist && zip -r ../CapsQual_1.5-macOS-AppleSilicon.zip CapsQual_1.5.app
 
       - name: Upload artifact (macOS ARM .app for CI/debug)
         uses: actions/upload-artifact@v4
@@ -183,11 +169,6 @@ jobs:
           
       - name: Upload macOS .app.zip as release asset
         if: ${{ github.event_name == 'release' }}
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v2
         with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: CapsQual_1.5.app.zip
-          asset_name: CapsQual_1.5-macOS-AppleSilicon.zip
-          asset_content_type: application/zip
+          files: CapsQual_1.5-macOS-AppleSilicon.zip
