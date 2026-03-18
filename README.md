@@ -5,9 +5,7 @@
 
 CapsQual (formerly CapsGAT) is a keyboard-first, lightweight UI-tool for editing and reformatting subtitle files (.SRT, .JSON, .TSV, .TXT) into qualitative interview transcripts based on different conventions such as the minimal version of GAT2 ([Gesprächsanalytisches Transkriptionssystem 2](https://gat-to.uni-jena.de/)), TiQ (Talk in Qualitative Research) and those suggested by Dresing & Pehl and by Kuckartz. It enables users to assign speakers to segments quickly using keyboard shortcuts.
 
-
-<img width="1766" height="952" alt="preview v 1 4" src="https://github.com/user-attachments/assets/8d1a9ac5-9a58-4597-b8a5-5c9a3977b0fc" />
-
+<img width="1919" height="997" alt="Preview of CapsQual V1.5" src="https://github.com/user-attachments/assets/358b44e3-a615-4b88-9302-b58324fff339" />
 
 Audio files can be imported and synced to the transcript. This is meant to reduce window-switching and simplify the formatting process. Playback speed can be adjusted (requires VLC Player to be installed). CapsQual features basic transcript-editing functionality such as segment splitting and merging, customizable symbols, overlapping speech, pauses, comments and more.
 
