@@ -16,5 +16,5 @@ However, it is not meant as a replacement for professional manual transcription 
 
 CapsQual projects can be loaded or saved. Transcripts can be exported as .HTML, .DOC, .TXT or .SRT files. With the exceptions of segments containing unassigned pauses and .SRT exports, only segments that have been assigned are included in the transcripts that are exported. 
 
-Please note that official CapsQual releases are only available from this GitHub repository's [releases page](https://github.com/anouarg88/CapsGAT/releases). 
+For further instructions on how to use CapsQual, please refer to the [CapsQual User Manual](https://github.com/anouarg88/CapsQual/wiki). Please note that official CapsQual releases are only available from this GitHub repository's [Releases page](https://github.com/anouarg88/CapsGAT/releases). 
 CapsQual was developed using AI.
