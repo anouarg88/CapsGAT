@@ -36,7 +36,7 @@ Optional but highly recommended for audio playback speed control:
 
 ## Installation guide
 
-_Note: Version 1.5.1 has been used as an example in this installation guide. Please replace this with whichever version you are going to install._
+_Note: Version 1.5.1 has been used as an example in this installation guide. Please replace "1.5.1" with whichever version you are going to install._
 
 ### Windows
 
