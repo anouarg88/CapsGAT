@@ -206,7 +206,7 @@ class SRTEditor(QMainWindow):
         self.mark_unsaved_changes()
         
     def init_ui(self):
-        self.setWindowTitle("CapsQual 1.5 - Subtitle-to-Transcript Workstation")
+        self.setWindowTitle("CapsQual 1.5.1 - Subtitle-to-Transcript Workstation")
         self.setGeometry(100, 100, 1400, 900)
         self.setWindowIcon(QIcon(resource_path('images/logo.ico')))
         
@@ -1920,7 +1920,7 @@ Help:
     def show_about(self):
         """Show about dialog"""
         about_text = """
-<b style="font-size: 16px;">CapsQual 1.5</b><br><br>
+<b style="font-size: 16px;">CapsQual 1.5.1</b><br><br>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -1945,7 +1945,7 @@ Engineered with DeepSeek V3.2
     def mark_unsaved_changes(self):
         """Mark that there are unsaved changes"""
         self.has_unsaved_changes = True
-        base_title = "CapsQual 1.5 - Subtitle-to-Transcript Workstation"
+        base_title = "CapsQual 1.5.1 - Subtitle-to-Transcript Workstation"
         if self.project_name:
             self.setWindowTitle(f"{base_title} - {self.project_name} *")
         else:
@@ -1954,7 +1954,7 @@ Engineered with DeepSeek V3.2
     def clear_unsaved_changes(self):
         """Clear unsaved changes marker"""
         self.has_unsaved_changes = False
-        base_title = "CapsQual 1.5 - Subtitle-to-Transcript Workstation"
+        base_title = "CapsQual 1.5.1 - Subtitle-to-Transcript Workstation"
         if self.project_name:
             self.setWindowTitle(f"{base_title} - {self.project_name}")
         else:
@@ -2518,15 +2518,17 @@ Engineered with DeepSeek V3.2
         
         return blocks
     
+
     def save_project(self, force_save_as=False):
         if not self.srt_blocks:
             return
 
         file_path = None
-        default_name = ""  # will be used if we need to show a dialog
+        default_name = ""
 
-        # --- Handle existing .capsgat file (upgrade prompt) ---
+        # --- Determine if we should show a Save As dialog ---
         if not force_save_as and self.current_file_path:
+            # If current file is a .capsgat file, handle upgrade
             if self.current_file_path.endswith('.capsgat'):
                 reply = QMessageBox.question(
                     self,
@@ -2545,18 +2547,21 @@ Engineered with DeepSeek V3.2
                 base = os.path.basename(self.current_file_path)[:-8]  # remove '.capsgat'
                 default_name = os.path.join(old_dir, base + '.capsqual')
                 force_save_as = True   # force dialog
-            else:
-                # Current file is already .capsqual or another format – use it
+            elif self.current_file_path.endswith('.capsqual'):
+                # It's a valid CapsQual project file – use it
                 file_path = self.current_file_path
+            else:
+                # Current file is a subtitle or other format – treat as unsaved
+                force_save_as = True
 
-        # --- If we need to show a Save As dialog (no valid path, force_save_as, or upgrade case) ---
+        # --- If we need a Save As dialog, show it ---
         if force_save_as or not file_path:
-            # Only compute default_name if not already set (upgrade case sets it)
+            # Compute a default name if not already set
             if not default_name:
                 if self.project_name:
                     default_name = self.project_name.replace(" ", "_") + ".capsqual"
                 elif self.current_file_path:
-                    # For existing non-capsgat file, use its directory with new extension
+                    # For existing non-capsqual file, use its directory with new extension
                     default_name = str(Path(self.current_file_path).with_suffix('.capsqual'))
                 else:
                     default_name = "transcript_project.capsqual"
@@ -2564,23 +2569,23 @@ Engineered with DeepSeek V3.2
             file_path, _ = QFileDialog.getSaveFileName(
                 self,
                 "Save Project As",
-                default_name,   # full path, so dialog starts in correct directory
-                "CapsQual Project (*.capsqual);;All Files (*)"  # only .capsqual offered
+                default_name,
+                "CapsQual Project (*.capsqual);;All Files (*)"
             )
             if not file_path:
                 return  # user cancelled
 
-            # Ensure the file has .capsqual extension (if user typed a different one, add it)
+            # Ensure the file has .capsqual extension
             if not file_path.endswith('.capsqual'):
                 file_path += '.capsqual'
 
-        # --- Save the project data (same JSON structure) ---
+        # --- Save the project ---
         try:
             project_data = {
                 'srt_blocks': self.srt_blocks,
                 'current_block_index': self.current_block_index,
                 'speakers': self.speakers,
-                'source_file': self.current_file_path,
+                'source_file': self.current_file_path,  # keep original source path (may be .srt etc.)
                 'file_has_timestamps': self.file_has_timestamps,
                 'audio_file_path': self.audio_file_path,
                 'project_name': self.project_name,
@@ -2599,12 +2604,13 @@ Engineered with DeepSeek V3.2
                 json.dump(project_data, f, indent=2, ensure_ascii=False)
 
             self.current_file_path = file_path
-            self.add_to_recent(file_path)          # <-- add to recent files
+            self.add_to_recent(file_path)
             self.clear_unsaved_changes()
             QMessageBox.information(self, "Success", f"Project saved to {file_path}")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Could not save project: {str(e)}")
-    
+
+
     def load_project(self):
         if not self.check_unsaved_changes():
             return
@@ -4723,4 +4729,5 @@ Engineered with DeepSeek V3.2
             event.accept()
         else:
             event.ignore()
+
 
