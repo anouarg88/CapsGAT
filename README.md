@@ -14,7 +14,7 @@ Audio files can be imported and synced to the transcript. This is meant to reduc
 
 However, it is not meant as a replacement for professional manual transcription software (for full-fledged, professional transcription software, check out [EXMARaLDA](https://www.exmaralda.org)), nor as an all-in-one automated transcription worksuite (for AI-powered transcription with automatic diarization check out [noScribe](https://ai4culture.eu/resources/tools/172)), but more as a complementary formatting tool to be used with transcription AI models such as Whisper AI or CapsWriter, aimed at those who wish to efficiently tidy up their automatically transcribed interview-data in a user-friendly, intuitive environment.
 
-CapsQual projects can be loaded or saved. Transcripts can be exported as .HTML, .DOC, .TXT or .SRT files. With the exceptions of segments containing unassigned pauses and .SRT exports, only segments that have been assigned are included in the transcripts that are exported. 
+CapsQual projects can be loaded or saved. Transcripts can be exported as .HTML, .DOCX, .TXT or .SRT files. With the exceptions of segments containing unassigned pauses and .SRT exports, only segments that have been assigned are included in the transcripts that are exported. 
 
 For further instructions on how to use CapsQual, please refer to the [CapsQual User Manual](https://github.com/anouarg88/CapsQual/wiki). Please note that official CapsQual releases are only available from this GitHub repository's [Releases page](https://github.com/anouarg88/CapsGAT/releases). 
 CapsQual was developed using AI.
