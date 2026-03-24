@@ -53,7 +53,7 @@ Two versions are provided:
 - `CapsQual-macOS-AppleSilicon` for Macs with Apple Silicon (M1, M2, M3)
 
 1. Download the appropriate `.zip` file.
-2. Open the downloaded file and drag `CapsQual_1.5.app` to your `Applications` folder.
+2. Open the downloaded file and drag `CapsQual_1.5.1.app` to your `Applications` folder.
 3. The first time you run the app, macOS may warn you that it is from an unidentified developer.  
    To bypass this, right‑click (or Ctrl‑click) the app and select **Open**, then click **Open** again.
 4. (Optional) Install [VLC](https://www.videolan.org/) to enable playback speed control before running CapsQual.
