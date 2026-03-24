@@ -40,7 +40,7 @@ _Note: Version 1.5.1 has been used as an example in this installation guide. Ple
 
 ### Windows
 
-1. Download the Windows installer `CapsQual_1.5_Windows_Setup.exe` or the portable executable: `CapsQual_1.5.1.exe`.
+1. Download the Windows installer `CapsQual_1.5.1_Setup.exe` or the portable executable: `CapsQual_1.5.1.exe`.
 2. If you downloaded the installer, double‑click and follow the on‑screen instructions.
 3. If you downloaded the portable version, simply unzip the file in any folder and double‑click `CapsQual_1.5.1.exe` to run. A system warning may show up, since this software does not contain any official certificates. You may ignore this at your own discretion.
 4. (Optional) Install [VLC](https://www.videolan.org/) to enable playback speed control and better audio compatibility before running CapsQual.
