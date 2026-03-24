@@ -25,7 +25,7 @@ CapsQual was developed using AI.
 
 - **Windows**: 7 or later (64‑bit recommended)
 - **macOS**: 10.13 (High Sierra) or later (Intel and Apple Silicon supported)
-- **Linux**: any modern distribution (Ubuntu 20.04+)
+- **Linux**: any modern distribution (e.g., Ubuntu 20.04+)
 - **RAM**: 512 MB minimum, 2 GB recommended
 - **Disk space**: 150 MB for the application, plus space for your projects
 
