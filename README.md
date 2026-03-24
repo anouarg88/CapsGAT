@@ -36,11 +36,13 @@ Optional but highly recommended for audio playback speed control:
 
 ## Installation guide
 
+_Note: Version 1.5.1 has been used as an example in this installation guide. Please replace this with whichever version you are going to install._
+
 ### Windows
 
-1. Download the Windows installer `CapsQual_1.5_Windows_Setup.exe` or the portable executable: `CapsQual_1.5.exe`.
+1. Download the Windows installer `CapsQual_1.5_Windows_Setup.exe` or the portable executable: `CapsQual_1.5.1.exe`.
 2. If you downloaded the installer, double‑click and follow the on‑screen instructions.
-3. If you downloaded the portable version, simply unzip the file in any folder and double‑click `CapsQual_1.5.exe` to run. A system warning may show up, since this software does not contain any official certificates. You may ignore this at your own discretion.
+3. If you downloaded the portable version, simply unzip the file in any folder and double‑click `CapsQual_1.5.1.exe` to run. A system warning may show up, since this software does not contain any official certificates. You may ignore this at your own discretion.
 4. (Optional) Install [VLC](https://www.videolan.org/) to enable playback speed control and better audio compatibility before running CapsQual.
 
 ### macOS
@@ -58,18 +60,18 @@ Two versions are provided:
 
 ### Linux (Debian/Ubuntu 22.04 or newer)
 
-1. Download `CapsQual_1.5-linux.tar.gz`.
+1. Download `CapsQual_1.5.1-linux.tar.gz`.
 2. Open a terminal in the download folder and unfold the archive:
    ```bash
-   tar -xzf CapsQual_1.5-linux.tar.gz
+   tar -xzf CapsQual_1.5.1-linux.tar.gz
    ```
 3. Make the extracted file executable:
    ```bash
-   chmod +x CapsQual_1.5
+   chmod +x CapsQual_1.5.1
    ```
 4. Run the program:
    ```bash
-   ./CapsQual_1.5
+   ./CapsQual_1.5.1
    ```
 5. (Optional) Install VLC using your package manager (e.g., `sudo apt install vlc` on Debian/Ubuntu) to enable playback speed control.
 
