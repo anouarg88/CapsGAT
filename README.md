@@ -18,9 +18,9 @@ However, it is not meant as a replacement for professional manual transcription 
 For further instructions on how to use CapsQual, please refer to the [CapsQual User Manual](https://github.com/anouarg88/CapsQual/wiki). Please note that official CapsQual releases are only available from this GitHub repository's [Releases page](https://github.com/anouarg88/CapsGAT/releases). 
 CapsQual was developed using AI.
 
-# Contribution
+# Contributions
 
-Contributions are welcome! If you wish to contribute to this project, please open an issue and describe your ideas for review. If accepted, please create a fork of this repository to work on. Do not send pull requests without prior notice.
+Contributions are welcome! If you would like to contribute to CapsQual, please start by opening an issue or responding to an existing one to discuss your ideas before starting work. This helps ensure your efforts align with the project's goals. For code contributions, please fork the repository and submit a pull request after the idea has been discussed. Thank you for your interest!
 
 # Installation
 
