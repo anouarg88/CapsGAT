@@ -10,14 +10,17 @@ CapsQual (formerly CapsGAT) is a keyboard-first, lightweight UI-tool for editing
 
 
 
-Audio files can be imported and synced to the transcript. This is meant to reduce window-switching and simplify the formatting process. Playback speed can be adjusted (requires VLC Player to be installed). CapsQual features basic transcript-editing functionality such as segment splitting and merging, customizable symbols, overlapping speech, pauses, comments and more.
+Audio files can be imported and synced to the transcript. This is meant to reduce window-switching and simplify the formatting process. Playback speed can be adjusted (requires VLC Player to be installed). CapsQual features basic transcript-editing functionality such as segment splitting and merging, customizable symbols, overlapping speech, pauses, comments and more.  
 
-However, it is not meant as a replacement for professional manual transcription software (for full-fledged, professional transcription software, check out [EXMARaLDA](https://www.exmaralda.org)), nor as an all-in-one automated transcription worksuite (for AI-powered transcription with automatic diarization check out [noScribe](https://ai4culture.eu/resources/tools/172)), but more as a complementary formatting tool to be used with transcription AI models such as Whisper AI or CapsWriter, aimed at those who wish to efficiently tidy up their automatically transcribed interview-data in a user-friendly, intuitive environment.
 
-CapsQual projects can be loaded or saved. Transcripts can be exported as .HTML, .DOCX, .TXT or .SRT files. With the exceptions of segments containing unassigned pauses and .SRT exports, only segments that have been assigned are included in the transcripts that are exported. 
+However, it is not meant as a replacement for professional manual transcription software (for full-fledged, professional transcription software, check out [EXMARaLDA](https://www.exmaralda.org)), nor as an all-in-one automated transcription worksuite (for AI-powered transcription with automatic diarization check out [noScribe](https://ai4culture.eu/resources/tools/172)), but more as a complementary formatting tool to be used with transcription AI models such as Whisper AI or CapsWriter, aimed at those who wish to efficiently tidy up their automatically transcribed interview-data in a user-friendly, intuitive environment. Projects can be loaded or saved. Transcripts can be exported as .HTML, .DOCX, .TXT or .SRT files. With the exceptions of segments containing unassigned pauses and .SRT exports, only segments that have been assigned are included in the transcripts that are exported.
 
 For further instructions on how to use CapsQual, please refer to the [CapsQual User Manual](https://github.com/anouarg88/CapsQual/wiki). Please note that official CapsQual releases are only available from this GitHub repository's [Releases page](https://github.com/anouarg88/CapsGAT/releases). 
 CapsQual was developed using AI.
+
+# Contribution
+
+Contributions are welcome! If you wish to contribute to this project, please open an issue and describe your ideas for review. If accepted, please create a fork of this repository to work on. Do not send pull requests without prior notice.
 
 # Installation
 
