@@ -22,7 +22,7 @@ from PyQt5.QtWidgets import (
     QInputDialog, QLineEdit, QDialog, QDialogButtonBox,
     QGridLayout, QPlainTextEdit, QCheckBox, QTabWidget, QRadioButton,
     QSlider, QProgressBar, QMenuBar, QMenu, QAction, QFontDialog,
-    QGroupBox, QScrollArea, QSizePolicy, QComboBox, QStackedWidget, QStyle, QSplashScreen,
+    QGroupBox, QScrollArea, QSizePolicy, QComboBox, QStackedWidget, QStyle, QSplashScreen, QSplitter, QSplitterHandle, QToolButton
 )
 from PyQt5.QtCore import Qt, QTimer, QUrl, pyqtSignal, QPoint, QRect, QElapsedTimer, QThread, QSize, QRegularExpression, QSettings
 from PyQt5.QtGui import QFont, QKeySequence, QColor, QTextCharFormat, QIcon, QPixmap
@@ -37,6 +37,96 @@ from dialogs import (
     EnhancedPlacementDialog, PlacementDialog, InsertPausesDialog
 )
 from widgets import SpeedKnob
+
+class CollapsibleSplitterHandle(QSplitterHandle):
+    def __init__(self, orientation, parent, right_widget):
+        super().__init__(orientation, parent)
+        self.right_widget = right_widget
+        self.collapsed = False
+        self.saved_size = None
+        
+        # Create toggle button
+        self.toggle_btn = QToolButton(self)
+        self.toggle_btn.setCursor(Qt.ArrowCursor)
+        self.toggle_btn.setFixedSize(16, 16)
+        self.update_button_icon()
+        self.toggle_btn.clicked.connect(self.toggle_collapse)
+        
+        # Update button position on resize
+        self.update_button_position()
+        
+        # Monitor splitter movement to sync state
+        splitter = self.splitter()
+        splitter.splitterMoved.connect(self.on_splitter_moved)
+    
+    def update_button_icon(self):
+        if self.collapsed:
+            self.toggle_btn.setText("◀")   # arrow left (expand)
+        else:
+            self.toggle_btn.setText("▶")   # arrow right (collapse)
+    
+    def update_button_position(self):
+        x = (self.width() - self.toggle_btn.width()) // 2
+        y = (self.height() - self.toggle_btn.height()) // 2
+        self.toggle_btn.move(x, y)
+    
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.update_button_position()
+    
+    def on_splitter_moved(self, pos, index):
+        # After a manual resize, update collapsed state based on current width
+        QTimer.singleShot(10, self.update_state_from_size)
+    
+    def update_state_from_size(self):
+        splitter = self.splitter()
+        idx = splitter.indexOf(self.right_widget)
+        if idx == -1:
+            return
+        current_width = splitter.sizes()[idx]
+        min_width = self.right_widget.minimumWidth()
+        is_collapsed = (current_width <= min_width + 5)  # tolerance
+        if self.collapsed != is_collapsed:
+            self.collapsed = is_collapsed
+            self.update_button_icon()
+            if is_collapsed:
+                # Save the size before collapse? Actually we want to restore later.
+                # But when manually collapsing, we don't have a saved size.
+                # We'll only save size when collapsing via button.
+                pass
+    
+    def toggle_collapse(self):
+        splitter = self.splitter()
+        idx = splitter.indexOf(self.right_widget)
+        if idx == -1:
+            return
+        
+        if self.collapsed:
+            # Expand: restore saved size if available, else use a default
+            if self.saved_size is not None:
+                new_sizes = splitter.sizes()
+                new_sizes[idx] = self.saved_size
+                splitter.setSizes(new_sizes)
+            self.collapsed = False
+        else:
+            # Collapse: save current size, then set to minimum
+            sizes = splitter.sizes()
+            self.saved_size = sizes[idx]
+            new_sizes = sizes[:]
+            new_sizes[idx] = self.right_widget.minimumWidth()
+            splitter.setSizes(new_sizes)
+            self.collapsed = True
+        self.update_button_icon()
+
+
+class CollapsibleSplitter(QSplitter):
+    def __init__(self, orientation, right_widget):
+        super().__init__(orientation)
+        self.right_widget = right_widget
+    
+    def createHandle(self):
+        return CollapsibleSplitterHandle(self.orientation(), self, self.right_widget)
+    
 
 class SRTEditor(QMainWindow):
     # Constant for placeholder character (visible in viewer)
@@ -207,13 +297,30 @@ class SRTEditor(QMainWindow):
         
     def init_ui(self):
         self.setWindowTitle("CapsQual 1.5.1 - Subtitle-to-Transcript Workstation")
-        self.setGeometry(100, 100, 1400, 900)
+        # Get the screen geometry (available space, excluding taskbars/docks)
+        screen = QApplication.primaryScreen()
+        screen_geom = screen.availableGeometry()
+        screen_width = screen_geom.width()
+        screen_height = screen_geom.height()
+
+        # Set a reasonable initial size (e.g., 80% of width, 90% of height)
+        init_width = int(screen_width * 0.8)
+        init_height = int(screen_height * 0.9)
+        self.resize(init_width, init_height)
+
+        # Set a minimum size that is still usable (e.g., 800x600)
+        self.setMinimumSize(800, 600)
+
+        # Center the window on the screen
+        self.move((screen_width - init_width) // 2, (screen_height - init_height) // 2)
+
+        # Now show the window (do not call showMaximized unless desired)
+        self.show()
         self.setWindowIcon(QIcon(resource_path('images/logo.ico')))
         
         # Create menu bar
         self.update_splash("Creating menu bar...")
         self.create_menu_bar()
-        
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         layout = QHBoxLayout(central_widget)
@@ -251,6 +358,8 @@ class SRTEditor(QMainWindow):
                 padding: 10px;
             }
         """)
+        self.text_display.setMinimumWidth(150)   # allow it to shrink
+        self.text_display.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # horizontal scroll if needed
         left_panel.addWidget(self.text_display)
         self.highlighter = FormattingMarkerHighlighter(self.text_display.document())
         
@@ -265,57 +374,35 @@ class SRTEditor(QMainWindow):
         self.btn_next = QPushButton("Next (N) →")
         self.btn_next.clicked.connect(self.next_block)
         
-        self.btn_split = QPushButton("Split (Space)")
-        self.btn_split.clicked.connect(self.split_current_block)
-        
-        self.btn_merge = QPushButton("Merge (Del)")
-        self.btn_merge.clicked.connect(self.merge_with_next)
-        
-        self.btn_edit = QPushButton("Edit (E)")
-        self.btn_edit.clicked.connect(self.edit_current_block)
-        
-        self.btn_edit_time = QPushButton("Edit Timestamp (T)")
-        self.btn_edit_time.clicked.connect(self.edit_current_timestamps)
-        
-        
-        self.btn_unassign = QPushButton("Unassign (U)")
-        self.btn_unassign.clicked.connect(self.unassign_current)
-
-        self.btn_symbols = QPushButton("Symbols (*)")
-        self.btn_symbols.clicked.connect(self.open_pause_dialog)
-
+      
         nav_layout.addWidget(self.btn_prev)
         nav_layout.addWidget(self.lbl_current)
-        nav_layout.addWidget(self.btn_next)
-        nav_layout.addWidget(self.btn_split)
-        nav_layout.addWidget(self.btn_merge)
-        nav_layout.addWidget(self.btn_edit)
-        nav_layout.addWidget(self.btn_edit_time)
-        nav_layout.addWidget(self.btn_unassign)
-        nav_layout.addWidget(self.btn_symbols)
-        
+        nav_layout.addWidget(self.btn_next)     
         left_panel.addLayout(nav_layout)
         
         # Right panel - Controls
         right_panel = QVBoxLayout()
+        
 
-        # Speaker assignment header with + and - buttons
-        speaker_header = QHBoxLayout()
-        speaker_label = QLabel("Assign Speaker:")
-        speaker_label.setFont(QFont("Arial", 12, QFont.Bold))
-        speaker_header.addWidget(speaker_label)
+        # ----- Speaker Assignment group -----
+        speaker_group = QGroupBox("Speakers")
+        speaker_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        speaker_group_layout = QVBoxLayout()
+        speaker_group_layout.setSpacing(2)
+        speaker_group_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Add spacer to push buttons to the right
-        speaker_header.addStretch()
+        # Header with +/- buttons and count (centered)
+        header_layout = QHBoxLayout()
+        header_layout.addStretch()
 
-        # Circular minus button
-        self.btn_remove_speaker = QPushButton("−")  # Minus sign
-        self.btn_remove_speaker.setFixedSize(28, 28)
+        # Minus button
+        self.btn_remove_speaker = QPushButton("−")
+        self.btn_remove_speaker.setFixedSize(25, 25)
         self.btn_remove_speaker.setStyleSheet("""
             QPushButton {
                 background-color: #f0f0f0;
                 border: 2px solid #ccc;
-                border-radius: 14px;
+                border-radius: 12px;
                 font-size: 16px;
                 font-weight: bold;
                 padding-bottom: 2px;
@@ -335,11 +422,11 @@ class SRTEditor(QMainWindow):
             }
         """)
         self.btn_remove_speaker.clicked.connect(self.decrease_speaker_count)
-        speaker_header.addWidget(self.btn_remove_speaker)
+        header_layout.addWidget(self.btn_remove_speaker)
 
         # Speaker count display
         self.speaker_count_label = QLabel("4")
-        self.speaker_count_label.setFixedSize(30, 28)
+        self.speaker_count_label.setFixedSize(40, 28)
         self.speaker_count_label.setAlignment(Qt.AlignCenter)
         self.speaker_count_label.setStyleSheet("""
             QLabel {
@@ -348,64 +435,51 @@ class SRTEditor(QMainWindow):
                 color: #333;
             }
         """)
-        speaker_header.addWidget(self.speaker_count_label)
+        header_layout.addWidget(self.speaker_count_label)
 
-        # Circular plus button
+        # Plus button
         self.btn_add_speaker = QPushButton("+")
-        self.btn_add_speaker.setFixedSize(28, 28)
-        self.btn_add_speaker.setStyleSheet("""
-            QPushButton {
-                background-color: #f0f0f0;
-                border: 2px solid #ccc;
-                border-radius: 14px;
-                font-size: 16px;
-                font-weight: bold;
-                padding-bottom: 2px;
-                color: #333;
-            }
-            QPushButton:hover {
-                background-color: #e0e0e0;
-                border-color: #999;
-            }
-            QPushButton:pressed {
-                background-color: #d0d0d0;
-            }
-            QPushButton:disabled {
-                background-color: #f8f8f8;
-                border-color: #ddd;
-                color: #aaa;
-            }
-        """)
+        self.btn_add_speaker.setFixedSize(25, 25)
+        self.btn_add_speaker.setStyleSheet(self.btn_remove_speaker.styleSheet())
         self.btn_add_speaker.clicked.connect(self.increase_speaker_count)
-        speaker_header.addWidget(self.btn_add_speaker)
+        header_layout.addWidget(self.btn_add_speaker)
+        header_layout.addStretch()
+        speaker_group_layout.addLayout(header_layout)
 
-        # Add a tiny bit of spacing after buttons
-        speaker_header.addSpacing(23)
-
-        right_panel.addLayout(speaker_header)
-
-        # Speaker container
+        # Speaker container (list of speaker widgets)
         self.speaker_container = QWidget()
         self.speaker_layout = QVBoxLayout(self.speaker_container)
+        self.speaker_layout.setSpacing(2)
+        self.speaker_layout.setContentsMargins(0, 0, 0, 0)
         self.create_speaker_widgets()
-        right_panel.addWidget(self.speaker_container)
+
+        # Wrap speaker container in a scroll area
+        speaker_scroll = QScrollArea()
+        speaker_scroll.setWidgetResizable(True)
+        speaker_scroll.setWidget(self.speaker_container)
+        speaker_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        speaker_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        speaker_scroll.setMinimumHeight(120)
+        speaker_scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)   # allow expansion
+        speaker_scroll.setFrameShape(QScrollArea.NoFrame)          # removes the border
+        speaker_scroll.setStyleSheet("QScrollArea { border: none; }")  # extra safety
+
+        speaker_group_layout.addWidget(speaker_scroll)
+        speaker_group.setLayout(speaker_group_layout)
+        right_panel.addWidget(speaker_group)
         
-
-        # Audio Controls Label
-        audio_label = QLabel("Audio Controls:")
-        audio_label.setFont(QFont("Arial", 12, QFont.Bold))
-        right_panel.addWidget(audio_label)
-
-        # Audio controls group
-        audio_group = QGroupBox()
+         # Audio controls group
+        audio_group = QGroupBox("Audio Controls")
         audio_layout = QVBoxLayout()
+        audio_layout.setSpacing(2)                       # reduce spacing between rows
+        audio_layout.setContentsMargins(5, 5, 5, 5)      # smaller margins
 
         # Audio file info
         self.audio_info_label = QLabel("No audio loaded")
         self.audio_info_label.setStyleSheet("""
             QLabel {
                 background-color: #f0f0f0; 
-                padding: 5px; 
+                padding: 0px; 
                 border-radius: 3px;
                 font-size: 11px;
             }
@@ -417,6 +491,12 @@ class SRTEditor(QMainWindow):
         self.audio_progress = QSlider(Qt.Horizontal)
         self.audio_progress.setEnabled(False)
         self.audio_progress.sliderMoved.connect(self.seek_audio)
+        self.audio_progress.setStyleSheet("""
+            QSlider {
+                padding: 0px;
+                margin: 0px;
+            }
+        """)
         audio_layout.addWidget(self.audio_progress)
 
         # Time display
@@ -424,12 +504,16 @@ class SRTEditor(QMainWindow):
         self.time_label = QLabel("00:00 / 00:00")
         self.time_label.setAlignment(Qt.AlignCenter)
         
+        audio_button_font = QFont("Segoe UI Symbol")
+        
         self.btn_jump_to = QPushButton("Jump (Ctrl+J)")
         self.btn_jump_to.clicked.connect(self.jump_to_time)
+        self.btn_jump_to.setFont(audio_button_font)
         self.btn_jump_to.setEnabled(False)
         
         self.btn_play_segment = QPushButton("Play from segment (Shift+Enter)")
         self.btn_play_segment.clicked.connect(self.play_from_current_segment)
+        self.btn_play_segment.setFont(audio_button_font)
         self.btn_play_segment.setEnabled(False)  # initially disabled until audio loaded
         self.btn_play_segment.setToolTip("Play audio from the start of the current segment")
         
@@ -440,13 +524,12 @@ class SRTEditor(QMainWindow):
 
         # Audio controls
         audio_controls_layout = QHBoxLayout()
-        
-        audio_button_font = QFont("Segoe UI Symbol")
-        
+          
 
 
         self.btn_load_audio = QPushButton("Load Audio")
         self.btn_load_audio.clicked.connect(self.load_audio_file)
+        self.btn_load_audio.setFont(audio_button_font)
 
         self.btn_rewind = QPushButton("⏪ (PgUp)")
         self.btn_rewind.clicked.connect(self.rewind_audio)
@@ -462,11 +545,16 @@ class SRTEditor(QMainWindow):
         self.btn_forward.clicked.connect(self.forward_audio)
         self.btn_forward.setFont(audio_button_font)
         self.btn_forward.setEnabled(False)
+        
+        self.btn_load_audio.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.btn_rewind.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.btn_play.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.btn_forward.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
-        audio_controls_layout.addWidget(self.btn_load_audio)
-        audio_controls_layout.addWidget(self.btn_rewind)
-        audio_controls_layout.addWidget(self.btn_play)
-        audio_controls_layout.addWidget(self.btn_forward)
+        audio_controls_layout.addWidget(self.btn_load_audio, 1)
+        audio_controls_layout.addWidget(self.btn_rewind, 1)
+        audio_controls_layout.addWidget(self.btn_play, 1)
+        audio_controls_layout.addWidget(self.btn_forward, 1)
         audio_controls_layout.addStretch()
 
         audio_layout.addLayout(audio_controls_layout)
@@ -525,14 +613,52 @@ class SRTEditor(QMainWindow):
         audio_group.setLayout(audio_layout)
         right_panel.addWidget(audio_group)
         
+        
+        # Button panel (split, merge, edit, etc.)
+        button_panel = QGroupBox()
+        button_layout = QVBoxLayout()
+
+        # First row: Split, Merge, Edit
+        row1 = QHBoxLayout()
+        self.btn_split = QPushButton("Split (Space)")
+        self.btn_merge = QPushButton("Merge (Del)")
+        self.btn_edit = QPushButton("Edit (E)")
+        row1.addWidget(self.btn_split)
+        row1.addWidget(self.btn_merge)
+        row1.addWidget(self.btn_edit)
+        button_layout.addLayout(row1)
+
+        # Second row: Edit Timestamp, Unassign, Symbols
+        row2 = QHBoxLayout()
+        self.btn_edit_time = QPushButton("Edit Timestamp (T)")
+        self.btn_unassign = QPushButton("Unassign (U)")
+        self.btn_symbols = QPushButton("Symbols (*)")
+        row2.addWidget(self.btn_edit_time)
+        row2.addWidget(self.btn_unassign)
+        row2.addWidget(self.btn_symbols)
+        button_layout.addLayout(row2)
+        
+        self.btn_split.clicked.connect(self.split_current_block)
+        self.btn_merge.clicked.connect(self.merge_with_next)
+        self.btn_edit.clicked.connect(self.edit_current_block)
+        self.btn_edit_time.clicked.connect(self.edit_current_timestamps)
+        self.btn_unassign.clicked.connect(self.unassign_current)
+        self.btn_symbols.clicked.connect(self.open_pause_dialog)
+        button_panel.setLayout(button_layout)
+        right_panel.addWidget(button_panel)
+        
+        
         # Unassigned blocks with counter
         self.unassigned_blocks_label = QLabel("Unassigned Segments (0/0):")
-        self.unassigned_blocks_label.setFont(QFont("Arial", 12, QFont.Bold))
+        #self.unassigned_blocks_label.setFont(QFont("Arial", 12, QFont.Bold))
         right_panel.addWidget(self.unassigned_blocks_label)
 
         self.unassigned_list = QListWidget()
+        self.unassigned_list.setMinimumHeight(40)
+        self.unassigned_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.MinimumExpanding)
         self.unassigned_list.itemDoubleClicked.connect(self.jump_to_block)
-        right_panel.addWidget(self.unassigned_list, 1)  # Give it stretch factor 1 to expand
+        
+        right_panel.addWidget(self.unassigned_list)  # Give it stretch factor 1 to expand
 
         # Button container (will stay at bottom)
         button_container = QWidget()
@@ -550,12 +676,12 @@ class SRTEditor(QMainWindow):
         pixmap.loadFromData(svg_data)
         icon = QIcon(pixmap)
         self.btn_quick_export.setIcon(icon)
-        self.btn_quick_export.setIconSize(QSize(48, 48))
+        self.btn_quick_export.setIconSize(QSize(32, 32))
         self.btn_quick_export.setStyleSheet("""
             QPushButton {
                 background-color: #124607;
-                padding: 5px 9px;
-                font-size: 14px;
+                padding: 2px 7px;
+                font-size: 12px;
                 font-weight: bold;
                 color: white;
                 border: 0px;
@@ -569,8 +695,25 @@ class SRTEditor(QMainWindow):
         
         right_panel.addWidget(button_container)  # No stretch, stays at bottom
         
-        layout.addLayout(left_panel, 4)
-        layout.addLayout(right_panel, 1)
+        
+        # Create left and right panel widgets
+        left_widget = QWidget()
+        left_widget.setLayout(left_panel)
+
+        right_widget = QWidget()
+        right_widget.setLayout(right_panel)
+        right_widget.setMinimumWidth(0)
+        right_widget.setMaximumWidth(400)   # optional, adjust as needed
+
+        # Create custom splitter
+        splitter = CollapsibleSplitter(Qt.Horizontal, right_widget)
+        splitter.addWidget(left_widget)
+        splitter.addWidget(right_widget)
+        splitter.setSizes([800, 200])   # initial sizes
+        splitter.setHandleWidth(15)     # wider handle for button
+
+        # Add splitter to central layout
+        layout.addWidget(splitter)
         
         self.update_splash("Setting up shortcuts...")
         self.setup_shortcuts()
@@ -2133,7 +2276,7 @@ Engineered with DeepSeek V3.2
         for i, speaker in enumerate(self.speakers):
             speaker_widget = QWidget()
             speaker_layout = QHBoxLayout(speaker_widget)
-            speaker_layout.setSpacing(10)
+            speaker_layout.setSpacing(5)
             speaker_layout.setContentsMargins(5, 2, 5, 2)
             
             color_label = QLabel("■")
@@ -2143,7 +2286,7 @@ Engineered with DeepSeek V3.2
             speaker_name_edit.editingFinished.connect(lambda checked=False, idx=i: self.rename_speaker(idx))
             speaker_name_edit.setFixedWidth(120)
             
-            speaker_btn = QPushButton(f"{i+1}. Assign")
+            speaker_btn = QPushButton(f"Assign ({i+1})")
             speaker_btn.clicked.connect(lambda checked, idx=i: self.assign_speaker(idx))
             
             if self.current_theme == "dark":
@@ -2152,7 +2295,7 @@ Engineered with DeepSeek V3.2
                         background-color: {self.speaker_colors[i].name()}; 
                         color: white;
                         border: 2px solid #676767;
-                        padding: 3px 5px;
+                        padding: 1px 1px;
                         font-weight: bold;
                         min-width: 100px;
                     }}
@@ -2166,7 +2309,7 @@ Engineered with DeepSeek V3.2
                     QPushButton {{ 
                         background-color: {self.speaker_colors[i].name()}; 
                         border: 2px solid darkgray;
-                        padding: 3px 5px;
+                        padding: 1px 1px;
                         font-weight: bold;
                         min-width: 100px;
                     }}
@@ -2182,7 +2325,7 @@ Engineered with DeepSeek V3.2
             speaker_layout.addWidget(speaker_btn)
             
             centered_widget = QWidget()
-            centered_widget.setMinimumHeight(40)
+            centered_widget.setMinimumHeight(24)
             centered_layout = QHBoxLayout(centered_widget)
             centered_layout.setSpacing(0)
             centered_layout.setContentsMargins(0, 0, 0, 0)
@@ -2780,8 +2923,8 @@ Engineered with DeepSeek V3.2
         speaker_name = self.speakers[current_block['speaker']] if current_block['speaker'] is not None else "UNASSIGNED"
         turn_indicator = " [TURN START]" if current_block.get('is_turn_start', True) else " [CONTINUATION]"
         self.current_info_label.setText(
-            f"Block {current_block['index']} | Speaker: {speaker_name}{turn_indicator} | "
-            f"Time: {current_block['start_time']} --> {current_block['end_time']}"
+            f"{current_block['index']} | {speaker_name}{turn_indicator} | "
+            f"{current_block['start_time']} --> {current_block['end_time']}"
         )
         
         start_idx = max(0, self.current_block_index - self.context_blocks)
