@@ -471,7 +471,7 @@ class SRTEditor(QMainWindow):
          # Audio controls group
         audio_group = QGroupBox("Audio Controls")
         audio_layout = QVBoxLayout()
-        audio_layout.setSpacing(2)                       # reduce spacing between rows
+        audio_layout.setSpacing(3)                       # reduce spacing between rows
         audio_layout.setContentsMargins(5, 5, 5, 5)      # smaller margins
 
         # Audio file info
@@ -505,15 +505,17 @@ class SRTEditor(QMainWindow):
         self.time_label.setAlignment(Qt.AlignCenter)
         
         audio_button_font = QFont("Segoe UI Symbol")
-        
+        audio_function_font = QFont("Arial")
+                
         self.btn_jump_to = QPushButton("Jump (Ctrl+J)")
         self.btn_jump_to.clicked.connect(self.jump_to_time)
-        self.btn_jump_to.setFont(audio_button_font)
+        self.btn_jump_to.setFont(audio_function_font)
         self.btn_jump_to.setEnabled(False)
+        self.btn_jump_to.setToolTip("Jump to any time in the audio file")
         
         self.btn_play_segment = QPushButton("Play from segment (Shift+Enter)")
         self.btn_play_segment.clicked.connect(self.play_from_current_segment)
-        self.btn_play_segment.setFont(audio_button_font)
+        self.btn_play_segment.setFont(audio_function_font)
         self.btn_play_segment.setEnabled(False)  # initially disabled until audio loaded
         self.btn_play_segment.setToolTip("Play audio from the start of the current segment")
         
@@ -525,11 +527,9 @@ class SRTEditor(QMainWindow):
         # Audio controls
         audio_controls_layout = QHBoxLayout()
           
-
-
         self.btn_load_audio = QPushButton("Load Audio")
         self.btn_load_audio.clicked.connect(self.load_audio_file)
-        self.btn_load_audio.setFont(audio_button_font)
+        self.btn_load_audio.setFont(audio_function_font)
 
         self.btn_rewind = QPushButton("⏪ (PgUp)")
         self.btn_rewind.clicked.connect(self.rewind_audio)
@@ -580,36 +580,42 @@ class SRTEditor(QMainWindow):
         # Speed control
         speed_layout = QHBoxLayout()
         speed_layout.addWidget(QLabel("Playback Speed:"))
-        
+
         self.speed_slower_btn = QPushButton("-")
         self.speed_slower_btn.clicked.connect(lambda: self.speed_knob.set_value_direct(max(0.5, self.playback_speed - 0.1)))
         self.speed_slower_btn.setFixedWidth(30)
         speed_layout.addWidget(self.speed_slower_btn)
-        
+
         self.speed_knob = SpeedKnob()
         self.speed_knob.valueChanged.connect(self.change_playback_speed)
-        speed_layout.addWidget(self.speed_knob)
-                        
+        #self.speed_knob.setMinimumHeight(40)
+        self.speed_knob.setMinimumSize(30, 30)   # allow very small (will be drawn scaled)
+        
+        # Create a container widget for the speed knob with a fixed height
+        knob_container = QWidget()
+        knob_container.setMaximumHeight(60)  # or whatever maximum height you want
+        knob_layout = QVBoxLayout(knob_container)
+        knob_layout.setContentsMargins(0, 0, 0, 0)
+        knob_layout.addWidget(self.speed_knob)
+        knob_layout.setAlignment(Qt.AlignCenter)  # center the knob vertically
+
+        # Then add the container to speed_layout instead of the knob directly
+        speed_layout.addWidget(knob_container)
+
         self.speed_normal_btn = QPushButton("Reset")
         self.speed_normal_btn.clicked.connect(lambda: self.speed_knob.set_value_direct(1.0))
         self.speed_normal_btn.setFixedWidth(50)
-        
+
         self.speed_faster_btn = QPushButton("+")
         self.speed_faster_btn.clicked.connect(lambda: self.speed_knob.set_value_direct(min(2.0, self.playback_speed + 0.1)))
         self.speed_faster_btn.setFixedWidth(30)
-        
+
         speed_layout.addWidget(self.speed_faster_btn)
         speed_layout.addWidget(self.speed_normal_btn)
-        
-        # Disable speed controls if VLC is not available
-        self.speed_knob.setEnabled(False)
-        self.speed_slower_btn.setEnabled(False)
-        self.speed_normal_btn.setEnabled(False)
-        self.speed_faster_btn.setEnabled(False)
-        self.speed_knob.setToolTip("Load audio with VLC to enable speed control")
-                
+
+        # Add directly to audio_layout (no container)
         audio_layout.addLayout(speed_layout)
-        
+
         audio_group.setLayout(audio_layout)
         right_panel.addWidget(audio_group)
         
@@ -703,7 +709,7 @@ class SRTEditor(QMainWindow):
         right_widget = QWidget()
         right_widget.setLayout(right_panel)
         right_widget.setMinimumWidth(0)
-        right_widget.setMaximumWidth(400)   # optional, adjust as needed
+        right_widget.setMaximumWidth(450)   # optional, adjust as needed
 
         # Create custom splitter
         splitter = CollapsibleSplitter(Qt.Horizontal, right_widget)
