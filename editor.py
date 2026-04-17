@@ -296,7 +296,7 @@ class SRTEditor(QMainWindow):
         self.mark_unsaved_changes()
         
     def init_ui(self):
-        self.setWindowTitle("CapsQual 1.5.1 - Subtitle-to-Transcript Workstation")
+        self.setWindowTitle("CapsQual 1.5.2 - Subtitle-to-Transcript Workstation")
         # Get the screen geometry (available space, excluding taskbars/docks)
         screen = QApplication.primaryScreen()
         screen_geom = screen.availableGeometry()
@@ -308,8 +308,8 @@ class SRTEditor(QMainWindow):
         init_height = int(screen_height * 0.9)
         self.resize(init_width, init_height)
 
-        # Set a minimum size that is still usable (e.g., 800x600)
-        self.setMinimumSize(800, 600)
+        # Set a minimum size that is still usable
+        self.setMinimumSize(800, 560)
 
         # Center the window on the screen
         self.move((screen_width - init_width) // 2, (screen_height - init_height) // 2)
@@ -459,7 +459,7 @@ class SRTEditor(QMainWindow):
         speaker_scroll.setWidget(self.speaker_container)
         speaker_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         speaker_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        speaker_scroll.setMinimumHeight(120)
+        speaker_scroll.setMinimumHeight(100)
         speaker_scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)   # allow expansion
         speaker_scroll.setFrameShape(QScrollArea.NoFrame)          # removes the border
         speaker_scroll.setStyleSheet("QScrollArea { border: none; }")  # extra safety
@@ -2063,7 +2063,7 @@ Help:
     def show_about(self):
         """Show about dialog"""
         about_text = """
-<b style="font-size: 16px;">CapsQual 1.5.1</b><br><br>
+<b style="font-size: 16px;">CapsQual 1.5.2</b><br><br>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -2088,7 +2088,7 @@ Engineered with DeepSeek V3.2
     def mark_unsaved_changes(self):
         """Mark that there are unsaved changes"""
         self.has_unsaved_changes = True
-        base_title = "CapsQual 1.5.1 - Subtitle-to-Transcript Workstation"
+        base_title = "CapsQual 1.5.2 - Subtitle-to-Transcript Workstation"
         if self.project_name:
             self.setWindowTitle(f"{base_title} - {self.project_name} *")
         else:
@@ -2097,7 +2097,7 @@ Engineered with DeepSeek V3.2
     def clear_unsaved_changes(self):
         """Clear unsaved changes marker"""
         self.has_unsaved_changes = False
-        base_title = "CapsQual 1.5.1 - Subtitle-to-Transcript Workstation"
+        base_title = "CapsQual 1.5.2 - Subtitle-to-Transcript Workstation"
         if self.project_name:
             self.setWindowTitle(f"{base_title} - {self.project_name}")
         else:
@@ -2269,14 +2269,14 @@ Engineered with DeepSeek V3.2
         for i in reversed(range(self.speaker_layout.count())): 
             self.speaker_layout.itemAt(i).widget().setParent(None)
         
-        self.speaker_layout.setSpacing(5)
+        self.speaker_layout.setSpacing(3)
         self.speaker_layout.setContentsMargins(0, 0, 0, 0)
         
         self.speaker_widgets = []
         for i, speaker in enumerate(self.speakers):
             speaker_widget = QWidget()
             speaker_layout = QHBoxLayout(speaker_widget)
-            speaker_layout.setSpacing(5)
+            speaker_layout.setSpacing(3)
             speaker_layout.setContentsMargins(5, 2, 5, 2)
             
             color_label = QLabel("■")
@@ -2285,9 +2285,12 @@ Engineered with DeepSeek V3.2
             speaker_name_edit = QLineEdit(speaker)
             speaker_name_edit.editingFinished.connect(lambda checked=False, idx=i: self.rename_speaker(idx))
             speaker_name_edit.setFixedWidth(120)
+            speaker_name_edit.setMinimumHeight(18)
+            
             
             speaker_btn = QPushButton(f"Assign ({i+1})")
             speaker_btn.clicked.connect(lambda checked, idx=i: self.assign_speaker(idx))
+            speaker_btn.setMinimumHeight(18)
             
             if self.current_theme == "dark":
                 speaker_btn.setStyleSheet(f"""
@@ -2325,7 +2328,7 @@ Engineered with DeepSeek V3.2
             speaker_layout.addWidget(speaker_btn)
             
             centered_widget = QWidget()
-            centered_widget.setMinimumHeight(24)
+            centered_widget.setMinimumHeight(20)
             centered_layout = QHBoxLayout(centered_widget)
             centered_layout.setSpacing(0)
             centered_layout.setContentsMargins(0, 0, 0, 0)
