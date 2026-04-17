@@ -16,7 +16,7 @@ class SpeedKnob(QWidget):
         self.step = 0.1
         self.is_dragging = False
         self.last_mouse_pos = None
-        self.setMinimumSize(45, 45)
+        self.setMinimumSize(40, 40)
 
     def paintEvent(self, event):
         painter = QPainter(self)
