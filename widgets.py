@@ -16,15 +16,16 @@ class SpeedKnob(QWidget):
         self.step = 0.1
         self.is_dragging = False
         self.last_mouse_pos = None
-        self.setMinimumSize(60, 60)
+        self.setMinimumSize(40, 40)
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
-        # Draw knob background
         center = QPoint(self.width() // 2, self.height() // 2)
         radius = min(self.width(), self.height()) // 2 - 5
+        if radius < 5:
+            return  # too small to draw anything
 
         # Outer circle
         painter.setBrush(QColor(240, 240, 240))
@@ -34,33 +35,48 @@ class SpeedKnob(QWidget):
         # Value indicator
         angle = 142 + (self.value - self.min_value) / (self.max_value - self.min_value) * 270
         angle_rad = math.radians(angle)
-
-        indicator_length = radius - 5
+        indicator_length = radius - 2  # stay inside circle
         end_x = center.x() + indicator_length * math.cos(angle_rad)
         end_y = center.y() + indicator_length * math.sin(angle_rad)
 
         painter.setPen(QPen(QColor(0, 120, 215), 2))
         painter.drawLine(center, QPoint(int(end_x), int(end_y)))
 
-        # Draw center dot
+        # Center dot
         painter.setBrush(QColor(0, 120, 215))
         painter.setPen(Qt.NoPen)
-        painter.drawEllipse(center, 4, 4)
+        dot_radius = max(2, radius // 10)
+        painter.drawEllipse(center, dot_radius, dot_radius)
 
-        # Draw value text
+        # Value text
         painter.setPen(QColor(50, 50, 50))
         font = painter.font()
-        font.setPointSize(9)
+        font_size = max(7, radius // 4)
+        font.setPointSize(font_size)
         painter.setFont(font)
         value_text = f"{self.value:.1f}x"
-        text_rect = QRect(center.x() - 30, center.y() - -2, 60, 20)
+        text_rect = QRect(center.x() - 30, center.y() - 10, 60, 20)
         painter.drawText(text_rect, Qt.AlignCenter, value_text)
 
-        # Draw min/max labels
-        font.setPointSize(7)
+      # Min/max labels (0.5 and 2.0)
+        font.setPointSize(max(6, radius // 5))
         painter.setFont(font)
-        painter.drawText(center.x() - 40, center.y() - radius + 50, "0.5x")
-        painter.drawText(center.x() + 27, center.y() - radius + 50, "2.0x")
+        label_min = "0.5"
+        label_max = "2.0"
+
+        # Get text bounding rectangles
+        min_rect = painter.fontMetrics().boundingRect(label_min)
+        max_rect = painter.fontMetrics().boundingRect(label_max)
+
+        # Position min label to the left of the circle
+        min_x = center.x() - radius - min_rect.width() - 5
+        min_y = center.y() + radius // 1   # adjust vertical position as needed
+        painter.drawText(min_x, min_y, label_min)
+
+        # Position max label to the right of the circle
+        max_x = center.x() + radius + 5
+        max_y = center.y() + radius // 1
+        painter.drawText(max_x, max_y, label_max)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -107,3 +123,4 @@ class SpeedKnob(QWidget):
         else:
             self.set_value_direct(self.value - self.step)
         event.accept()
+
