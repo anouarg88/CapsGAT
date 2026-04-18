@@ -4742,9 +4742,9 @@ Engineered with DeepSeek V3.2
 
         try:
             if settings['format'] == 'srt':
-                # generate_srt_text now returns marker‑stripped text
                 with open(file_path, 'w', encoding='utf-8') as f:
                     f.write(transcript_text)
+                QMessageBox.information(self, "Success", f"Transcript exported to {file_path}")
 
             elif settings['format'] == 'docx':
                 try:
@@ -4755,7 +4755,6 @@ Engineered with DeepSeek V3.2
 
                     doc = docx.Document()
 
-                    # Header section (titles / meta) keeps default/system fonts
                     if settings.get('include_title', True) and project_info.get('name'):
                         title = doc.add_heading(project_info['name'], 0)
                         title.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -4766,10 +4765,8 @@ Engineered with DeepSeek V3.2
                     if settings.get('include_audio', True) and self.audio_file_path:
                         doc.add_paragraph(f"Audio File: {Path(self.audio_file_path).name}")
 
-                    # Blank line before transcript body
                     doc.add_paragraph()
 
-                    # Create a dedicated transcript style so we can control font and spacing
                     styles = doc.styles
                     style_name = "TranscriptBody"
                     if style_name in [s.name for s in styles]:
@@ -4777,23 +4774,14 @@ Engineered with DeepSeek V3.2
                     else:
                         body_style = styles.add_style(style_name, WD_STYLE_TYPE.PARAGRAPH)
 
-                    # Set body font by convention
-                    if settings.get('convention') == 'gat2':
+                    if settings.get('convention') in ('gat2', 'tiq'):
                         body_style.font.name = 'Courier New'
-                    elif settings.get('convention') == 'tiq':
-                        body_style.font.name = 'Courier New'
-                    else:  # dresing_pehl or fallback: leave default/system font
-                        pass
-                    
                     body_style.font.size = Pt(10)
-
-                    # Single spacing, no extra space after paragraphs for transcript body
                     para_fmt = body_style.paragraph_format
                     para_fmt.line_spacing = 1
                     para_fmt.space_after = Pt(0)
                     para_fmt.space_before = Pt(0)
 
-                    # Process each line with formatting using the transcript style
                     for line in transcript_text.split('\n'):
                         if line.strip():
                             self.add_formatted_paragraph(doc, line, style_name=style_name)
@@ -4801,21 +4789,26 @@ Engineered with DeepSeek V3.2
                             doc.add_paragraph(style=style_name)
 
                     doc.save(file_path)
+                    QMessageBox.information(self, "Success", f"Transcript exported to {file_path}")
 
                 except ImportError:
-                    QMessageBox.warning(self, "DOCX Export",
-                        "python-docx library not found. Please install it with: pip install python-docx\n\n"
-                        "Exporting as plain text instead.")
+                    # Fallback to plain text with .txt extension
+                    new_path = os.path.splitext(file_path)[0] + '.txt'
+                    QMessageBox.warning(
+                        self,
+                        "DOCX Export Failed",
+                        f"python-docx library not found.\n\n"
+                        f"Exporting as plain text instead.\n\n"
+                        f"Saved as: {new_path}"
+                    )
                     stripped = self.strip_markup(transcript_text)
-                    with open(file_path, 'w', encoding='utf-8') as f:
+                    with open(new_path, 'w', encoding='utf-8') as f:
                         f.write(stripped)
 
             elif settings['format'] == 'html':
-                # First escape the raw transcript text, then convert markers to HTML tags
                 escaped_text = self.escape_html(transcript_text)
                 formatted = self.convert_markup_to_html(escaped_text)
 
-                # Build header
                 header_lines = []
                 if settings.get('include_title', True) and project_info.get('name'):
                     header_lines.append(f"<h1>{self.escape_html(project_info['name'])}</h1>")
@@ -4860,16 +4853,17 @@ Engineered with DeepSeek V3.2
     </html>"""
                 with open(file_path, 'w', encoding='utf-8') as f:
                     f.write(html_content)
-            else:
-                # Plain text: strip markers
+                QMessageBox.information(self, "Success", f"Transcript exported to {file_path}")
+
+            else:  # plain text
                 stripped = self.strip_markup(transcript_text)
                 with open(file_path, 'w', encoding='utf-8') as f:
                     f.write(stripped)
+                QMessageBox.information(self, "Success", f"Transcript exported to {file_path}")
 
-            QMessageBox.information(self, "Success", f"Transcript exported to {file_path}")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Could not export file: {str(e)}")
-
+        
     def closeEvent(self, event):
         """Clean up on close"""
         if self.audio_player:
