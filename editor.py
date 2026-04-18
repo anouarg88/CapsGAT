@@ -218,6 +218,9 @@ class SRTEditor(QMainWindow):
             tokens.extend([p for p in parts if p])
         return tokens
     
+    def time_label_clicked(self, event):
+        self.jump_to_time()
+    
     def update_splash(self, message):
         """Update splash screen message if splash exists."""
         if self.splash:
@@ -470,10 +473,11 @@ class SRTEditor(QMainWindow):
         
          # Audio controls group
         audio_group = QGroupBox("Audio Controls")
+        audio_group.setMaximumHeight(200)
         audio_layout = QVBoxLayout()
-        audio_layout.setSpacing(3)                       # reduce spacing between rows
-        audio_layout.setContentsMargins(5, 5, 5, 5)      # smaller margins
-
+        audio_layout.setSpacing(0)                       # reduce spacing between rows
+        audio_layout.setContentsMargins(3, 3, 3, 3)      # smaller margins
+        audio_layout.addStretch()
         # Audio file info
         self.audio_info_label = QLabel("No audio loaded")
         self.audio_info_label.setStyleSheet("""
@@ -503,24 +507,17 @@ class SRTEditor(QMainWindow):
         time_layout = QHBoxLayout()
         self.time_label = QLabel("00:00 / 00:00")
         self.time_label.setAlignment(Qt.AlignCenter)
-        
+        self.time_label.setCursor(Qt.PointingHandCursor)
+        self.time_label.setToolTip("Click to jump to time (Ctrl+J)")
+        self.time_label.mousePressEvent = self.time_label_clicked
         audio_button_font = QFont("Segoe UI Symbol")
-        audio_function_font = QFont("Arial")
-                
-        self.btn_jump_to = QPushButton("Jump (Ctrl+J)")
-        self.btn_jump_to.clicked.connect(self.jump_to_time)
-        self.btn_jump_to.setFont(audio_function_font)
-        self.btn_jump_to.setEnabled(False)
-        self.btn_jump_to.setToolTip("Jump to any time in the audio file")
-        
+                              
         self.btn_play_segment = QPushButton("Play from segment (Shift+Enter)")
         self.btn_play_segment.clicked.connect(self.play_from_current_segment)
-        self.btn_play_segment.setFont(audio_function_font)
         self.btn_play_segment.setEnabled(False)  # initially disabled until audio loaded
         self.btn_play_segment.setToolTip("Play audio from the start of the current segment")
         
         time_layout.addWidget(self.time_label)
-        time_layout.addWidget(self.btn_jump_to)
         time_layout.addWidget(self.btn_play_segment)
         audio_layout.addLayout(time_layout)
 
@@ -529,8 +526,7 @@ class SRTEditor(QMainWindow):
           
         self.btn_load_audio = QPushButton("Load Audio")
         self.btn_load_audio.clicked.connect(self.load_audio_file)
-        self.btn_load_audio.setFont(audio_function_font)
-
+        
         self.btn_rewind = QPushButton("⏪ (PgUp)")
         self.btn_rewind.clicked.connect(self.rewind_audio)
         self.btn_rewind.setFont(audio_button_font)
@@ -550,6 +546,7 @@ class SRTEditor(QMainWindow):
         self.btn_rewind.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.btn_play.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.btn_forward.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        
 
         audio_controls_layout.addWidget(self.btn_load_audio, 1)
         audio_controls_layout.addWidget(self.btn_rewind, 1)
@@ -558,6 +555,7 @@ class SRTEditor(QMainWindow):
         audio_controls_layout.addStretch()
 
         audio_layout.addLayout(audio_controls_layout)
+    
 
         # Auto-sync and Autopause checkboxes
         sync_layout = QHBoxLayout()
@@ -593,14 +591,17 @@ class SRTEditor(QMainWindow):
         
         # Create a container widget for the speed knob with a fixed height
         knob_container = QWidget()
+        knob_container.setMinimumHeight(30)
         knob_container.setMaximumHeight(60)  # or whatever maximum height you want
         knob_layout = QVBoxLayout(knob_container)
         knob_layout.setContentsMargins(0, 0, 0, 0)
+        
         knob_layout.addWidget(self.speed_knob)
         knob_layout.setAlignment(Qt.AlignCenter)  # center the knob vertically
 
         # Then add the container to speed_layout instead of the knob directly
         speed_layout.addWidget(knob_container)
+        audio_layout.addStretch()
 
         self.speed_normal_btn = QPushButton("Reset")
         self.speed_normal_btn.clicked.connect(lambda: self.speed_knob.set_value_direct(1.0))
@@ -1609,7 +1610,6 @@ class SRTEditor(QMainWindow):
             self.btn_play.setEnabled(True)
             self.btn_rewind.setEnabled(True)
             self.btn_forward.setEnabled(True)
-            self.btn_jump_to.setEnabled(True)
             self.btn_play_segment.setEnabled(True)
             self.auto_sync_check.setEnabled(self.file_has_timestamps)
             self.auto_pause_check.setEnabled(True)
@@ -1911,7 +1911,6 @@ class SRTEditor(QMainWindow):
             self.btn_play.setEnabled(False)
             self.btn_rewind.setEnabled(False)
             self.btn_forward.setEnabled(False)
-            self.btn_jump_to.setEnabled(False)
             self.auto_sync_check.setEnabled(False)
             self.auto_pause_check.setEnabled(False)
             self.auto_sync_check.setChecked(False)
@@ -2818,7 +2817,6 @@ Engineered with DeepSeek V3.2
             self.btn_play.setEnabled(True)
             self.btn_rewind.setEnabled(True)
             self.btn_forward.setEnabled(True)
-            self.btn_jump_to.setEnabled(True)
             self.btn_play_segment.setEnabled(True)
             self.auto_sync_check.setEnabled(self.file_has_timestamps)
             self.auto_pause_check.setEnabled(True)
