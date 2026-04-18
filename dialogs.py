@@ -8,7 +8,7 @@ from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QDialogButtonBox,
     QPushButton, QLineEdit, QWidget, QMessageBox, QComboBox, QStackedWidget,
     QScrollArea, QFrame, QSizePolicy, QGridLayout, QFileDialog, QCheckBox,
-    QRadioButton, QGroupBox, QSpinBox, QDoubleSpinBox, QPlainTextEdit, QShortcut, QFontDialog, QFormLayout
+    QRadioButton, QGroupBox, QSpinBox, QDoubleSpinBox, QPlainTextEdit, QShortcut, QFontDialog, QFormLayout, QApplication
 )
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QFont, QKeySequence
@@ -1393,7 +1393,24 @@ class ExportPreviewDialog(QDialog):
 
     def init_ui(self):
         self.setWindowTitle("Export Preview")
-        self.setGeometry(100, 100, 850, 750)
+        # Fixed width, dynamic height
+        fixed_width = 800
+        screen = QApplication.primaryScreen()
+        screen_geom = screen.availableGeometry()
+        screen_height = screen_geom.height()
+
+        # Compute initial height: 85% of screen height, but clamp to reasonable range
+        init_height = int(screen_height * 0.85)
+        init_height = max(500, min(900, init_height))   # between 500 and 900
+
+        self.resize(fixed_width, init_height)
+        self.setMinimumSize(600, 400)      # allow some resizing, but width can be changed
+        # Optional: prevent horizontal resizing by setting maximum width
+        # self.setMaximumWidth(fixed_width)   # uncomment if you want fixed width
+
+        # Center the dialog
+        self.move((screen_geom.width() - fixed_width) // 2,
+                  (screen_geom.height() - init_height) // 2)
 
         layout = QVBoxLayout(self)
 
