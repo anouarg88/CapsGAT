@@ -1,0 +1,73 @@
+name: Build macOS binaries (manual)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-macos-intel:
+    runs-on: macos-15-intel
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install system dependencies (macOS)
+        run: brew install portaudio
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install -r requirements.txt
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller --icon "images/logo.icns" --add-data "images/*:images" -w --name "CapsQual" main.py
+          # Output is dist/CapsQual.app
+
+      - name: Zip .app bundle
+        run: cd dist && zip -r ../CapsQual-macOS-Intel.zip CapsQual.app
+
+      - name: Upload artifact (Intel .app)
+        uses: actions/upload-artifact@v4
+        with:
+          name: CapsQual-macOS-Intel
+          path: CapsQual-macOS-Intel.zip
+
+  build-macos-arm64:
+    runs-on: macos-15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install system dependencies (macOS)
+        run: brew install portaudio
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install -r requirements.txt
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller --icon "images/logo.icns" --add-data "images/*:images" -w --name "CapsQual" main.py
+          # Output is dist/CapsQual.app
+
+      - name: Zip .app bundle
+        run: cd dist && zip -r ../CapsQual-macOS-AppleSilicon.zip CapsQual.app
+
+      - name: Upload artifact (Apple Silicon .app)
+        uses: actions/upload-artifact@v4
+        with:
+          name: CapsQual-macOS-AppleSilicon
+          path: CapsQual-macOS-AppleSilicon.zip
