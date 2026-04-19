@@ -1,7 +1,7 @@
 """Custom widgets for CapsQual."""
 import math
-from PyQt5.QtWidgets import QWidget
-from PyQt5.QtCore import Qt, pyqtSignal, QPoint, QRect
+from PyQt5.QtWidgets import QWidget, QSizePolicy
+from PyQt5.QtCore import Qt, pyqtSignal, QPoint, QRect, QSize
 from PyQt5.QtGui import QPainter, QPen, QColor
 
 
@@ -10,14 +10,19 @@ class SpeedKnob(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.value = 1.0  # Default 1.0x speed
+        self.value = 1.0
         self.min_value = 0.5
         self.max_value = 2.0
         self.step = 0.1
         self.is_dragging = False
         self.last_mouse_pos = None
-        self.setMinimumSize(40, 40)
-
+        self.setMinimumSize(30, 30)   # allow very small (will be drawn scaled)
+        #self.setMaximumSize(70, 70)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        
+    def sizeHint(self):
+        return QSize(60, 60)
+    
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
@@ -49,7 +54,8 @@ class SpeedKnob(QWidget):
         painter.drawEllipse(center, dot_radius, dot_radius)
 
         # Value text
-        painter.setPen(QColor(50, 50, 50))
+        text_color = self.palette().text().color()
+        painter.setPen(text_color)
         font = painter.font()
         font_size = max(7, radius // 4)
         font.setPointSize(font_size)
