@@ -462,7 +462,7 @@ class SRTEditor(QMainWindow):
         speaker_scroll.setWidget(self.speaker_container)
         speaker_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         speaker_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        speaker_scroll.setMinimumHeight(100)
+        speaker_scroll.setMinimumHeight(70)
         speaker_scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)   # allow expansion
         speaker_scroll.setFrameShape(QScrollArea.NoFrame)          # removes the border
         speaker_scroll.setStyleSheet("QScrollArea { border: none; }")  # extra safety
@@ -473,16 +473,14 @@ class SRTEditor(QMainWindow):
         
          # Audio controls group
         audio_group = QGroupBox("Audio Controls")
-        audio_group.setMaximumHeight(200)
+        audio_group.setMaximumHeight(240)
         audio_layout = QVBoxLayout()
-        audio_layout.setSpacing(0)                       # reduce spacing between rows
-        audio_layout.setContentsMargins(3, 3, 3, 3)      # smaller margins
-        audio_layout.addStretch()
+        audio_layout.setSpacing(2)
+        audio_layout.setContentsMargins(3, 3, 3, 3)
         # Audio file info
         self.audio_info_label = QLabel("No audio loaded")
         self.audio_info_label.setStyleSheet("""
             QLabel {
-                background-color: #f0f0f0; 
                 padding: 0px; 
                 border-radius: 3px;
                 font-size: 11px;
@@ -523,7 +521,8 @@ class SRTEditor(QMainWindow):
 
         # Audio controls
         audio_controls_layout = QHBoxLayout()
-          
+        audio_controls_layout.setSpacing(15)
+
         self.btn_load_audio = QPushButton("Load Audio")
         self.btn_load_audio.clicked.connect(self.load_audio_file)
         
@@ -542,17 +541,11 @@ class SRTEditor(QMainWindow):
         self.btn_forward.setFont(audio_button_font)
         self.btn_forward.setEnabled(False)
         
-        self.btn_load_audio.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.btn_rewind.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.btn_play.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.btn_forward.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        
 
-        audio_controls_layout.addWidget(self.btn_load_audio, 1)
-        audio_controls_layout.addWidget(self.btn_rewind, 1)
-        audio_controls_layout.addWidget(self.btn_play, 1)
-        audio_controls_layout.addWidget(self.btn_forward, 1)
-        audio_controls_layout.addStretch()
+        audio_controls_layout.addWidget(self.btn_load_audio)
+        audio_controls_layout.addWidget(self.btn_rewind)
+        audio_controls_layout.addWidget(self.btn_play)
+        audio_controls_layout.addWidget(self.btn_forward)
 
         audio_layout.addLayout(audio_controls_layout)
     
@@ -577,6 +570,7 @@ class SRTEditor(QMainWindow):
         
         # Speed control
         speed_layout = QHBoxLayout()
+        speed_layout.setSpacing(15)
         speed_layout.addWidget(QLabel("Playback Speed:"))
 
         self.speed_slower_btn = QPushButton("-")
@@ -601,7 +595,7 @@ class SRTEditor(QMainWindow):
 
         # Then add the container to speed_layout instead of the knob directly
         speed_layout.addWidget(knob_container)
-        audio_layout.addStretch()
+        #audio_layout.addStretch()
 
         self.speed_normal_btn = QPushButton("Reset")
         self.speed_normal_btn.clicked.connect(lambda: self.speed_knob.set_value_direct(1.0))
@@ -1620,7 +1614,7 @@ class SRTEditor(QMainWindow):
             
             logger.info(f"Audio loaded with {player_name} player: {audio_name}")
         else:
-            QMessageBox.critical(self, "Error", f"Failed to load audio file")
+            QMessageBox.critical(self, "Error", f"Failed to load audio file (Install VLC)")
             self.audio_player = None
             self.audio_info_label.setText("No audio loaded")
     
