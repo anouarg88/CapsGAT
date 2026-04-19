@@ -91,8 +91,7 @@ For Ubuntu versions < 22.04, run from source (see below).
    sudo apt update
    sudo apt install -y python3-venv python3-pyqt5 portaudio19-dev
    ```
-   If you don't have pip installed, run ```sudo apt install python3-pip``` first.
-
+ 
 2. Clone the repository:
    ```bash
    git clone https://github.com/anouarg88/CapsQual.git
@@ -109,7 +108,9 @@ For Ubuntu versions < 22.04, run from source (see below).
    ```bash
    pip install -r requirements.txt
    ```
-5. Run the application:
+   If you don't have pip installed, run ```sudo apt install python3-pip``` first.
+   
+6. Run the application:
    ```bash
    python3 main.py
    ```
@@ -125,11 +126,16 @@ For Ubuntu versions < 22.04, run from source (see below).
    source venv/bin/activate
    pip install -r requirements.txt
    ```
-3. **Run the application**:
+   (If installing dependencies from requirements.txt fails, run `PyQt5 python-docx numpy soundfile python-vlc` instead. Note that the fallback audio player will not be available. Install VLC for optional audio support: `brew install vlc`)
+4. **Install VLC for optimal audio support (optional but highly recommended)**
+   ```bash
+   brew install vlc
+   ```
+5. **Run the application**:
    ```bash
    python main.py
    ```
-   (On macOS, you may need to install `portaudio` via Homebrew if you want a fallback audio player: `brew install portaudio`.)
+   (On macOS, you may need to install `portaudio` via Homebrew if you want a fallback audio player: `brew install portaudio`. If the fallback audio player does not work, instlall VLC using: `brew install vlc`.)
 
 
 ***Windows:***
