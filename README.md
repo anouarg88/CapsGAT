@@ -126,14 +126,14 @@ For Ubuntu versions < 22.04, run from source (see below).
    source venv/bin/activate
    pip install -r requirements.txt
    ```
-   (If installing dependencies from requirements.txt fails, run `PyQt5 python-docx numpy soundfile python-vlc` instead. Note that the fallback audio player will not be available. Install VLC for optional audio support: `brew install vlc`)
+   (If installing dependencies from requirements.txt fails, run `PyQt5 python-docx numpy soundfile python-vlc` instead. Note that the fallback audio player will not be available.)
 4. **Install VLC for optimal audio support (optional but highly recommended)**
    ```bash
    brew install vlc
    ```
 5. **Run the application**:
    ```bash
-   python main.py
+   python3 main.py
    ```
    (On macOS, you may need to install `portaudio` via Homebrew if you want a fallback audio player: `brew install portaudio`. If the fallback audio player does not work, instlall VLC using: `brew install vlc`.)
 
