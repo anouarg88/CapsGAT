@@ -30,6 +30,7 @@ jobs:
           sudo apt-get install -y portaudio19-dev python3-dev
           # For headless GUI tests (Qt needs a display)
           sudo apt-get install -y xvfb
+          sudo apt-get install -y libxcb-xinerama0 libxkbcommon-x11-0 libqt5gui5
 
       - name: Install Python dependencies
         run: |
