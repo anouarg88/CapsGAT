@@ -7,12 +7,14 @@ from editor import SRTEditor
 # ----------------------------------------------------------------------
 # Fixture to create a minimal editor with test blocks (UI mocked)
 # ----------------------------------------------------------------------
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def app():
     app = QApplication.instance()
     if app is None:
         app = QApplication([])
     yield app
+    app.quit()
+    app.processEvents()
 
 @pytest.fixture
 def editor(app):
