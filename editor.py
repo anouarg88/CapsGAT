@@ -4222,6 +4222,8 @@ Engineered with DeepSeek V3.2
         if delimiter_choice == "default":
             delimiter = " " if not self.cjk_mode else ""
         elif delimiter_choice == "custom":
+            delimiter = custom_delimiter
+        else:
             delimiter = " "
             
         # Use ordered segments
