@@ -5,23 +5,29 @@ from unittest.mock import patch
 from PyQt5.QtWidgets import QApplication
 from editor import SRTEditor
 
+# ----------------------------------------------------------------------
+# Fixtures
+# ----------------------------------------------------------------------
 @pytest.fixture(scope="session")
 def app():
     app = QApplication.instance()
     if app is None:
-        app = QApplication([])
+        app = QApplication(sys.argv)
     yield app
     app.quit()
     app.processEvents()
 
 @pytest.fixture
 def editor(app):
-    """Create an SRTEditor instance with the UI initialisation mocked."""
     with patch.object(SRTEditor, 'init_ui'):
         editor = SRTEditor()
         yield editor
         editor.close()
 
+# ----------------------------------------------------------------------
+# Tests
+# ----------------------------------------------------------------------
+@pytest.mark.timeout(60)
 def test_initial_attributes(editor):
     """Check that basic attributes are set correctly before init_ui."""
     assert editor.srt_blocks == []
@@ -32,6 +38,7 @@ def test_initial_attributes(editor):
     assert editor.project_memo == ""
     assert editor.cjk_mode is False
 
+@pytest.mark.timeout(60)
 def test_speaker_management(editor):
     """Test speaker count adjustment and renaming (no UI needed)."""
     # Initial speaker count
@@ -39,11 +46,12 @@ def test_speaker_management(editor):
     # Increase
     editor.increase_speaker_count()
     assert len(editor.speakers) == 5
-    assert editor.speakers[4] == "E"   # next letter
-    # Decrease (but need to handle assigned blocks – none assigned)
+    assert editor.speakers[4] == "E"
+    # Decrease (no assigned blocks, so safe)
     editor.decrease_speaker_count()
     assert len(editor.speakers) == 4
 
+@pytest.mark.timeout(60)
 def test_undo_redo_basic(editor):
     """Test undo/redo stack operations."""
     editor.srt_blocks = [{'text': 'Original', 'speaker': None}]
@@ -54,6 +62,7 @@ def test_undo_redo_basic(editor):
     editor.redo()
     assert editor.srt_blocks[0]['text'] == 'Modified'
 
+@pytest.mark.timeout(60)
 def test_mark_unsaved_changes(editor):
     """Test the unsaved changes flag and window title."""
     editor.project_name = "Test"
@@ -64,12 +73,14 @@ def test_mark_unsaved_changes(editor):
     assert editor.has_unsaved_changes is False
     assert "*" not in editor.windowTitle()
 
+@pytest.mark.timeout(60)
 def test_format_timestamp(editor):
     """Test timestamp formatting."""
     assert editor.format_timestamp(90.5, "curly") == "{00:01:30}"
     assert editor.format_timestamp(90.5, "hash") == "#00:01:30-5#"
     assert editor.format_timestamp(90.5, "bracket") == "[00:01:30]"
 
+@pytest.mark.timeout(60)
 def test_time_conversion(editor):
     """Test helper methods for time conversion."""
     assert editor.time_to_seconds("00:01:30,500") == 90.5
