@@ -1,18 +1,21 @@
 """Unit tests for export functions (GAT2, Dresing & Pehl, TiQ, SRT)."""
 import pytest
+import re
 from unittest.mock import patch
 from PyQt5.QtWidgets import QApplication
 from editor import SRTEditor
 
 # ----------------------------------------------------------------------
-# Fixture to create a minimal editor with test blocks (UI mocked)
+# Fixtures
 # ----------------------------------------------------------------------
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def app():
     app = QApplication.instance()
     if app is None:
         app = QApplication([])
     yield app
+    app.quit()
+    app.processEvents()
 
 @pytest.fixture
 def editor(app):
@@ -59,7 +62,6 @@ def editor(app):
         ]
         editor.speakers = ["A", "B"]
         editor.cjk_mode = False
-        # Ensure helper methods exist (they are inherited)
         yield editor
         editor.close()
 
@@ -87,26 +89,25 @@ def test_gat2_concatenate_turns(editor):
         delimiter_choice="space",
         wrap_enabled=False
     )
-    # Check that the two lines appear in order
-    assert "Hello world" in text
-    assert "Second line" in text
-    import re
-    # Remove line numbers and timestamps for a cleaner check
+    # Instead of exact substring, check that the combined text appears without newline
     cleaned = re.sub(r'\d+\s+\S+\s+', '', text)  # remove line numbers and timestamps
     assert "Hello world Second line" in cleaned or "Hello world Second line" in text
+    assert "Reply" in text
 
 def test_gat2_no_diarization(editor):
     text = editor.generate_gat2_text(include_diarization=False)
     assert "A:" not in text
     assert "Hello world" in text
 
+# ----------------------------------------------------------------------
+# Dresing & Pehl export tests
+# ----------------------------------------------------------------------
 def test_dresing_pehl_basic(editor):
     text = editor.generate_dresing_pehl_text(
         include_timestamps=True,
         include_diarization=True,
         add_blank_line=False
     )
-    # Check for speaker labels and combined text (order may vary)
     assert "A:" in text
     assert "Hello world" in text
     assert "Second line" in text
@@ -119,6 +120,9 @@ def test_dresing_pehl_no_timestamp(editor):
     assert "#" not in text
     assert "{" not in text
 
+# ----------------------------------------------------------------------
+# TiQ export tests
+# ----------------------------------------------------------------------
 def test_tiq_basic(editor):
     text = editor.generate_tiq_text(
         include_timestamps=True,
@@ -126,13 +130,12 @@ def test_tiq_basic(editor):
         wrap_enabled=False,
         add_blank_line=False
     )
-    # TiQ output includes line numbers and timestamps at the end of the turn
     assert "A:" in text
     assert "Hello world" in text
     assert "Second line" in text
     assert "B:" in text
     assert "Reply" in text
-    # Timestamp may be in various formats, so just check that something like #00:00:00 exists
+    # Check for timestamp format
     assert re.search(r'#\d{2}:\d{2}:\d{2}-\d#', text) or re.search(r'{\d{2}:\d{2}:\d{2}}', text)
 
 def test_tiq_wrapping(editor):
