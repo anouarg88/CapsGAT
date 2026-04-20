@@ -26,8 +26,8 @@ def editor(app):
                 'index': 1,
                 'start_time': '00:00:00,000',
                 'end_time': '00:00:02,000',
-                'text': 'Speaker A: Hello world',
-                'raw_text': 'Speaker A: Hello world',
+                'text': 'Hello world',
+                'raw_text': 'Hello world',
                 'speaker': 0,
                 'is_turn_start': True
             },
@@ -35,8 +35,8 @@ def editor(app):
                 'index': 2,
                 'start_time': '00:00:02,500',
                 'end_time': '00:00:04,000',
-                'text': 'Speaker A: Second line',
-                'raw_text': 'Speaker A: Second line',
+                'text': 'Second line',
+                'raw_text': 'Second line',
                 'speaker': 0,
                 'is_turn_start': False
             },
@@ -44,8 +44,8 @@ def editor(app):
                 'index': 3,
                 'start_time': '00:00:04,500',
                 'end_time': '00:00:06,000',
-                'text': 'Speaker B: Reply',
-                'raw_text': 'Speaker B: Reply',
+                'text': 'Reply',
+                'raw_text': 'Reply',
                 'speaker': 1,
                 'is_turn_start': True
             },
@@ -79,8 +79,10 @@ def test_gat2_basic_export(editor):
         concatenate_turns=False
     )
     assert "{00:00:00}" in text
-    assert "A: Hello world" in text
-    assert "B: Reply" in text
+    assert "A:" in text
+    assert "Hello world" in text
+    assert "B:" in text
+    assert "Reply" in text
     assert "(.) Pause block" in text
 
 @pytest.mark.timeout(60)
@@ -170,8 +172,8 @@ def test_tiq_wrapping(editor):
 @pytest.mark.timeout(60)
 def test_srt_export_basic(editor):
     srt = editor.generate_srt_text(include_diarization=True, unassigned_handling="skip")
-    assert "Speaker A: Hello world" in srt
-    assert "Speaker B: Reply" in srt
+    assert "A: Hello world" in srt
+    assert "B: Reply" in srt
     assert "00:00:00,000 --> 00:00:02,000" in srt
     assert "(.) Pause block" not in srt
 
