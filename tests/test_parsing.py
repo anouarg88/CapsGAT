@@ -1,12 +1,12 @@
 """Unit tests for parsing various subtitle formats."""
 import pytest
-import json
+import re
 from unittest.mock import patch
 from PyQt5.QtWidgets import QApplication
 from editor import SRTEditor
 
 # ----------------------------------------------------------------------
-# Fixture to create a minimal editor (UI mocked)
+# Fixtures
 # ----------------------------------------------------------------------
 @pytest.fixture(scope="session")
 def app():
@@ -21,7 +21,6 @@ def app():
 def editor(app):
     with patch.object(SRTEditor, 'init_ui'):
         editor = SRTEditor()
-        # Ensure required attributes exist
         editor.srt_blocks = []
         editor.speakers = ["A", "B", "C", "D"]
         editor.cjk_mode = False
@@ -31,6 +30,7 @@ def editor(app):
 # ----------------------------------------------------------------------
 # SRT parsing
 # ----------------------------------------------------------------------
+@pytest.mark.timeout(60)
 def test_parse_srt_basic(editor):
     content = """1
 00:00:01,000 --> 00:00:04,000
@@ -46,11 +46,13 @@ Second line"""
     assert blocks[0]['end_time'] == "00:00:04,000"
     assert blocks[1]['text'] == "Second line"
 
+@pytest.mark.timeout(60)
 def test_parse_srt_malformed(editor):
     content = "1\n00:00:01,000 --> 00:00:04,000"
     blocks = editor.parse_srt(content)
     assert blocks == []
 
+@pytest.mark.timeout(60)
 def test_parse_text_basic(editor):
     content = "Line one\nLine two\n\nLine three"
     blocks = editor.parse_text(content)
@@ -59,6 +61,7 @@ def test_parse_text_basic(editor):
     assert blocks[1]['text'] == "Line two"
     assert blocks[2]['text'] == "Line three"
 
+@pytest.mark.timeout(60)
 def test_parse_tsv_basic(editor):
     content = "start\tend\ttext\n1000\t2000\tHello\n2000\t3000\tWorld"
     blocks = editor.parse_tsv(content)
@@ -67,6 +70,7 @@ def test_parse_tsv_basic(editor):
     assert blocks[0]['end_time'] == "00:00:02,000"
     assert blocks[0]['text'] == "Hello"
 
+@pytest.mark.timeout(60)
 def test_parse_json_tokens_format(editor):
     data = {"tokens": ["Hello", " ", "world"], "timestamps": [0.5, 0.6, 0.7]}
     with patch('dialogs.JsonImportDialog') as mock_dialog:
@@ -76,6 +80,7 @@ def test_parse_json_tokens_format(editor):
     assert len(blocks) == 1
     assert blocks[0]['text'] == "Helloworld"
 
+@pytest.mark.timeout(60)
 def test_parse_json_segments_format(editor):
     data = {"segments": [{"start": 1.5, "end": 3.2, "text": "Hello"}]}
     blocks = editor.parse_json(data)
