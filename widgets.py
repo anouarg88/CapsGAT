@@ -16,8 +16,7 @@ class SpeedKnob(QWidget):
         self.step = 0.1
         self.is_dragging = False
         self.last_mouse_pos = None
-        self.setMinimumSize(30, 30)   # allow very small (will be drawn scaled)
-        #self.setMaximumSize(70, 70)
+        self.setMinimumSize(30, 30)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         
     def sizeHint(self):
@@ -61,14 +60,20 @@ class SpeedKnob(QWidget):
         font.setPointSize(font_size)
         painter.setFont(font)
         value_text = f"{self.value:.1f}x"
-        text_rect = QRect(center.x() - 30, center.y() - 10, 60, 20)
+
+        value_label_x = center.x()
+        value_label_y = center.y() + radius / 2
+
+        # Compute bounding rectangle of the text and centre it on the target point
+        text_rect = painter.fontMetrics().boundingRect(value_text)
+        text_rect.moveCenter(QPoint(int(value_label_x), int(value_label_y)))
         painter.drawText(text_rect, Qt.AlignCenter, value_text)
 
       # Min/max labels (0.5 and 2.0)
         font.setPointSize(max(6, radius // 5))
         painter.setFont(font)
-        label_min = "0.5"
-        label_max = "2.0"
+        label_min = "0.5x"
+        label_max = "2.0x"
 
         # Get text bounding rectangles
         min_rect = painter.fontMetrics().boundingRect(label_min)
