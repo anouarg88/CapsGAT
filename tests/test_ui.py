@@ -5,13 +5,14 @@ from unittest.mock import patch
 from PyQt5.QtWidgets import QApplication
 from editor import SRTEditor
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def app():
-    """Create a QApplication instance (required for any Qt object)."""
     app = QApplication.instance()
     if app is None:
-        app = QApplication(sys.argv)
+        app = QApplication([])
     yield app
+    app.quit()
+    app.processEvents()
 
 @pytest.fixture
 def editor(app):
