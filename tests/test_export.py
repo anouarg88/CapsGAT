@@ -68,6 +68,7 @@ def editor(app):
 # ----------------------------------------------------------------------
 # GAT2 export tests
 # ----------------------------------------------------------------------
+@pytest.mark.timeout(60)
 def test_gat2_basic_export(editor):
     text = editor.generate_gat2_text(
         include_timestamps=True,
@@ -82,6 +83,7 @@ def test_gat2_basic_export(editor):
     assert "B: Reply" in text
     assert "(.) Pause block" in text
 
+@pytest.mark.timeout(60)
 def test_gat2_concatenate_turns(editor):
     # Disable timestamps to avoid interference
     text = editor.generate_gat2_text(
@@ -98,6 +100,7 @@ def test_gat2_concatenate_turns(editor):
     assert any("Hello world Second line" in line for line in lines)
     assert "Reply" in text
 
+@pytest.mark.timeout(60)
 def test_gat2_no_diarization(editor):
     # Disable timestamps
     text = editor.generate_gat2_text(
@@ -110,6 +113,7 @@ def test_gat2_no_diarization(editor):
 # ----------------------------------------------------------------------
 # Dresing & Pehl export tests
 # ----------------------------------------------------------------------
+@pytest.mark.timeout(60)
 def test_dresing_pehl_basic(editor):
     # Disable timestamps for simpler content check
     text = editor.generate_dresing_pehl_text(
@@ -124,6 +128,7 @@ def test_dresing_pehl_basic(editor):
     assert "Reply" in text
     assert "(.) Pause block" in text
 
+@pytest.mark.timeout(60)
 def test_dresing_pehl_no_timestamp(editor):
     text = editor.generate_dresing_pehl_text(include_timestamps=False)
     assert "#" not in text
@@ -132,6 +137,7 @@ def test_dresing_pehl_no_timestamp(editor):
 # ----------------------------------------------------------------------
 # TiQ export tests
 # ----------------------------------------------------------------------
+@pytest.mark.timeout(60)
 def test_tiq_basic(editor):
     # Keep timestamps to test format, but content check can be relaxed
     text = editor.generate_tiq_text(
@@ -148,6 +154,7 @@ def test_tiq_basic(editor):
     # Check for timestamp format
     assert re.search(r'#\d{2}:\d{2}:\d{2}-\d#', text) or re.search(r'{\d{2}:\d{2}:\d{2}}', text)
 
+@pytest.mark.timeout(60)
 def test_tiq_wrapping(editor):
     text = editor.generate_tiq_text(
         wrap_enabled=True,
@@ -160,6 +167,7 @@ def test_tiq_wrapping(editor):
 # ----------------------------------------------------------------------
 # SRT export tests
 # ----------------------------------------------------------------------
+@pytest.mark.timeout(60)
 def test_srt_export_basic(editor):
     srt = editor.generate_srt_text(include_diarization=True, unassigned_handling="skip")
     assert "Speaker A: Hello world" in srt
@@ -167,6 +175,7 @@ def test_srt_export_basic(editor):
     assert "00:00:00,000 --> 00:00:02,000" in srt
     assert "(.) Pause block" not in srt
 
+@pytest.mark.timeout(60)
 def test_srt_unassigned_handling(editor):
     editor.srt_blocks.append({
         'text': 'Unassigned text',
@@ -186,6 +195,7 @@ def test_srt_unassigned_handling(editor):
 # ----------------------------------------------------------------------
 # Timestamp conversion tests
 # ----------------------------------------------------------------------
+@pytest.mark.timeout(60)
 def test_time_conversion(editor):
     assert editor.time_to_seconds("00:01:30,500") == 90.5
     assert editor.time_to_ms("00:01:30,500") == 90500
