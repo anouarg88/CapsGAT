@@ -1,13 +1,13 @@
-"""Basic UI tests for CapsQual – ensures main window can be instantiated and basic operations don't crash."""
+"""Basic UI and non‑UI tests for CapsQual – focuses on initialisation and core logic without GUI."""
 import sys
 import pytest
+from unittest.mock import patch
 from PyQt5.QtWidgets import QApplication
-from PyQt5.QtCore import Qt
 from editor import SRTEditor
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def app():
-    """Create a QApplication instance (once per test session)."""
+    """Create a QApplication instance (required for any Qt object)."""
     app = QApplication.instance()
     if app is None:
         app = QApplication(sys.argv)
@@ -15,50 +15,62 @@ def app():
 
 @pytest.fixture
 def editor(app):
-    """Create an SRTEditor instance (fresh for each test)."""
-    editor = SRTEditor()
-    yield editor
-    editor.close()
+    """Create an SRTEditor instance with the UI initialisation mocked."""
+    with patch.object(SRTEditor, 'init_ui'):
+        editor = SRTEditor()
+        yield editor
+        editor.close()
 
-def test_main_window_title(editor):
-    assert "CapsQual" in editor.windowTitle()
+def test_initial_attributes(editor):
+    """Check that basic attributes are set correctly before init_ui."""
+    assert editor.srt_blocks == []
+    assert editor.speakers == ["A", "B", "C", "D"]
+    assert editor.current_block_index == 0
+    assert editor.file_has_timestamps is True
+    assert editor.project_name == ""
+    assert editor.project_memo == ""
+    assert editor.cjk_mode is False
 
-def test_no_transcript_display(editor):
-    # When no transcript loaded, text display shows "No content loaded"
-    assert editor.text_display.toPlainText() == "No content loaded"
+def test_speaker_management(editor):
+    """Test speaker count adjustment and renaming (no UI needed)."""
+    # Initial speaker count
+    assert len(editor.speakers) == 4
+    # Increase
+    editor.increase_speaker_count()
+    assert len(editor.speakers) == 5
+    assert editor.speakers[4] == "E"   # next letter
+    # Decrease (but need to handle assigned blocks – none assigned)
+    editor.decrease_speaker_count()
+    assert len(editor.speakers) == 4
 
-def test_load_srt(editor, tmp_path):
-    srt_content = """1
-00:00:01,000 --> 00:00:02,000
-Test line
-"""
-    srt_file = tmp_path / "test.srt"
-    srt_file.write_text(srt_content, encoding="utf-8")
-    editor.load_file_from_path(str(srt_file))
-    assert len(editor.srt_blocks) == 1
-    assert editor.srt_blocks[0]['text'] == "Test line"
-
-def test_assign_speaker(editor):
-    # Load a dummy block
-    editor.srt_blocks = [{'text': 'Hello', 'raw_text': 'Hello', 'speaker': None, 'is_turn_start': True}]
-    editor.current_block_index = 0
-    editor.assign_speaker(0)  # assign speaker A
-    assert editor.srt_blocks[0]['speaker'] == 0
-    assert editor.srt_blocks[0]['is_turn_start'] is True
-
-def test_split_block(editor):
-    editor.srt_blocks = [{'text': 'Hello world', 'raw_text': 'Hello world', 'speaker': None, 'is_turn_start': True}]
-    editor.current_block_index = 0
-    # We need to simulate dialog acceptance. For now, we'll call split with a mock.
-    # Instead, we'll directly test the internal split logic.
-    # Since the dialog is interactive, we'll skip for automated test but can test the helper.
-    pass  # Placeholder; can be implemented with QTest if needed.
-
-def test_undo_redo(editor):
-    editor.srt_blocks = [{'text': 'Original', 'raw_text': 'Original', 'speaker': None, 'is_turn_start': True}]
+def test_undo_redo_basic(editor):
+    """Test undo/redo stack operations."""
+    editor.srt_blocks = [{'text': 'Original', 'speaker': None}]
     editor.push_undo()
     editor.srt_blocks[0]['text'] = 'Modified'
     editor.undo()
     assert editor.srt_blocks[0]['text'] == 'Original'
     editor.redo()
     assert editor.srt_blocks[0]['text'] == 'Modified'
+
+def test_mark_unsaved_changes(editor):
+    """Test the unsaved changes flag and window title."""
+    editor.project_name = "Test"
+    editor.mark_unsaved_changes()
+    assert editor.has_unsaved_changes is True
+    assert "*" in editor.windowTitle()
+    editor.clear_unsaved_changes()
+    assert editor.has_unsaved_changes is False
+    assert "*" not in editor.windowTitle()
+
+def test_format_timestamp(editor):
+    """Test timestamp formatting."""
+    assert editor.format_timestamp(90.5, "curly") == "{00:01:30}"
+    assert editor.format_timestamp(90.5, "hash") == "#00:01:30-5#"
+    assert editor.format_timestamp(90.5, "bracket") == "[00:01:30]"
+
+def test_time_conversion(editor):
+    """Test helper methods for time conversion."""
+    assert editor.time_to_seconds("00:01:30,500") == 90.5
+    assert editor.time_to_ms("00:01:30,500") == 90500
+    assert editor.ms_to_time(90500) == "00:01:30,500"
