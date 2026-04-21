@@ -15,7 +15,6 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-
 	  - name: Fetch Tags
         run: git fetch --tags --force
 
