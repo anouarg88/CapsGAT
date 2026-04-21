@@ -2,7 +2,6 @@
 ![GitHub Release](https://img.shields.io/github/v/release/anouarg88/CapsQual?label=Latest%20release)
 [![Run CI tests](https://github.com/anouarg88/CapsQual/actions/workflows/tests.yml/badge.svg)](https://github.com/anouarg88/CapsQual/actions/workflows/tests.yml)
 
-<img width="100" height="100" alt="CapsQual logo" src="https://github.com/user-attachments/assets/db350747-b876-45b8-b90d-341adc87b179" />
 
 
 CapsQual (formerly CapsGAT) is an open source cross-platform UI-tool for editing and reformatting subtitle files (.SRT, .JSON, .TSV, .TXT) into qualitative interview transcripts based on different conventions such as the minimal version of GAT2 ([Gesprächsanalytisches Transkriptionssystem 2](https://gat-to.uni-jena.de/)), TiQ (Talk in Qualitative Research) and those suggested by Kuckartz and Dresing & Pehl. It enables users to assign speakers to segments quickly using keyboard shortcuts.
@@ -180,5 +179,4 @@ For Ubuntu versions < 22.04, run from source (see below).
    ```
 
 
-
-If you encounter difficulties installing CapsQual, feel free to [open an issue](https://github.com/anouarg88/CapsQual/issues) in this Github repository.
+If you encounter difficulties installing CapsQual, feel free to [open an issue](https://github.com/anouarg88/CapsQual/issues).
