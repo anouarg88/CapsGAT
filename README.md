@@ -179,4 +179,6 @@ For Ubuntu versions < 22.04, run from source (see below).
    python main.py
    ```
 
-If you encounter difficulties installing CapsQual, feel free to open an issue in this Github repository.
+
+
+If you encounter difficulties installing CapsQual, feel free to [open an issue](https://github.com/anouarg88/CapsQual/issues) in this Github repository.
