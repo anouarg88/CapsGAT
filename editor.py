@@ -2544,57 +2544,60 @@ Engineered with DeepSeek V3.2
         
         return f"{hours:02d}:{minutes:02d}:{int(secs):02d},{milliseconds:03d}"
     
-    def parse_json(self, content):
+    def parse_json(self, content, import_option=None):
         blocks = []
         
         try:
             if isinstance(content, dict) and 'tokens' in content and 'timestamps' in content:
                 tokens = content['tokens']
                 timestamps = content['timestamps']
-                
-                dialog = JsonImportDialog(has_tokens=True, parent=self)
-                if dialog.exec_() == QDialog.Accepted:
+
+                option = import_option
+                if option is None:
+                    dialog = JsonImportDialog(has_tokens=True, parent=self)
+                    if dialog.exec_() != QDialog.Accepted:
+                        return []
                     option = dialog.get_import_option()
-                    
-                    if option == "one_block":
-                        text = ''.join(tokens) if tokens else ""
+
+                if option == "one_block":
+                    text = ''.join(tokens) if tokens else ""
+                    block_data = {
+                        'index': 1,
+                        'start_time': '',
+                        'end_time': '',
+                        'text': text,
+                        'raw_text': text,
+                        'speaker': None,
+                        'is_turn_start': True,
+                    }
+                    blocks.append(block_data)
+
+                elif option == "tokens":
+                    for i, (token, timestamp) in enumerate(zip(tokens, timestamps)):
                         block_data = {
-                            'index': 1,
-                            'start_time': '',
+                            'index': i + 1,
+                            'start_time': self.seconds_to_srt_time(timestamp),
                             'end_time': '',
-                            'text': text,
-                            'raw_text': text,
+                            'text': token,
+                            'raw_text': token,
                             'speaker': None,
                             'is_turn_start': True,
                         }
                         blocks.append(block_data)
-                        
-                    elif option == "tokens":
-                        for i, (token, timestamp) in enumerate(zip(tokens, timestamps)):
-                            block_data = {
-                                'index': i + 1,
-                                'start_time': self.seconds_to_srt_time(timestamp),
-                                'end_time': '',
-                                'text': token,
-                                'raw_text': token,
-                                'speaker': None,
-                                'is_turn_start': True,
-                            }
-                            blocks.append(block_data)
-                            
-                    elif option == "auto_segment":
-                        segments = self.auto_segment_tokens(tokens, timestamps)
-                        for i, segment in enumerate(segments):
-                            block_data = {
-                                'index': i + 1,
-                                'start_time': segment['start_time'],
-                                'end_time': segment['end_time'],
-                                'text': segment['text'],
-                                'raw_text': segment['text'],
-                                'speaker': None,
-                                'is_turn_start': True,
-                            }
-                            blocks.append(block_data)
+
+                elif option == "auto_segment":
+                    segments = self.auto_segment_tokens(tokens, timestamps)
+                    for i, segment in enumerate(segments):
+                        block_data = {
+                            'index': i + 1,
+                            'start_time': segment['start_time'],
+                            'end_time': segment['end_time'],
+                            'text': segment['text'],
+                            'raw_text': segment['text'],
+                            'speaker': None,
+                            'is_turn_start': True,
+                        }
+                        blocks.append(block_data)
                 else:
                     return []
                 
@@ -2653,13 +2656,14 @@ Engineered with DeepSeek V3.2
                             }
                             blocks.append(block_data)
             
-            if not blocks:
+            if not blocks and import_option is None:
                 QMessageBox.warning(self, "JSON Format", 
                                    "The JSON file doesn't contain recognizable transcript data.")
                 
         except Exception as e:
-            QMessageBox.critical(self, "JSON Error", 
-                               f"Could not parse JSON file: {str(e)}")
+            if import_option is None:
+                QMessageBox.critical(self, "JSON Error", 
+                                   f"Could not parse JSON file: {str(e)}")
         
         return blocks
     
