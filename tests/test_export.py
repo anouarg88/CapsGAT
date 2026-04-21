@@ -104,12 +104,13 @@ def test_gat2_concatenate_turns(editor):
 
 @pytest.mark.timeout(60)
 def test_gat2_no_diarization(editor):
-    # Disable timestamps
+    # GAT2 keeps diarization even if include_diarization is disabled.
     text = editor.generate_gat2_text(
         include_timestamps=False,
         include_diarization=False
     )
-    assert "A:" not in text
+    assert "A:" in text
+    assert "B:" in text
     assert "Hello world" in text
 
 # ----------------------------------------------------------------------
