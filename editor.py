@@ -25,7 +25,7 @@ from PyQt5.QtWidgets import (
     QGroupBox, QScrollArea, QSizePolicy, QComboBox, QStackedWidget, QStyle, QSplashScreen, QSplitter, QSplitterHandle, QToolButton
 )
 from PyQt5.QtCore import Qt, QTimer, QUrl, pyqtSignal, QPoint, QRect, QElapsedTimer, QThread, QSize, QRegularExpression, QSettings
-from PyQt5.QtGui import QFont, QKeySequence, QColor, QTextCharFormat, QIcon, QPixmap
+from PyQt5.QtGui import QFont, QKeySequence, QColor, QTextCharFormat, QTextCursor, QIcon, QPixmap
 
 from utils import resource_path, logger
 from highlighting import FormattingMarkerHighlighter
@@ -299,7 +299,7 @@ class SRTEditor(QMainWindow):
         self.mark_unsaved_changes()
         
     def init_ui(self):
-        self.setWindowTitle("CapsQual 1.5.2 - Subtitle-to-Transcript Workstation")
+        self.setWindowTitle("CapsQual 1.5.3 - Subtitle-to-Transcript Workstation")
         # Get the screen geometry (available space, excluding taskbars/docks)
         screen = QApplication.primaryScreen()
         screen_geom = screen.availableGeometry()
@@ -1970,25 +1970,23 @@ class SRTEditor(QMainWindow):
         # Clear previous extra selections
         self.text_display.setExtraSelections([])
         
-        # Find the position of this block in the displayed text
         start_idx = max(0, self.current_block_index - self.context_blocks)
-        display_block_pos = (block_idx - start_idx) * 2
-        
-        # Calculate the position in the displayed text
-        cursor.movePosition(cursor.Start)
-        for i in range(display_block_pos):
-            cursor.movePosition(cursor.Down)
-            
-        # Move to the beginning of the block text (after prefix)
-        cursor.movePosition(cursor.Down)
-        cursor.movePosition(cursor.StartOfLine)
-        
-        # Skip the prefix (">> " or "   ")
-        cursor.movePosition(cursor.Right, cursor.MoveAnchor, 3)
-        
-        # Move to the start position within the text
-        cursor.movePosition(cursor.Right, cursor.MoveAnchor, start_pos)
-        cursor.movePosition(cursor.Right, cursor.KeepAnchor, end_pos - start_pos)
+        display_block_pos = max(0, (block_idx - start_idx) * 2)
+        doc_block = self.text_display.document().findBlockByNumber(display_block_pos)
+        if not doc_block.isValid():
+            return
+
+        # Anchor the selection to the target paragraph, then offset into block text.
+        # This remains stable regardless of soft wrapping width.
+        prefix_len = min(3, len(doc_block.text()))
+        text_len = max(0, len(doc_block.text()) - prefix_len)
+        clamped_start = max(0, min(start_pos, text_len))
+        clamped_end = max(clamped_start, min(end_pos, text_len))
+
+        cursor = QTextCursor(doc_block)
+        anchor_pos = doc_block.position() + prefix_len
+        cursor.setPosition(anchor_pos + clamped_start)
+        cursor.setPosition(anchor_pos + clamped_end, QTextCursor.KeepAnchor)
         
         # Create and apply highlight
         selection = QTextEdit.ExtraSelection()
@@ -2062,7 +2060,7 @@ Help:
     def show_about(self):
         """Show about dialog"""
         about_text = """
-<b style="font-size: 16px;">CapsQual 1.5.2</b><br><br>
+<b style="font-size: 16px;">CapsQual 1.5.3</b><br><br>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -2087,7 +2085,7 @@ Engineered with DeepSeek V3.2
     def mark_unsaved_changes(self):
         """Mark that there are unsaved changes"""
         self.has_unsaved_changes = True
-        base_title = "CapsQual 1.5.2 - Subtitle-to-Transcript Workstation"
+        base_title = "CapsQual 1.5.3 - Subtitle-to-Transcript Workstation"
         if self.project_name:
             self.setWindowTitle(f"{base_title} - {self.project_name} *")
         else:
@@ -2096,7 +2094,7 @@ Engineered with DeepSeek V3.2
     def clear_unsaved_changes(self):
         """Clear unsaved changes marker"""
         self.has_unsaved_changes = False
-        base_title = "CapsQual 1.5.2 - Subtitle-to-Transcript Workstation"
+        base_title = "CapsQual 1.5.3 - Subtitle-to-Transcript Workstation"
         if self.project_name:
             self.setWindowTitle(f"{base_title} - {self.project_name}")
         else:
@@ -2964,10 +2962,26 @@ Engineered with DeepSeek V3.2
         
         # Update label with counter
         self.unassigned_blocks_label.setText(f"Unassigned Segments ({unassigned_count}/{total_blocks}):")
+
+    def _display_block_paragraph(self, block_idx, start_idx):
+        """Return the QTextDocument paragraph index for a segment in transcript display."""
+        return max(0, (block_idx - start_idx) * 2)
+
+    def _segment_cursor_for_display_block(self, block_idx, start_idx):
+        """Return a cursor selecting the segment paragraph (without spacer line)."""
+        paragraph_idx = self._display_block_paragraph(block_idx, start_idx)
+        doc_block = self.text_display.document().findBlockByNumber(paragraph_idx)
+        if not doc_block.isValid():
+            return None
+
+        cursor = QTextCursor(doc_block)
+        cursor.setPosition(doc_block.position())
+        cursor.movePosition(QTextCursor.EndOfBlock, QTextCursor.KeepAnchor)
+        return cursor
     
     def colorize_display(self):
         cursor = self.text_display.textCursor()
-        cursor.select(cursor.Document)
+        cursor.select(QTextCursor.Document)
         
         format_normal = QTextCharFormat()
         cursor.setCharFormat(format_normal)
@@ -2978,45 +2992,38 @@ Engineered with DeepSeek V3.2
             block = self.srt_blocks[i]
             if block['speaker'] is not None and block['speaker'] < len(self.speaker_colors):
                 color = self.speaker_colors[block['speaker']]
-                
-                block_pos = (i - start_idx) * 2
-                
-                cursor.movePosition(cursor.Start)
-                for _ in range(block_pos):
-                    cursor.movePosition(cursor.Down)
-                
-                cursor.movePosition(cursor.Down, cursor.KeepAnchor)
-                
+
+                segment_cursor = self._segment_cursor_for_display_block(i, start_idx)
+                if segment_cursor is None:
+                    continue
+
                 block_format = QTextCharFormat()
                 block_format.setBackground(color)
-                cursor.setCharFormat(block_format)
-        
-        current_pos = (self.current_block_index - start_idx) * 2
-        cursor.movePosition(cursor.Start)
-        for _ in range(current_pos):
-            cursor.movePosition(cursor.Down)
-        
-        cursor.movePosition(cursor.Down, cursor.KeepAnchor)
+                segment_cursor.setCharFormat(block_format)
+
+        current_cursor = self._segment_cursor_for_display_block(self.current_block_index, start_idx)
+        if current_cursor is None:
+            return
+
         current_format = QTextCharFormat()
         if self.current_theme == "dark":
             current_format.setBackground(QColor(120, 120, 200))
         else:
             current_format.setBackground(QColor(255, 240, 200))
         current_format.setFontWeight(QFont.Bold)
-        cursor.setCharFormat(current_format)
+        current_cursor.setCharFormat(current_format)
         
         self.scroll_to_current_block()
     
     def scroll_to_current_block(self):
-        cursor = self.text_display.textCursor()
-        cursor.movePosition(cursor.Start)
-        
         start_idx = max(0, self.current_block_index - self.context_blocks)
-        blocks_before_current = self.current_block_index - start_idx
-        
-        for _ in range(blocks_before_current * 2):
-            cursor.movePosition(cursor.Down)
-        
+        paragraph_idx = self._display_block_paragraph(self.current_block_index, start_idx)
+        doc_block = self.text_display.document().findBlockByNumber(paragraph_idx)
+        if not doc_block.isValid():
+            return
+
+        cursor = QTextCursor(doc_block)
+        cursor.setPosition(doc_block.position())
         self.text_display.setTextCursor(cursor)
         self.text_display.ensureCursorVisible()
         
