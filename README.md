@@ -1,7 +1,6 @@
 # CapsQual
 ![GitHub Release](https://img.shields.io/github/v/release/anouarg88/CapsQual?label=Latest%20release)
 [![Run CI tests](https://github.com/anouarg88/CapsQual/actions/workflows/tests.yml/badge.svg)](https://github.com/anouarg88/CapsQual/actions/workflows/tests.yml)
-[![Draft PDF](https://github.com/anouarg88/CapsQual/actions/workflows/draft-pdf.yml/badge.svg)](https://github.com/anouarg88/CapsQual/actions/workflows/draft-pdf.yml)
 
 
 
