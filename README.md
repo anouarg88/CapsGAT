@@ -53,7 +53,7 @@ Use **Modify transcript** to:
 - Strip punctuation  
 - Convert to lowercase  
 
-CapsQual can also convert silent segments into pause symbols, if the subtitle files were created with ASR-software which supports Voice Activity Detection (VAD), such as [CapsWriter-Offline](https://github.com/HaujetZhao/CapsWriter-Offline) or [WhisperX](https://github.com/m-bain/WhisperX).
+CapsQual can also convert silent segments into pause symbols, if the subtitle files were created with ASR-software which supports _Voice Activity Detection_ (VAD), such as [CapsWriter-Offline](https://github.com/HaujetZhao/CapsWriter-Offline) or [WhisperX](https://github.com/m-bain/WhisperX).
 
 <img src="https://github.com/user-attachments/assets/8373c360-0428-4404-ad39-771d196a15c9" alt="modify" />
 
