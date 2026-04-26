@@ -66,7 +66,7 @@ Use the **Symbols** button (`*`) to:
 - Split/merge segments  
 - Edit timestamps manually  
 
-<img src="https://github.com/user-attachments/assets/20c9bb30-cb5e-4dc-aae1-8590afb1f5de" alt="symbols" />
+<img src="https://github.com/user-attachments/assets/04d96b86-706b-4a58-acf0-4c1496b554da" alt="symbols" />
 
 ---
 
