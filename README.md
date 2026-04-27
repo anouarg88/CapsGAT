@@ -37,9 +37,9 @@ Import your files using the **Load Audio** button. If subtitle files are in the 
 
 ## 3. Assign Speakers
 
-- Use number keys (1, 2, 3, …) or use the buttons in the top-right corner to asssign speakers
+- Use the number keys (1, 2, 3, …) or buttons in the top-right corner to assign speakers to the selected segments.
 - Add/remove speakers with the `+` / `−` buttons.
-- Rename speakers via the text fields  
+- Rename speakers using the text fields  
 
 <img src="https://github.com/user-attachments/assets/550bac64-003a-44c5-994b-f36c1cdedb58" alt="assign" />
 
@@ -47,11 +47,7 @@ Import your files using the **Load Audio** button. If subtitle files are in the 
 
 ## 4. Auto-Process Transcript
 
-Use **Modify transcript** to:
-- Strip punctuation  
-- Convert to lowercase  
-
-CapsQual can also convert silent segments into pause symbols, if the subtitle files were created with ASR-software which supports _Voice Activity Detection_ (VAD), such as [CapsWriter-Offline](https://github.com/HaujetZhao/CapsWriter-Offline) or [WhisperX](https://github.com/m-bain/WhisperX).
+Use **Modify transcript** to strip punctuation or convert everything to lowercase. CapsQual can also convert silent segments into pause symbols, if the subtitle files were created with ASR-software which supports _Voice Activity Detection_ (VAD), such as [CapsWriter-Offline](https://github.com/HaujetZhao/CapsWriter-Offline) or [WhisperX](https://github.com/m-bain/WhisperX).
 
 <img src="https://github.com/user-attachments/assets/8373c360-0428-4404-ad39-771d196a15c9" alt="modify" />
 
@@ -59,10 +55,7 @@ CapsQual can also convert silent segments into pause symbols, if the subtitle fi
 
 ## 5. Review & Annotate
 
-Use the **Symbols** button (`*`) to:
-- Insert pauses, overlaps, comments  
-- Split/merge segments  
-- Edit timestamps manually  
+Review the transcript sequentially and split (`Space`), merge (`Del`) and edit (`E/F2`) segments where necessary. Edit timestamps (T) to adjust the start and end time of each segment if necessary. Use the **Symbols** button (`*`) to insert pauses, overlaps, comments and other transcription symbols. 
 
 <img src="https://github.com/user-attachments/assets/04d96b86-706b-4a58-acf0-4c1496b554da" alt="symbols" />
 
