@@ -29,8 +29,7 @@ If needed, check this tutorial on [how to install Whisper](https://www.qualitati
 
 ## 2. Import Audio & Subtitles
 
-Import your files using the **Load Audio** button.  
-If subtitle files are in the same folder, CapsQual will offer to import them automatically.
+Import your files using the **Load Audio** button. If subtitle files are in the same folder, CapsQual will offer to import them automatically. Otherwise, they can be imported from the menu bar.
 
 <img src="https://github.com/user-attachments/assets/63114a9b-4a62-466c-a5dc-81ab742f9138" alt="import" />
 
@@ -38,10 +37,9 @@ If subtitle files are in the same folder, CapsQual will offer to import them aut
 
 ## 3. Assign Speakers
 
-- Use number keys (1, 2, 3, …)  
-- Or use the buttons in the top-right corner  
-- Rename speakers via the text fields  
+- Use number keys (1, 2, 3, …) or use the buttons in the top-right corner to asssign speakers
 - Add/remove speakers with the `+` / `−` buttons.
+- Rename speakers via the text fields  
 
 <img src="https://github.com/user-attachments/assets/550bac64-003a-44c5-994b-f36c1cdedb58" alt="assign" />
 
