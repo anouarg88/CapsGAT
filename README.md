@@ -74,7 +74,8 @@ You can:
 
 ---
 
-For more details, see the [CapsQual User Manual](https://github.com/anouarg88/CapsQual/wiki)
+For more details, see the [CapsQual User Manual](https://github.com/anouarg88/CapsQual/wiki).
+
 CapsQual was developed using AI.
 
 # Installation
