@@ -1348,6 +1348,9 @@ class SRTEditor(QMainWindow):
         QShortcut(QKeySequence("End"), self).activated.connect(self.toggle_playback)
         QShortcut(QKeySequence("PgDown"), self).activated.connect(self.forward_audio)
         QShortcut(QKeySequence("Ctrl+J"), self).activated.connect(self.jump_to_time)
+        QShortcut(QKeySequence("Ctrl+L"), self).activated.connect(
+            lambda: self.auto_sync_with_audio(self.audio_player.get_position() if self.audio_player else 0)
+        )
                
         QShortcut(QKeySequence("+"), self).activated.connect(lambda: self.speed_knob.set_value_direct(min(2.0, self.playback_speed + 0.1)))
         QShortcut(QKeySequence("-"), self).activated.connect(lambda: self.speed_knob.set_value_direct(max(0.5, self.playback_speed - 0.1)))
@@ -2011,6 +2014,9 @@ Keyboard Shortcuts:
 Navigation:
 • P / Left Arrow: Previous block
 • N / Right Arrow: Next block
+• Ctrl+L: Jump to Current Audio Location
+
+Assigning Speakers:
 • 1-4: Assign speakers A-D
 • U: Unassign current block
 
@@ -2021,7 +2027,7 @@ Editing:
 • T: Edit segment timestamp
 • Enter: Insert empty line
 
-GAT2 Symbols:
+Transcription Symbols:
 • *: Open symbols dialog
 • .: Insert micropause (with placement)
 • h: Insert short inhale (with placement)
@@ -4880,5 +4886,3 @@ Engineered with DeepSeek V3.2
             event.accept()
         else:
             event.ignore()
-
-
