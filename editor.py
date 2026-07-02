@@ -1348,9 +1348,10 @@ class SRTEditor(QMainWindow):
         QShortcut(QKeySequence("End"), self).activated.connect(self.toggle_playback)
         QShortcut(QKeySequence("PgDown"), self).activated.connect(self.forward_audio)
         QShortcut(QKeySequence("Ctrl+J"), self).activated.connect(self.jump_to_time)
-        QShortcut(QKeySequence("Ctrl+L"), self).activated.connect(
+        QShortcut(QKeySequence("Shift+L"), self).activated.connect(
             lambda: self.auto_sync_with_audio(self.audio_player.get_position() if self.audio_player else 0)
         )
+        QShortcut(QKeySequence("Ctrl+L"), self).activated.connect(self.toggle_auto_sync_shortcut)
                
         QShortcut(QKeySequence("+"), self).activated.connect(lambda: self.speed_knob.set_value_direct(min(2.0, self.playback_speed + 0.1)))
         QShortcut(QKeySequence("-"), self).activated.connect(lambda: self.speed_knob.set_value_direct(max(0.5, self.playback_speed - 0.1)))
@@ -1810,6 +1811,10 @@ class SRTEditor(QMainWindow):
         """Toggle auto-sync"""
         self.auto_sync_enabled = checked
         logger.info(f"Auto-sync {'enabled' if checked else 'disabled'}")
+
+    def toggle_auto_sync_shortcut(self):
+        if self.auto_sync_check.isEnabled():
+            self.auto_sync_check.toggle()
     
     def toggle_auto_pause(self, checked):
         """Toggle auto-pause"""
@@ -2014,7 +2019,6 @@ Keyboard Shortcuts:
 Navigation:
 • P / Left Arrow: Previous block
 • N / Right Arrow: Next block
-• Ctrl+L: Jump to Current Audio Location
 
 Assigning Speakers:
 • 1-4: Assign speakers A-D
@@ -2038,6 +2042,8 @@ Audio Controls:
 • PgUp: Rewind 5 seconds
 • PgDn: Fast forward 5 seconds
 • Ctrl+J: Jump to Time
+• Shift+L: Jump to Current Audio Location
+• Ctrl+L: Toggle Auto-sync to Audio
 • Shift+Enter: Play from current segment
 • -: Lower Playback Speed
 • +: Speed up Playback
@@ -4886,3 +4892,4 @@ Engineered with DeepSeek V3.2
             event.accept()
         else:
             event.ignore()
+            
