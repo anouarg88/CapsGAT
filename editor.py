@@ -1,3 +1,14 @@
+from export import (
+    time_to_seconds, time_to_ms, format_timestamp, get_timestamp_width,
+    format_srt_time, strip_markup, escape_html, convert_markup_to_html,
+    replace_indent_placeholders, generate_gat2_text, generate_dresing_pehl_text,
+    generate_tiq_text, generate_srt_text, generate_transcript_text,
+    _build_ordered_segments, _group_into_turns, _tokenize_with_pauses,
+    _tokenize_cjk_with_pauses, _wrap_text as wrap_text, estimate_missing_timestamps,
+    _ms_to_time as ms_to_time
+)
+
+
 """Main SRT/transcript editor window for CapsQual."""
 import sys
 import re
@@ -198,25 +209,6 @@ class SRTEditor(QMainWindow):
             r'\(\.\)|\(-+\)|\(\d+(?:\.\d+)?\)|°h+|h+°|@\(\.\)@|@\(\d+s\)@|//|<<.*?>>|\[.*?\]|\(\(.*?\)\)|└'
         )
 
-    def _tokenize_with_pauses(self, text):
-        """Split text into tokens, keeping pause symbols whole and spaces as separate tokens."""
-        tokens = []
-        last_end = 0
-        for match in self.pause_pattern.finditer(text):
-            start, end = match.span()
-            if start > last_end:
-                # Add preceding text, split by spaces
-                preceding = text[last_end:start]
-                # Split by spaces, preserving spaces as tokens
-                parts = re.split(r'(\s+)', preceding)
-                tokens.extend([p for p in parts if p])
-            tokens.append(match.group())  # pause token
-            last_end = end
-        if last_end < len(text):
-            remaining = text[last_end:]
-            parts = re.split(r'(\s+)', remaining)
-            tokens.extend([p for p in parts if p])
-        return tokens
     
     def time_label_clicked(self, event):
         self.jump_to_time()
@@ -903,8 +895,8 @@ class SRTEditor(QMainWindow):
             if not current.get('end_time') or not nxt.get('start_time'):
                 continue
 
-            end_sec = self.time_to_seconds(current['end_time'])
-            start_sec = self.time_to_seconds(nxt['start_time'])
+            end_sec = time_to_seconds(current['end_time'])
+            start_sec = time_to_seconds(nxt['start_time'])
             gap = start_sec - end_sec
 
             if gap < min_gap:
@@ -1005,51 +997,7 @@ class SRTEditor(QMainWindow):
             return None
                 
                 
-    def format_timestamp(self, seconds, style="curly", custom_pattern=None):
-        """
-        Format a timestamp (seconds) according to the chosen style.
-        style: "hash", "bracket", "curly", "custom"
-        custom_pattern: a string containing placeholders HH, mm, ss, xx (case‑insensitive)
-        Returns a string (no surrounding whitespace).
-        """
-        if seconds is None:
-            return ""
-
-        # Compute components
-        h = int(seconds // 3600)
-        m = int((seconds % 3600) // 60)
-        s = int(seconds % 60)
-        tenths = int((seconds - int(seconds)) * 10)   # one digit after decimal
-
-        if style == "curly":
-            return f"{{{h:02d}:{m:02d}:{s:02d}}}"
-        elif style == "hash":
-            return f"#{h:02d}:{m:02d}:{s:02d}-{tenths}#"
-        elif style == "bracket":
-            return f"[{h:02d}:{m:02d}:{s:02d}]"
-        elif style == "custom" and custom_pattern:
-            result = custom_pattern
-            # Replace placeholders case‑insensitively
-            result = re.sub(r'HH', f"{h:02d}", result, flags=re.IGNORECASE)
-            result = re.sub(r'MM', f"{m:02d}", result, flags=re.IGNORECASE)   # matches MM, Mm, mM, mm
-            result = re.sub(r'SS', f"{s:02d}", result, flags=re.IGNORECASE)   # matches SS, Ss, sS, ss
-            result = re.sub(r'XX', f"{tenths}", result, flags=re.IGNORECASE)  # matches XX, Xx, xX, xx
-            return result
-        else:
-            return ""
         
-    def get_timestamp_width(self, style, custom_pattern=None):
-        """Return the width (in characters) of a timestamp for the given style."""
-        if style =="curly":
-            return 10
-        elif style == "hash":
-            return 12   # #HH:MM:SS-x# always 12 chars
-        elif style == "bracket":
-            return 10   # [HH:MM:SS] always 10 chars
-        else:  # custom
-            # Use a sample time (1:23:45.6) to determine length
-            sample = self.format_timestamp(5025.6, style, custom_pattern)
-            return len(sample)
     
     def count_leading_spaces(self, s):
         """Return number of leading space characters."""
@@ -1363,24 +1311,7 @@ class SRTEditor(QMainWindow):
         
         self.update_splash("Loading user interface...")
     
-    def convert_markup_to_html(self, text):
-        """Convert #@B #@/B, #@I #@/I, #@U #@/U to HTML tags."""
-        import re
-        # Bold
-        text = re.sub(r'#@B(.*?)#@/B', r'<b>\1</b>', text, flags=re.DOTALL)
-        # Italic
-        text = re.sub(r'#@I(.*?)#@/I', r'<i>\1</i>', text, flags=re.DOTALL)
-        # Underline
-        text = re.sub(r'#@U(.*?)#@/U', r'<u>\1</u>', text, flags=re.DOTALL)
-        return text
 
-    def strip_markup(self, text):
-        """Remove formatting markers, leaving only the inner text."""
-        import re
-        text = re.sub(r'#@[BIU](.*?)#@/[BIU]', r'\1', text, flags=re.DOTALL)
-        # Also remove any leftover markers if they appear standalone (should not happen)
-        text = re.sub(r'#@[BIU]|#@/[BIU]', '', text)
-        return text
 
     def add_formatted_paragraph(self, doc, text, style_name=None):
         """Add a paragraph to a python-docx document with appropriate runs."""
@@ -1446,39 +1377,6 @@ class SRTEditor(QMainWindow):
             run.underline = underline
     
     
-    def _build_ordered_segments(self, include_timestamps=False):
-        """
-        Walk through srt_blocks and return a list of segments in original order.
-        Each segment is a dict with keys:
-            'type': 'turn' or 'special'
-            For 'turn': 'speaker' (index), 'blocks' (list of blocks), 
-                        'start_time' (first block's start), 'end_time' (last block's end)
-            For 'special': 'block' (the whole block)
-        """
-        segments = []
-        i = 0
-        n = len(self.srt_blocks)
-        while i < n:
-            block = self.srt_blocks[i]
-            if block['speaker'] is not None:
-                # Start a turn – collect consecutive blocks with the same speaker
-                speaker = block['speaker']
-                turn_blocks = []
-                while i < n and self.srt_blocks[i]['speaker'] == speaker:
-                    turn_blocks.append(self.srt_blocks[i])
-                    i += 1
-                segments.append({
-                    'type': 'turn',
-                    'speaker': speaker,
-                    'blocks': turn_blocks,
-                    'start_time': turn_blocks[0].get('start_time') if include_timestamps else None,
-                    'end_time': turn_blocks[-1].get('end_time') if include_timestamps else None
-                })
-            else:
-                # Special block (empty, pause, comment)
-                segments.append({'type': 'special', 'block': block})
-                i += 1
-        return segments
     
     def update_ui(self):
         """Update UI elements based on current state"""
@@ -1686,7 +1584,7 @@ class SRTEditor(QMainWindow):
             return
 
         # Convert start_time to seconds
-        seconds = self.time_to_seconds(block['start_time'])
+        seconds = time_to_seconds(block['start_time'])
 
         # If already playing, just seek. If not, play then seek so the first time
         # after load the seek takes effect (some backends only apply seek after play has started).
@@ -1763,8 +1661,8 @@ class SRTEditor(QMainWindow):
         if 0 <= self.current_block_index < len(self.srt_blocks):
             block = self.srt_blocks[self.current_block_index]
             if block.get('start_time') and block.get('end_time'):
-                start_ms = self.time_to_ms(block['start_time'])
-                end_ms = self.time_to_ms(block['end_time'])
+                start_ms = time_to_ms(block['start_time'])
+                end_ms = time_to_ms(block['end_time'])
                 
                 if start_ms - buffer_ms <= current_time_ms <= end_ms + buffer_ms:
                     return  # Still in current block
@@ -1772,8 +1670,8 @@ class SRTEditor(QMainWindow):
         # Search for matching block
         for i, block in enumerate(self.srt_blocks):
             if block.get('start_time') and block.get('end_time'):
-                start_ms = self.time_to_ms(block['start_time'])
-                end_ms = self.time_to_ms(block['end_time'])
+                start_ms = time_to_ms(block['start_time'])
+                end_ms = time_to_ms(block['end_time'])
                 
                 if start_ms - buffer_ms <= current_time_ms <= end_ms + buffer_ms:
                     if i != self.current_block_index:
@@ -1823,70 +1721,7 @@ class SRTEditor(QMainWindow):
               
 
 
-    def wrap_text(self, text, max_width, character_wrap=False, first_line_only_indent=True):
-        """
-        Wrap text to max_width characters.
-        - If character_wrap: break at exact character positions.
-        - Otherwise, tokenize using _tokenize_with_pauses (keeps pause symbols atomic)
-          and then fill lines greedily, dropping leading spaces on new lines.
-        """
-        if not text or max_width <= 0:
-            return [text]
 
-        if character_wrap:
-            # Simple character‑based wrap
-            return [text[i:i+max_width] for i in range(0, len(text), max_width)]
-
-        # Use pause‑aware tokenization
-        tokens = self._tokenize_with_pauses(text)
-
-        lines = []
-        current_line = ''
-
-        for token in tokens:
-            if not token:
-                continue
-
-            # If adding this token would exceed max_width
-            if len(current_line + token) > max_width:
-                if current_line:
-                    lines.append(current_line)
-                    current_line = ''
-
-                # Skip leading space token
-                if token.isspace():
-                    continue
-
-                # If the token itself is longer than max_width, split it into chunks
-                if len(token) > max_width:
-                    for i in range(0, len(token), max_width):
-                        chunk = token[i:i+max_width]
-                        if chunk:
-                            if i == 0:
-                                current_line = chunk
-                            else:
-                                lines.append(chunk)
-                    current_line = ''
-                else:
-                    current_line = token
-
-            else:
-                current_line += token
-
-        if current_line:
-            lines.append(current_line)
-
-        return lines
-
-    def escape_html(self, text):
-        """Escape HTML special characters to prevent interpretation as HTML tags"""
-        if not text:
-            return text
-        return (text.replace('&', '&amp;')
-                   .replace('<', '&lt;')
-                   .replace('>', '&gt;')
-                   .replace('"', '&quot;')
-                   .replace("'", '&#39;'))
     
     def new_project(self):
         """Create new project"""
@@ -2915,15 +2750,6 @@ Engineered with DeepSeek V3.2
         self.create_speaker_widgets()
         self.update_display()
     
-    def replace_indent_placeholders(self, text, for_export=False):
-        """Replace indent placeholders with spaces.
-        If for_export is True and cjk_mode is True, replace each placeholder with two spaces.
-        Otherwise replace with one space.
-        """
-        if for_export and self.cjk_mode:
-            return text.replace(self.INDENT_PLACEHOLDER, '  ')
-        else:
-            return text.replace(self.INDENT_PLACEHOLDER, ' ')
     
     def update_display(self):
         if not self.srt_blocks:
@@ -3148,9 +2974,9 @@ Engineered with DeepSeek V3.2
                 if text_before and text_after:
                     if current_block.get('start_time') and current_block.get('end_time'):
                         original_end_time = current_block['end_time']
-                        original_end_ms = self.time_to_ms(original_end_time)
+                        original_end_ms = time_to_ms(original_end_time)
                         
-                        start_ms = self.time_to_ms(current_block['start_time'])
+                        start_ms = time_to_ms(current_block['start_time'])
                         end_ms = original_end_ms
                         total_duration = end_ms - start_ms
                         
@@ -3162,13 +2988,13 @@ Engineered with DeepSeek V3.2
 
                         current_block['raw_text'] = text_before
                         current_block['text'] = text_before   # also update text for compatibility
-                        current_block['end_time'] = self.ms_to_time(split_ms)
+                        current_block['end_time'] = ms_to_time(split_ms)
 
                         new_block = current_block.copy()
                         new_block['raw_text'] = text_after
                         new_block['text'] = text_after
                         new_block['index'] = max(block['index'] for block in self.srt_blocks) + 1
-                        new_block['start_time'] = self.ms_to_time(split_ms)
+                        new_block['start_time'] = ms_to_time(split_ms)
                         new_block['end_time'] = original_end_time
                         new_block['speaker'] = None
                         new_block['is_turn_start'] = False
@@ -4028,12 +3854,12 @@ Engineered with DeepSeek V3.2
                     unassigned_handling = "skip"
 
             if settings['format'] == 'srt':
-                transcript_text = self.generate_srt_text(
+                transcript_text = generate_srt_text(self, 
                     include_diarization=settings['include_diarization'],
                     unassigned_handling=unassigned_handling
                 )
             else:
-                transcript_text = self.generate_transcript_text(
+                transcript_text = generate_transcript_text(self, 
                     include_timestamps=settings['include_timestamps'],
                     timestamp_style=settings.get('timestamp_style', 'hash'),
                     custom_pattern=settings.get('custom_timestamp_pattern', None),
@@ -4051,684 +3877,20 @@ Engineered with DeepSeek V3.2
             self.final_export(transcript_text, settings, project_info, unassigned_handling)
 
 
-    def generate_transcript_text(self, include_timestamps=True,
-                                 timestamp_style="hash", custom_pattern=None,
-                                 convention="gat2", include_diarization=True,
-                                 wrap_enabled=False, wrap_length=80, character_wrap=False,
-                                 add_blank_line=False,
-                                 concatenate_turns=False, delimiter_choice="space", custom_delimiter=""):
-        if convention == "dresing_pehl":
-            return self.generate_dresing_pehl_text(
-                include_timestamps, timestamp_style, custom_pattern, include_diarization,
-                add_blank_line, concatenate_turns, delimiter_choice, custom_delimiter)
-        elif convention == "tiq":
-            return self.generate_tiq_text(
-                include_timestamps, timestamp_style, custom_pattern, include_diarization,
-                wrap_enabled, wrap_length, character_wrap, add_blank_line,
-                concatenate_turns, delimiter_choice, custom_delimiter)
-        else:  # gat2
-            return self.generate_gat2_text(
-                include_timestamps, timestamp_style, custom_pattern, include_diarization,
-                wrap_enabled, wrap_length, character_wrap, add_blank_line,
-                concatenate_turns, delimiter_choice, custom_delimiter)
         
-    def generate_gat2_text(self, include_timestamps=True,
-                           timestamp_style="curly", custom_pattern=None,
-                           include_diarization=True,
-                           wrap_enabled=False, wrap_length=80, character_wrap=False,
-                           add_blank_line=False,
-                           concatenate_turns=False, delimiter_choice="default", custom_delimiter=""):
-        if not self.srt_blocks:
-            return ""
-
-        # Determine delimiter
-        if delimiter_choice == "default":
-            delimiter = " " if not self.cjk_mode else ""
-        elif delimiter_choice == "custom":
-            delimiter = custom_delimiter
-        else:
-            delimiter = " "
-
-        # Helper to decide which blocks to include
-        def is_valid_block(b):
-            # Keep if assigned, or if it's a pause/comment block (even if unassigned)
-            return (b['speaker'] is not None) or b.get('is_pause') or b.get('is_comment')
-
-        if concatenate_turns:
-            # Group into turns – this automatically only includes speaker blocks
-            turns = self._group_into_turns(include_timestamps)
-            if not turns:
-                return ""
-
-            # Determine max speaker label length
-            max_speaker_length = 2
-            for turn in turns:
-                speaker_label = self.speakers[turn['speaker']] + ":"
-                max_speaker_length = max(max_speaker_length, len(speaker_label))
-
-            total_turns = len(turns)
-            line_digits = len(str(total_turns))
-
-            # Pre‑compute timestamp width if needed
-            if include_timestamps:
-                ts_width = self.get_timestamp_width(timestamp_style, custom_pattern)
-                timestamp_padding = " " * (ts_width + 3)
-            else:
-                timestamp_padding = ""
-
-            output_lines = []
-
-            for turn_idx, turn in enumerate(turns, start=1):
-                # Build turn text from all blocks in the turn
-                turn_text = delimiter.join(
-                    self.replace_indent_placeholders(b['raw_text'], for_export=True).strip()
-                    for b in turn['blocks'] if b['text'].strip()
-                )
-                if not turn_text:
-                    continue
-
-                line_num_part = f"{turn_idx:0{line_digits}d}   "
-
-                # Timestamp part
-                if include_timestamps:
-                    if turn.get('start_time'):
-                        seconds = self.time_to_seconds(turn['start_time'])
-                        ts = self.format_timestamp(seconds, timestamp_style, custom_pattern)
-                        timestamp = f"{ts}   "
-                    else:
-                        timestamp = timestamp_padding
-                else:
-                    timestamp = ""
-
-                speaker_part = self.speakers[turn['speaker']] + ":"
-                speaker_part = speaker_part.ljust(max_speaker_length) + "   "
-                left_part = timestamp + line_num_part + speaker_part
-
-                if wrap_enabled and wrap_length > 0:
-                    available_width = wrap_length - len(left_part)
-                    if available_width < 10:
-                        available_width = 40
-                    lines = self.wrap_text(turn_text, available_width, character_wrap, first_line_only_indent=True)
-                    for idx, line in enumerate(lines):
-                        if idx == 0:
-                            output_lines.append(left_part + line)
-                        else:
-                            output_lines.append(' ' * len(left_part) + line)
-                else:
-                    output_lines.append(left_part + turn_text)
-
-                if add_blank_line:
-                    output_lines.append("")
-
-            return '\n'.join(output_lines)
-
-        else:
-            # Original block‑by‑block output, but skip unassigned non‑pause blocks
-            included_blocks = [b for b in self.srt_blocks if is_valid_block(b)]
-            if not included_blocks:
-                return ""
-
-            # Determine max speaker label length
-            max_speaker_length = 2
-            for b in included_blocks:
-                if b['speaker'] is not None and b.get('is_turn_start', True):
-                    speaker_label = self.speakers[b['speaker']] + ":"
-                    max_speaker_length = max(max_speaker_length, len(speaker_label))
-
-            total_lines = len(included_blocks)
-            line_digits = len(str(total_lines))
-
-            if include_timestamps:
-                ts_width = self.get_timestamp_width(timestamp_style, custom_pattern)
-                timestamp_padding = " " * (ts_width + 3)
-            else:
-                timestamp_padding = ""
-
-            output_lines = []
-
-            for i, block in enumerate(included_blocks):
-                line_num = i + 1
-                line_number_part = f"{line_num:0{line_digits}d}   "
-
-                if block.get('is_turn_start', True) and block['speaker'] is not None:
-                    speaker_part = self.speakers[block['speaker']] + ":"
-                    speaker_part = speaker_part.ljust(max_speaker_length) + "   "
-                else:
-                    speaker_part = " " * (max_speaker_length + 3)
-
-                if include_timestamps:
-                    if block.get('is_turn_start', True) and block['speaker'] is not None:
-                        if block.get('start_time'):
-                            seconds = self.time_to_seconds(block['start_time'])
-                            ts = self.format_timestamp(seconds, timestamp_style, custom_pattern)
-                            timestamp = f"{ts}   "
-                        else:
-                            timestamp = timestamp_padding
-                    else:
-                        timestamp = timestamp_padding
-                else:
-                    timestamp = ""
-
-                left_part = timestamp + line_number_part + speaker_part
-                text = self.replace_indent_placeholders(block['raw_text'], for_export=True)
-
-                if wrap_enabled and wrap_length > 0:
-                    available_width = wrap_length - len(left_part)
-                    if available_width < 10:
-                        available_width = 40
-                    lines = self.wrap_text(text, available_width, character_wrap, first_line_only_indent=True)
-                    for idx, line in enumerate(lines):
-                        if idx == 0:
-                            output_lines.append(left_part + line)
-                        else:
-                            output_lines.append(' ' * len(left_part) + line)
-                else:
-                    output_lines.append(left_part + text)
-
-                # Check for turn end and add blank line if requested (only in block mode)
-                is_last = (i == len(included_blocks) - 1)
-                next_block = included_blocks[i+1] if not is_last else None
-                if not is_last and next_block and next_block.get('speaker') != block.get('speaker'):
-                    if add_blank_line:
-                        output_lines.append("")
-
-            return '\n'.join(output_lines)
     
-    def generate_dresing_pehl_text(self, include_timestamps=True,
-                                   timestamp_style="hash", custom_pattern=None,
-                                   include_diarization=True, add_blank_line=False,
-                                   concatenate_turns=True,   # ignored
-                                   delimiter_choice="space", custom_delimiter=""):
-        if not self.srt_blocks:
-            return ""
-
-        if delimiter_choice == "default":
-            delimiter = " " if not self.cjk_mode else ""
-        elif delimiter_choice == "custom":
-            delimiter = custom_delimiter
-        else:
-            delimiter = " "
-            
-        # Use ordered segments
-        segments = self._build_ordered_segments(include_timestamps)
-        output_lines = []
-        output_lines.append("")  # blank line at top
-
-        for seg in segments:
-            if seg['type'] == 'turn':
-                # Concatenate all block texts in the turn using delimiter
-                turn_text = delimiter.join(
-                    self.replace_indent_placeholders(b['raw_text'], for_export=True).strip()
-                    for b in seg['blocks'] if b['text'].strip()
-                )
-                if not turn_text:
-                    continue
-
-                if include_diarization:
-                    line = f"{self.speakers[seg['speaker']]}: {turn_text}"
-                else:
-                    line = turn_text
-
-                if include_timestamps and seg['start_time']:
-                    seconds = self.time_to_seconds(seg['start_time'])
-                    ts = self.format_timestamp(seconds, timestamp_style, custom_pattern)
-                    line += f" {ts}"
-
-                output_lines.append(line)
-                if add_blank_line:
-                    output_lines.append("")
-
-            else:  # special block
-                block = seg['block']
-                # Skip unassigned blocks that are not pause/comment
-                if block['speaker'] is None and not block.get('is_pause') and not block.get('is_comment'):
-                    continue
-                if block.get('is_empty'):
-                    output_lines.append("")
-                    continue
-                text = self.replace_indent_placeholders(block['raw_text'], for_export=True).strip()
-                if text:
-                    output_lines.append(text)
-                    if add_blank_line:
-                        output_lines.append("")
-
-        return '\n'.join(output_lines)
     
-    def _group_into_turns(self, include_timestamps=False):
-        """Group consecutive blocks with the same speaker into turns.
-        Returns list of turns, each with keys: speaker (index), blocks, start_time, end_time.
-        """
-        turns = []
-        current_turn = None
-        for block in self.srt_blocks:
-            if block.get('is_pause') or block.get('is_comment') or block.get('is_empty'):
-                continue
-            if block['speaker'] is None:
-                continue
-
-            speaker_idx = block['speaker']   # integer, not the label string
-            if current_turn is None or current_turn['speaker'] != speaker_idx or block.get('is_turn_start', True):
-                if current_turn is not None:
-                    turns.append(current_turn)
-                current_turn = {
-                    'speaker': speaker_idx,
-                    'blocks': [],
-                    'start_time': block['start_time'] if include_timestamps else None
-                }
-            current_turn['blocks'].append(block)
-            if include_timestamps and block['end_time']:
-                current_turn['end_time'] = block['end_time']
-        if current_turn is not None:
-            turns.append(current_turn)
-        return turns
 
 
-    def generate_tiq_text(self, include_timestamps=True,
-                          timestamp_style="hash", custom_pattern=None,
-                          include_diarization=True,
-                          wrap_enabled=False, wrap_length=80, character_wrap=False,
-                          add_blank_line=False,
-                          concatenate_turns=True,   # ignored
-                          delimiter_choice="space", custom_delimiter=""):
-        """Generate TiQ format transcript – pause symbols are atomic except when character wrap is forced."""
-        if not self.srt_blocks:
-            return ""
-
-        # Determine delimiter
-        if delimiter_choice == "default":
-            delimiter = " " if not self.cjk_mode else ""
-        elif delimiter_choice == "custom":
-            delimiter = custom_delimiter
-        else:
-            delimiter = " "
-
-        # Max speaker label width
-        max_speaker_width = 0
-        if include_diarization:
-            for speaker in self.speakers:
-                label = f"{speaker}: "
-                max_speaker_width = max(max_speaker_width, len(label))
-        else:
-            max_speaker_width = 0
-
-        segments = self._build_ordered_segments(include_timestamps)
-        content_lines = []
-
-        for seg in segments:
-            if seg['type'] == 'turn':
-                # Build turn text using delimiter
-                turn_text = delimiter.join(
-                    self.replace_indent_placeholders(b['raw_text'], for_export=True)
-                    for b in seg['blocks'] if b['text'].strip()
-                )
-                if not turn_text:
-                    continue
-
-                # Timestamp token (including leading space)
-                ts_token = ""
-                if include_timestamps and seg.get('start_time'):
-                    seconds = self.time_to_seconds(seg['start_time'])
-                    ts = self.format_timestamp(seconds, timestamp_style, custom_pattern)
-                    ts_token = " " + ts
-
-                # Speaker prefix for first line
-                if include_diarization:
-                    speaker_prefix = f"{self.speakers[seg['speaker']]}: ".ljust(max_speaker_width)
-                else:
-                    speaker_prefix = " " * max_speaker_width
-
-                # Estimate line number width (safe maximum)
-                line_num_width = 4  # up to 9999 lines
-                line_num_padding = line_num_width + 1  # space after number
-
-                # Available width for content (text + timestamp) on a line
-                content_width = wrap_length - line_num_padding - len(speaker_prefix)
-
-                if wrap_enabled and wrap_length > 0 and content_width > 10:
-                    # Choose tokenization strategy
-                    if character_wrap:
-                        # Character‑based: treat every character as a token (pause symbols will split)
-                        tokens = list(turn_text)
-                    elif self.cjk_mode:
-                        # CJK mode: characters are atomic, but pause symbols should remain whole
-                        tokens = self._tokenize_cjk_with_pauses(turn_text)
-                    else:
-                        # Latin mode: word‑based with pause symbols atomic
-                        tokens = self._tokenize_with_pauses(turn_text)
-
-                    if ts_token:
-                        tokens.append(ts_token)
-
-                    # Greedy line filling with leading space skipping
-                    lines = []
-                    current_line = ""
-                    for token in tokens:
-                        if not token:
-                            continue
-                        if len(current_line + token) > content_width:
-                            if current_line:
-                                lines.append(current_line)
-                                current_line = ""
-                            # Skip leading space token
-                            if token.isspace():
-                                continue
-                            # If token too long, split
-                            if len(token) > content_width:
-                                for i in range(0, len(token), content_width):
-                                    chunk = token[i:i+content_width]
-                                    if chunk:
-                                        if i == 0:
-                                            current_line = chunk
-                                        else:
-                                            lines.append(chunk)
-                                current_line = ""
-                            else:
-                                current_line = token
-                        else:
-                            current_line += token
-
-                    if current_line:
-                        lines.append(current_line)
-
-                    # Apply speaker prefix
-                    for idx, line in enumerate(lines):
-                        if idx == 0:
-                            content_lines.append(speaker_prefix + line)
-                        else:
-                            content_lines.append(" " * len(speaker_prefix) + line)
-                else:
-                    # No wrapping: one line with timestamp appended
-                    line = speaker_prefix + turn_text
-                    if ts_token:
-                        line += ts_token
-                    content_lines.append(line)
-
-                if add_blank_line:
-                    content_lines.append("")
-
-            else:  # special block
-                block = seg['block']
-                if block['speaker'] is None and not block.get('is_pause') and not block.get('is_comment'):
-                    continue
-                if block.get('is_empty'):
-                    content_lines.append("")
-                    continue
-                text = self.replace_indent_placeholders(block['raw_text'], for_export=True).strip()
-                if not text:
-                    continue
-
-                speaker_padding = " " * max_speaker_width
-                if wrap_enabled and wrap_length > 0:
-                    line_num_width = 4
-                    line_num_padding = line_num_width + 1
-                    content_width = wrap_length - line_num_padding - len(speaker_padding)
-                    if content_width > 10:
-                        # Tokenize special block similarly
-                        if character_wrap:
-                            tokens = list(text)
-                        elif self.cjk_mode:
-                            tokens = self._tokenize_cjk_with_pauses(text)
-                        else:
-                            tokens = self._tokenize_with_pauses(text)
-
-                        lines = []
-                        current_line = ""
-                        for token in tokens:
-                            if not token:
-                                continue
-                            if len(current_line + token) > content_width:
-                                if current_line:
-                                    lines.append(current_line)
-                                    current_line = ""
-                                if token.isspace():
-                                    continue
-                                if len(token) > content_width:
-                                    for i in range(0, len(token), content_width):
-                                        chunk = token[i:i+content_width]
-                                        if chunk:
-                                            if i == 0:
-                                                current_line = chunk
-                                            else:
-                                                lines.append(chunk)
-                                    current_line = ""
-                                else:
-                                    current_line = token
-                            else:
-                                current_line += token
-                        if current_line:
-                            lines.append(current_line)
-
-                        for idx, line in enumerate(lines):
-                            if idx == 0:
-                                content_lines.append(speaker_padding + line)
-                            else:
-                                content_lines.append(" " * len(speaker_padding) + line)
-                    else:
-                        content_lines.append(speaker_padding + text)
-                else:
-                    content_lines.append(speaker_padding + text)
-
-        # Add line numbers
-        total_lines = len(content_lines)
-        line_digits = len(str(total_lines))
-        output_lines = []
-        for idx, line in enumerate(content_lines, start=1):
-            line_num = f"{idx:0{line_digits}d}"
-            output_lines.append(f"{line_num} {line}")
-
-        return '\n'.join(output_lines)
         
 
-    def _tokenize_cjk_with_pauses(self, text):
-        """Split CJK text into tokens: either a single character, or a whole pause symbol."""
-        tokens = []
-        i = 0
-        while i < len(text):
-            # Try to match a pause symbol starting at i
-            m = self.pause_pattern.match(text, i)
-            if m:
-                tokens.append(m.group())
-                i = m.end()
-            else:
-                tokens.append(text[i])
-                i += 1
-        return tokens
 
 
-    def time_to_seconds(self, time_str):
-        """Convert time string to seconds with milliseconds as decimal."""
-        if not time_str:
-            return 0
 
-        if ',' in time_str:
-            time_part, ms_part = time_str.split(',')
-            ms = int(ms_part)
-        else:
-            time_part = time_str
-            ms = 0
 
-        parts = time_part.split(':')
-        if len(parts) == 3:
-            hours = int(parts[0])
-            minutes = int(parts[1])
-            seconds = int(parts[2])
-        elif len(parts) == 2:
-            hours = 0
-            minutes = int(parts[0])
-            seconds = int(parts[1])
-        else:
-            return 0
 
-        return hours * 3600 + minutes * 60 + seconds + ms / 1000.0
 
-    def generate_srt_text(self, include_diarization=True, unassigned_handling="skip"):
-        """Generate SRT format text with optional diarization."""
-        if not self.file_has_timestamps:
-            return "SRT export requires timestamp information. Original file does not contain timestamps.\n\nNote: SRT files require precise timing information for each subtitle."
 
-        blocks_with_timestamps = self.estimate_missing_timestamps()
-
-        srt_blocks = []
-        subtitle_index = 1
-
-        for block in blocks_with_timestamps:
-            if block.get('is_pause') or block.get('is_comment') or block.get('is_empty'):
-                continue
-
-            if block['speaker'] is None:
-                if unassigned_handling == "skip":
-                    continue
-                elif unassigned_handling == "no_label":
-                    speaker_prefix = ""
-                elif unassigned_handling == "unknown":
-                    speaker_prefix = "Unknown: "
-            else:
-                speaker_prefix = ""
-                if include_diarization:
-                    speaker_prefix = f"{self.speakers[block['speaker']]}: "
-
-            # For SRT, we don't need indentation; replace placeholders with spaces (1 space each)
-            formatted = self.replace_indent_placeholders(block['raw_text'], for_export=True).lstrip()
-            # Strip formatting markers for SRT
-            formatted = self.strip_markup(formatted)
-
-            start_time = self.format_srt_time(block['start_time'])
-            end_time = self.format_srt_time(block['end_time'])
-
-            srt_block = f"{subtitle_index}\n{start_time} --> {end_time}\n{speaker_prefix}{formatted}\n"
-            srt_blocks.append(srt_block)
-            subtitle_index += 1
-
-        return "\n".join(srt_blocks)
-
-    def format_srt_time(self, time_str):
-        """Convert time string to SRT format (HH:MM:SS,mmm)."""
-        if not time_str:
-            return "00:00:00,000"
-
-        if ',' in time_str:
-            return time_str
-        elif ':' in time_str:
-            parts = time_str.split(':')
-            if len(parts) == 2:
-                return f"00:{parts[0].zfill(2)}:{parts[1].zfill(2)},000"
-            elif len(parts) == 3:
-                time_part = parts[2]
-                if ',' in time_part:
-                    time_part, ms_part = time_part.split(',')
-                    return f"{parts[0].zfill(2)}:{parts[1].zfill(2)}:{time_part.zfill(2)},{ms_part.zfill(3)}"
-                else:
-                    return f"{parts[0].zfill(2)}:{parts[1].zfill(2)}:{time_part.zfill(2)},000"
-
-        return "00:00:00,000"
-
-    def estimate_missing_timestamps(self):
-        """Estimate timestamps for blocks that don't have them."""
-        if not self.srt_blocks:
-            return []
-
-        blocks = self.srt_blocks.copy()
-
-        timestamped_blocks = []
-        for i, block in enumerate(blocks):
-            if block.get('start_time') and block.get('end_time'):
-                timestamped_blocks.append((i, block))
-
-        if not timestamped_blocks:
-            return blocks
-
-        segments = []
-        last_timestamped_idx = -1
-
-        for i, block in timestamped_blocks:
-            if last_timestamped_idx == -1:
-                segments.append({
-                    'start_idx': 0,
-                    'end_idx': i,
-                    'start_time': None,
-                    'end_time': block['start_time'],
-                    'total_chars': sum(len(b['text']) for b in blocks[0:i])
-                })
-            else:
-                segments.append({
-                    'start_idx': last_timestamped_idx + 1,
-                    'end_idx': i,
-                    'start_time': blocks[last_timestamped_idx]['end_time'],
-                    'end_time': block['start_time'],
-                    'total_chars': sum(len(b['text']) for b in blocks[last_timestamped_idx + 1:i])
-                })
-            last_timestamped_idx = i
-
-        if last_timestamped_idx < len(blocks) - 1:
-            last_block = timestamped_blocks[-1][1] if timestamped_blocks else None
-            segments.append({
-                'start_idx': last_timestamped_idx + 1,
-                'end_idx': len(blocks) - 1,
-                'start_time': last_block['end_time'] if last_block else None,
-                'end_time': None,
-                'total_chars': sum(len(b['text']) for b in blocks[last_timestamped_idx + 1:])
-            })
-
-        for segment in segments:
-            if segment['start_time'] and segment['end_time'] and segment['total_chars'] > 0:
-                start_ms = self.time_to_ms(segment['start_time'])
-                end_ms = self.time_to_ms(segment['end_time'])
-                total_duration = end_ms - start_ms
-
-                current_time = start_ms
-                for i in range(segment['start_idx'], segment['end_idx'] + 1):
-                    block = blocks[i]
-                    if not block.get('start_time') or not block.get('end_time'):
-                        block_chars = len(block['text'])
-                        if segment['total_chars'] > 0:
-                            block_duration = (block_chars / segment['total_chars']) * total_duration
-                        else:
-                            block_duration = 1000
-
-                        block_duration = max(100, block_duration)
-
-                        block['start_time'] = self.ms_to_time(current_time)
-                        block['end_time'] = self.ms_to_time(current_time + block_duration)
-                        current_time += block_duration
-
-        return blocks
-
-    def time_to_ms(self, time_str):
-        """Convert time string to milliseconds."""
-        if not time_str:
-            return 0
-
-        if ',' in time_str:
-            time_part, ms_part = time_str.split(',')
-            ms = int(ms_part)
-        else:
-            time_part = time_str
-            ms = 0
-
-        parts = time_part.split(':')
-        if len(parts) == 3:
-            hours = int(parts[0])
-            minutes = int(parts[1])
-            seconds = int(parts[2])
-        elif len(parts) == 2:
-            hours = 0
-            minutes = int(parts[0])
-            seconds = int(parts[1])
-        else:
-            return 0
-
-        return (hours * 3600 + minutes * 60 + seconds) * 1000 + ms
-
-    def ms_to_time(self, ms):
-        """Convert milliseconds to SRT time format."""
-        hours = int(ms // 3600000)
-        ms %= 3600000
-        minutes = int(ms // 60000)
-        ms %= 60000
-        seconds = int(ms // 1000)
-        milliseconds = int(ms % 1000)
-
-        return f"{hours:02d}:{minutes:02d}:{seconds:02d},{milliseconds:03d}"
 
     def final_export(self, transcript_text, settings, project_info, unassigned_handling="skip"):
         format_extensions = {
@@ -4820,22 +3982,22 @@ Engineered with DeepSeek V3.2
                         f"Exporting as plain text instead.\n\n"
                         f"Saved as: {new_path}"
                     )
-                    stripped = self.strip_markup(transcript_text)
+                    stripped = strip_markup(transcript_text)
                     with open(new_path, 'w', encoding='utf-8') as f:
                         f.write(stripped)
 
             elif settings['format'] == 'html':
-                escaped_text = self.escape_html(transcript_text)
-                formatted = self.convert_markup_to_html(escaped_text)
+                escaped_text = escape_html(transcript_text)
+                formatted = convert_markup_to_html(escaped_text)
 
                 header_lines = []
                 if settings.get('include_title', True) and project_info.get('name'):
-                    header_lines.append(f"<h1>{self.escape_html(project_info['name'])}</h1>")
+                    header_lines.append(f"<h1>{escape_html(project_info['name'])}</h1>")
                 if settings.get('include_memo', True) and project_info.get('memo'):
-                    header_lines.append(f"<p class=\"headerstyle\"><strong>Project Memo:</strong> {self.escape_html(project_info['memo'])}</p>")
+                    header_lines.append(f"<p class=\"headerstyle\"><strong>Project Memo:</strong> {escape_html(project_info['memo'])}</p>")
                 if settings.get('include_audio', True) and self.audio_file_path:
                     audio_name = Path(self.audio_file_path).name
-                    header_lines.append(f"<p class=\"headerstyle\"><strong>Audio File:</strong> {self.escape_html(audio_name)}</p>")
+                    header_lines.append(f"<p class=\"headerstyle\"><strong>Audio File:</strong> {escape_html(audio_name)}</p>")
                 header = "\n".join(header_lines) + "\n" if header_lines else ""
 
                 font_family = "'Courier New', monospace"
@@ -4846,7 +4008,7 @@ Engineered with DeepSeek V3.2
     <html>
     <head>
     <meta charset="UTF-8">
-    <title>Transcript - {self.escape_html(project_info.get('name', 'Untitled'))}</title>
+    <title>Transcript - {escape_html(project_info.get('name', 'Untitled'))}</title>
     <style>
     body {{
         font-family: {font_family};
@@ -4875,7 +4037,7 @@ Engineered with DeepSeek V3.2
                 QMessageBox.information(self, "Success", f"Transcript exported to {file_path}")
 
             else:  # plain text
-                stripped = self.strip_markup(transcript_text)
+                stripped = strip_markup(transcript_text)
                 with open(file_path, 'w', encoding='utf-8') as f:
                     f.write(stripped)
                 QMessageBox.information(self, "Success", f"Transcript exported to {file_path}")
@@ -4892,4 +4054,5 @@ Engineered with DeepSeek V3.2
             event.accept()
         else:
             event.ignore()
-            
+
+
