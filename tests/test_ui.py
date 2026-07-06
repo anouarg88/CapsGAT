@@ -4,6 +4,9 @@ import pytest
 from unittest.mock import patch, Mock
 from PyQt5.QtWidgets import QApplication
 from editor import SRTEditor
+from export import (
+    format_timestamp, time_to_seconds, time_to_ms, _ms_to_time as ms_to_time
+)
 
 @pytest.fixture(scope="module")
 def app():
@@ -74,12 +77,12 @@ def test_mark_unsaved_changes(editor):
 
 def test_format_timestamp(editor):
     """Test timestamp formatting."""
-    assert editor.format_timestamp(90.5, "curly") == "{00:01:30}"
-    assert editor.format_timestamp(90.5, "hash") == "#00:01:30-5#"
-    assert editor.format_timestamp(90.5, "bracket") == "[00:01:30]"
+    assert format_timestamp(90.5, "curly") == "{00:01:30}"
+    assert format_timestamp(90.5, "hash") == "#00:01:30-5#"
+    assert format_timestamp(90.5, "bracket") == "[00:01:30]"
 
 def test_time_conversion(editor):
     """Test helper methods for time conversion."""
-    assert editor.time_to_seconds("00:01:30,500") == 90.5
-    assert editor.time_to_ms("00:01:30,500") == 90500
-    assert editor.ms_to_time(90500) == "00:01:30,500"
+    assert time_to_seconds("00:01:30,500") == 90.5
+    assert time_to_ms("00:01:30,500") == 90500
+    assert ms_to_time(90500) == "00:01:30,500"

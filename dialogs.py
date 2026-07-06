@@ -15,6 +15,11 @@ from PyQt5.QtGui import QFont, QKeySequence
 
 from utils import logger
 from highlighting import FormattingMarkerHighlighter
+from export import (
+    generate_srt_text, generate_transcript_text, escape_html,
+    convert_markup_to_html, strip_markup
+)
+
 
 
 
@@ -1811,7 +1816,7 @@ class ExportPreviewDialog(QDialog):
             custom = self.ts_custom_edit.text()
 
         if self.export_format == "srt":
-            srt_text = main.generate_srt_text(
+            srt_text = generate_srt_text(main, 
                 include_diarization=self.diarization_check.isChecked(),
                 unassigned_handling="skip"
             )
@@ -1824,7 +1829,7 @@ class ExportPreviewDialog(QDialog):
             return
 
         # Generate transcript text (includes markers)
-        transcript_text = main.generate_transcript_text(
+        transcript_text = generate_transcript_text(main, 
             include_timestamps=self.current_include_timestamps,
             timestamp_style=ts_style,
             custom_pattern=custom,
@@ -1843,21 +1848,21 @@ class ExportPreviewDialog(QDialog):
         header_lines = []
         if self.title_check.isChecked() and main.project_name:
             if self.export_format == "html":
-                header_lines.append(f"<h1>{main.escape_html(main.project_name)}</h1>")
+                header_lines.append(f"<h1>{escape_html(main.project_name)}</h1>")
             else:
                 header_lines.append(main.project_name)
                 header_lines.append("=" * len(main.project_name))
                 header_lines.append("")
         if self.memo_check.isChecked() and main.project_memo:
             if self.export_format == "html":
-                header_lines.append(f'<p class="headerstyle"><strong>Project Memo:</strong> {main.escape_html(main.project_memo)}</p>')
+                header_lines.append(f'<p class="headerstyle"><strong>Project Memo:</strong> {escape_html(main.project_memo)}</p>')
             else:
                 header_lines.append(f"Project Memo: {main.project_memo}")
                 header_lines.append("")
         if self.audio_check.isChecked() and main.audio_file_path:
             audio_name = Path(main.audio_file_path).name
             if self.export_format == "html":
-                header_lines.append(f'<p class="headerstyle"><strong>Audio File:</strong> {main.escape_html(audio_name)}</p>')
+                header_lines.append(f'<p class="headerstyle"><strong>Audio File:</strong> {escape_html(audio_name)}</p>')
             else:
                 header_lines.append(f"Audio File: {audio_name}")
                 header_lines.append("")
@@ -1866,8 +1871,8 @@ class ExportPreviewDialog(QDialog):
 
         if self.export_format == "html":
             # For HTML, escape then convert markers
-            escaped_text = main.escape_html(transcript_text)
-            formatted = main.convert_markup_to_html(escaped_text)
+            escaped_text = escape_html(transcript_text)
+            formatted = convert_markup_to_html(escaped_text)
 
             # Choose transcript font by convention
             if self.transcript_convention == "gat2":
@@ -1909,7 +1914,7 @@ class ExportPreviewDialog(QDialog):
             self.preview_text.setHtml(full_html)
         else:  # TXT
             # For plain text, strip markers
-            stripped_text = main.strip_markup(transcript_text)
+            stripped_text = strip_markup(transcript_text)
             self.preview_text.setPlainText(header + stripped_text)
 
     def get_export_settings(self):
