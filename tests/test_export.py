@@ -4,6 +4,10 @@ import re
 from unittest.mock import patch
 from PyQt5.QtWidgets import QApplication
 from editor import SRTEditor
+from export import (
+    generate_gat2_text, generate_dresing_pehl_text, generate_tiq_text,
+    generate_srt_text, time_to_seconds, time_to_ms
+)
 
 # ----------------------------------------------------------------------
 # Fixtures
@@ -70,7 +74,7 @@ def editor(app):
 # ----------------------------------------------------------------------
 @pytest.mark.timeout(60)
 def test_gat2_basic_export(editor):
-    text = editor.generate_gat2_text(
+    text = generate_gat2_text(editor, 
         include_timestamps=True,
         timestamp_style="curly",
         include_diarization=True,
@@ -88,7 +92,7 @@ def test_gat2_basic_export(editor):
 @pytest.mark.timeout(60)
 def test_gat2_concatenate_turns(editor):
     # Disable timestamps to avoid interference
-    text = editor.generate_gat2_text(
+    text = generate_gat2_text(editor, 
         include_timestamps=False,
         concatenate_turns=True,
         delimiter_choice="space",
@@ -105,7 +109,7 @@ def test_gat2_concatenate_turns(editor):
 @pytest.mark.timeout(60)
 def test_gat2_no_diarization(editor):
     # GAT2 keeps diarization even if include_diarization is disabled.
-    text = editor.generate_gat2_text(
+    text = generate_gat2_text(editor, 
         include_timestamps=False,
         include_diarization=False
     )
@@ -119,7 +123,7 @@ def test_gat2_no_diarization(editor):
 @pytest.mark.timeout(60)
 def test_dresing_pehl_basic(editor):
     # Disable timestamps for simpler content check
-    text = editor.generate_dresing_pehl_text(
+    text = generate_dresing_pehl_text(editor, 
         include_timestamps=False,
         include_diarization=True,
         add_blank_line=False
@@ -133,7 +137,7 @@ def test_dresing_pehl_basic(editor):
 
 @pytest.mark.timeout(60)
 def test_dresing_pehl_no_timestamp(editor):
-    text = editor.generate_dresing_pehl_text(include_timestamps=False)
+    text = generate_dresing_pehl_text(editor, include_timestamps=False)
     assert "#" not in text
     assert "{" not in text
 
@@ -143,7 +147,7 @@ def test_dresing_pehl_no_timestamp(editor):
 @pytest.mark.timeout(60)
 def test_tiq_basic(editor):
     # Keep timestamps to test format, but content check can be relaxed
-    text = editor.generate_tiq_text(
+    text = generate_tiq_text(editor, 
         include_timestamps=True,
         include_diarization=True,
         wrap_enabled=False,
@@ -159,7 +163,7 @@ def test_tiq_basic(editor):
 
 @pytest.mark.timeout(60)
 def test_tiq_wrapping(editor):
-    text = editor.generate_tiq_text(
+    text = generate_tiq_text(editor, 
         wrap_enabled=True,
         wrap_length=20,
         character_wrap=False,
@@ -172,7 +176,7 @@ def test_tiq_wrapping(editor):
 # ----------------------------------------------------------------------
 @pytest.mark.timeout(60)
 def test_srt_export_basic(editor):
-    srt = editor.generate_srt_text(include_diarization=True, unassigned_handling="skip")
+    srt = generate_srt_text(editor, include_diarization=True, unassigned_handling="skip")
     assert "A: Hello world" in srt
     assert "B: Reply" in srt
     assert "00:00:00,000 --> 00:00:02,000" in srt
@@ -188,11 +192,11 @@ def test_srt_unassigned_handling(editor):
         'start_time': '00:00:08,000',
         'end_time': '00:00:09,000'
     })
-    srt = editor.generate_srt_text(unassigned_handling="skip")
+    srt = generate_srt_text(editor, unassigned_handling="skip")
     assert "Unassigned text" not in srt
-    srt = editor.generate_srt_text(unassigned_handling="no_label")
+    srt = generate_srt_text(editor, unassigned_handling="no_label")
     assert "Unassigned text" in srt
-    srt = editor.generate_srt_text(unassigned_handling="unknown")
+    srt = generate_srt_text(editor, unassigned_handling="unknown")
     assert "Unknown: Unassigned text" in srt
 
 # ----------------------------------------------------------------------
@@ -200,5 +204,5 @@ def test_srt_unassigned_handling(editor):
 # ----------------------------------------------------------------------
 @pytest.mark.timeout(60)
 def test_time_conversion(editor):
-    assert editor.time_to_seconds("00:01:30,500") == 90.5
-    assert editor.time_to_ms("00:01:30,500") == 90500
+    assert time_to_seconds("00:01:30,500") == 90.5
+    assert time_to_ms("00:01:30,500") == 90500
