@@ -291,7 +291,7 @@ class SRTEditor(QMainWindow):
         self.mark_unsaved_changes()
         
     def init_ui(self):
-        self.setWindowTitle("CapsQual 1.5.3 - Subtitle-to-Transcript Workstation")
+        self.setWindowTitle("CapsQual 1.5.4 - Subtitle-to-Transcript Workstation")
         # Get the screen geometry (available space, excluding taskbars/docks)
         screen = QApplication.primaryScreen()
         screen_geom = screen.availableGeometry()
@@ -1285,6 +1285,8 @@ class SRTEditor(QMainWindow):
         QShortcut(QKeySequence("F2"), self).activated.connect(self.edit_current_block)
         QShortcut(QKeySequence("*"), self).activated.connect(self.open_pause_dialog)
         QShortcut(QKeySequence("U"), self).activated.connect(self.unassign_current)
+        QShortcut(QKeySequence("Ctrl+Del"), self).activated.connect(self.remove_overlap_from_current)
+
         QShortcut(QKeySequence("Return"), self).activated.connect(self.insert_empty_line)
         QShortcut(QKeySequence("."), self).activated.connect(lambda: self.handle_pause("(.)"))
         QShortcut(QKeySequence("H"), self).activated.connect(lambda: self.handle_pause("°h"))
@@ -1907,7 +1909,7 @@ Help:
     def show_about(self):
         """Show about dialog"""
         about_text = """
-<b style="font-size: 16px;">CapsQual 1.5.3</b><br><br>
+<b style="font-size: 16px;">CapsQual 1.5.4</b><br><br>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -1932,7 +1934,7 @@ Engineered with DeepSeek V3.2
     def mark_unsaved_changes(self):
         """Mark that there are unsaved changes"""
         self.has_unsaved_changes = True
-        base_title = "CapsQual 1.5.3 - Subtitle-to-Transcript Workstation"
+        base_title = "CapsQual 1.5.4 - Subtitle-to-Transcript Workstation"
         if self.project_name:
             self.setWindowTitle(f"{base_title} - {self.project_name} *")
         else:
@@ -1941,7 +1943,7 @@ Engineered with DeepSeek V3.2
     def clear_unsaved_changes(self):
         """Clear unsaved changes marker"""
         self.has_unsaved_changes = False
-        base_title = "CapsQual 1.5.3 - Subtitle-to-Transcript Workstation"
+        base_title = "CapsQual 1.5.4 - Subtitle-to-Transcript Workstation"
         if self.project_name:
             self.setWindowTitle(f"{base_title} - {self.project_name}")
         else:
@@ -2071,10 +2073,19 @@ Engineered with DeepSeek V3.2
                     block['raw_text'] = block['text']
                 if 'overlap' in block:
                     del block['overlap']
+                if block.get('overlap_info') and block.get('is_empty'):
+                    del block['is_empty']
+            # Check for old-format overlap blocks (␣ placeholders without overlap_info)
+            # and ask user to upgrade if found
+            self._check_and_upgrade_old_overlap_format()
 
             self.current_block_index = project_data['current_block_index']
             self.speakers = project_data['speakers']
-            self.current_file_path = project_data.get('source_file', '')
+            # Use the actual project file path being opened, not the stored source_file
+            # (source_file was the original subtitle path or a stale path from Save As)
+            self.current_file_path = file_path
+            # Preserve original source file path separately for reference
+            self.source_file = project_data.get('source_file', '')
             self.file_has_timestamps = project_data.get('file_has_timestamps', True)
             self.project_name = project_data.get('project_name', '')
             self.project_memo = project_data.get('project_memo', '')
@@ -2108,6 +2119,145 @@ Engineered with DeepSeek V3.2
             QMessageBox.information(self, "Success", f"Project loaded from {file_path}")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Could not load project: {str(e)}")
+
+    # ──────────────────────────────────────────────
+    #  Old-format overlap upgrade helpers
+    # ──────────────────────────────────────────────
+
+    def _detect_old_overlap_blocks(self):
+        """Scan srt_blocks for inline overlap placeholders without overlap_info metadata.
+        
+        Returns a list of (block_index, block) tuples for blocks that have
+        ␣ placeholders suggesting old-format overlap but no overlap_info.
+        """
+        old_blocks = []
+        for idx, block in enumerate(self.srt_blocks):
+            raw = block.get('raw_text', '')
+            if not raw:
+                continue
+            if self.INDENT_PLACEHOLDER in raw and not block.get('overlap_info'):
+                # Check if there's a GAT2 bracket [ ... ] or TiQ └ marker after placeholders
+                has_gat2_overlap = re.search(
+                    re.escape(self.INDENT_PLACEHOLDER) + r'+\[', raw
+                )
+                has_tiq_overlap = re.search(
+                    re.escape(self.INDENT_PLACEHOLDER) + r'+└', raw
+                )
+                if has_gat2_overlap or has_tiq_overlap:
+                    old_blocks.append((idx, block))
+        return old_blocks
+
+    def _check_and_upgrade_old_overlap_format(self):
+        """Check if loaded project has old-format overlap blocks and offer to upgrade."""
+        old_blocks = self._detect_old_overlap_blocks()
+        if not old_blocks:
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Overlap Format Update Available",
+            "This project file was created with an older version of CapsQual.\n\n"
+            "The way overlapping speech is handled has been improved:\n"
+            "• Overlap indentation now correctly accounts for concatenated turns and line wrapping.\n"
+            "• Older projects show the indentation correctly in the editor, but the export may not\n"
+            "  display overlap indentation properly.\n\n"
+            f"Found {len(old_blocks)} block(s) with old-format overlap markers.\n\n"
+            "Do you want CapsQual to automatically update this file to the new format?\n"
+            "The file will be updated in memory — you will need to save it afterwards.\n\n"
+            "If you choose 'No', the file will be loaded as-is, but overlap may not export correctly.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        upgraded_count = self._upgrade_old_overlap_format(old_blocks)
+        if upgraded_count > 0:
+            self.mark_unsaved_changes()
+            QMessageBox.information(
+                self,
+                "Overlap Format Updated",
+                f"Successfully updated {upgraded_count} block(s) to the new overlap format.\n\n"
+                "Please review the overlap positions and save the project to make the changes permanent."
+            )
+
+    def _upgrade_old_overlap_format(self, old_blocks):
+        """Reconstruct overlap_info metadata from inline placeholders in old-format blocks.
+        
+        For each block, detects GAT2 ([...]) or TiQ (└) overlap markers,
+        counts the number of ␣ placeholders as indent, finds the previous block,
+        and reconstructs text_before/text_after.
+        
+        Returns the number of blocks upgraded.
+        """
+        import re as _re
+        count = 0
+        for idx, block in old_blocks:
+            raw = block.get('raw_text', '')
+            if not raw:
+                continue
+
+            # Determine convention: TiQ uses └, GAT2 uses [ ... ]
+            # Look for pattern: ␣␣␣[ or ␣␣␣└
+            ph_esc = _re.escape(self.INDENT_PLACEHOLDER)
+            tiq_match = _re.search(ph_esc + r'+(└)', raw)
+            gat2_match = _re.search(ph_esc + r'+(\[)', raw)
+
+            if tiq_match:
+                # TiQ format: "text_before␣␣␣└selected_texttext_after"
+                ph_start = tiq_match.start()
+                indent_str = raw[ph_start:tiq_match.start(1)]
+                indent = indent_str.count(self.INDENT_PLACEHOLDER)
+                text_before = raw[:ph_start].strip()
+                # Everything after └ is the overlap text (old format has no text_after separation)
+                overlap_text = raw[tiq_match.start(1):]
+                text_after = ''
+
+                prev_block_idx = idx - 1
+                if prev_block_idx < 0:
+                    continue
+
+                block['overlap_info'] = {
+                    'indent': indent,
+                    'overlap_text': overlap_text,
+                    'prev_block_idx': prev_block_idx,
+                    'convention': 'tiq',
+                    'text_before': text_before,
+                    'text_after': text_after
+                }
+                count += 1
+
+            elif gat2_match:
+                # GAT2 format: "text_before␣␣␣[selected]text_after"
+                ph_start = gat2_match.start()
+                bracket_start = gat2_match.start(1)  # position of [
+                indent_str = raw[ph_start:bracket_start]
+                indent = indent_str.count(self.INDENT_PLACEHOLDER)
+                text_before = raw[:ph_start].strip()
+
+                # Find closing bracket
+                close_bracket = raw.find(']', bracket_start)
+                if close_bracket == -1:
+                    continue  # malformed
+
+                overlap_text = raw[bracket_start:close_bracket + 1]
+                text_after = raw[close_bracket + 1:].strip()
+
+                prev_block_idx = idx - 1
+                if prev_block_idx < 0:
+                    continue
+
+                block['overlap_info'] = {
+                    'indent': indent,
+                    'overlap_text': overlap_text,
+                    'prev_block_idx': prev_block_idx,
+                    'convention': 'gat2',
+                    'text_before': text_before,
+                    'text_after': text_after
+                }
+                count += 1
+
+        return count
 
     def create_speaker_widgets(self):
         for i in reversed(range(self.speaker_layout.count())): 
@@ -2579,7 +2729,8 @@ Engineered with DeepSeek V3.2
                 'srt_blocks': self.srt_blocks,
                 'current_block_index': self.current_block_index,
                 'speakers': self.speakers,
-                'source_file': self.current_file_path,  # keep original source path (may be .srt etc.)
+                # Save the original source path if we have it, otherwise the current file path
+                'source_file': getattr(self, 'source_file', self.current_file_path),
                 'file_has_timestamps': self.file_has_timestamps,
                 'audio_file_path': self.audio_file_path,
                 'project_name': self.project_name,
@@ -3064,6 +3215,12 @@ Engineered with DeepSeek V3.2
             new_text = dialog.get_text()
             current_block['raw_text'] = new_text
             current_block['text'] = new_text
+            # Clear overlap_info if user removed overlap markers
+            if current_block.get('overlap_info'):
+                indent_ph = self.INDENT_PLACEHOLDER
+                has_overlap = bool(re.search(re.escape(indent_ph), new_text))
+                if not has_overlap:
+                    del current_block['overlap_info']
             self.update_display()
             self.mark_unsaved_changes()
 
@@ -3325,16 +3482,27 @@ Engineered with DeepSeek V3.2
                 if prev_dialog.exec_() == QDialog.Accepted:
                     prev_start, prev_end, prev_selected = prev_dialog.get_selection()
                     if prev_selected:
-                        # For TiQ, we only mark the later block with indentation and the '└' marker
-                        indent = prev_start  # characters before overlap in earlier block
-                        # Insert placeholders for indentation (visible as ␣ in viewer)
+                        # For TiQ, advance prev_start past any whitespace so the └
+                        # points at the first character of the overlapped word,
+                        # not at a space before it.
+                        prev_block_text = prev_block['raw_text']
+                        while prev_start < len(prev_block_text) and prev_block_text[prev_start] in (' ', '\t'):
+                            prev_start += 1
+                        viewer_indent = prev_start
                         curr_before = current_block['raw_text'][:curr_start]
                         curr_after = current_block['raw_text'][curr_end:]
-                        # Insert placeholders (one per required space)
-                        indent_placeholders = self.INDENT_PLACEHOLDER * indent
+                        indent_placeholders = self.INDENT_PLACEHOLDER * viewer_indent
                         current_block['raw_text'] = f"{curr_before}{indent_placeholders}└{curr_selected}{curr_after}"
                         current_block['text'] = current_block['raw_text']
-                        # Optionally, we could mark the earlier block with something, but TiQ typically doesn't
+                        current_block.pop('is_empty', None)
+                        current_block['overlap_info'] = {
+                            'indent': prev_start,
+                            'overlap_text': f"└{curr_selected}",
+                            'prev_block_idx': self.current_block_index - 1,
+                            'convention': 'tiq',
+                            'text_before': curr_before.strip(),
+                            'text_after': curr_after.strip()
+                        }
                         self.update_display()
                         self.mark_unsaved_changes()
 
@@ -3739,15 +3907,22 @@ Engineered with DeepSeek V3.2
                         prev_block['raw_text'] = f"{prev_before}[{prev_selected}]{prev_after}"
                         prev_block['text'] = prev_block['raw_text']
 
-                        # Compute indentation length = number of characters before the overlap in the previous block
-                        indent = len(prev_before)
-
-                        # Modify current block: insert placeholders and brackets around the overlapping text
+                        # Block-level indent for viewer. Export will compute wrapping-aware indent.
+                        viewer_indent = len(prev_before)
                         curr_before = current_block['raw_text'][:curr_start]
                         curr_after = current_block['raw_text'][curr_end:]
-                        indent_placeholders = self.INDENT_PLACEHOLDER * indent
+                        indent_placeholders = self.INDENT_PLACEHOLDER * viewer_indent
                         current_block['raw_text'] = f"{curr_before}{indent_placeholders}[{curr_selected}]{curr_after}"
                         current_block['text'] = current_block['raw_text']
+                        current_block.pop('is_empty', None)  # clear stale is_empty flag
+                        current_block['overlap_info'] = {
+                            'indent': viewer_indent,
+                            'overlap_text': f"[{curr_selected}]",
+                            'prev_block_idx': self.current_block_index - 1,
+                            'convention': 'gat2',
+                            'text_before': curr_before.strip(),
+                            'text_after': curr_after.strip()
+                        }
 
                         self.update_display()
                         self.mark_unsaved_changes()
@@ -3755,6 +3930,51 @@ Engineered with DeepSeek V3.2
         if was_playing and self.auto_pause_enabled:
             if self.audio_player:
                 self.audio_player.play()
+
+    def remove_overlap_from_current(self):
+        """Remove overlap markers and metadata from the current block."""
+        if not self.srt_blocks:
+            return
+        block = self.srt_blocks[self.current_block_index]
+        if not block.get('overlap_info'):
+            QMessageBox.information(self, "No Overlap", "The current block does not contain an overlap.")
+            return
+
+        self.push_undo()
+        raw = block['raw_text']
+        info = block['overlap_info']
+        overlap_text = info.get('overlap_text', '')
+        if info.get('convention') == 'tiq':
+            # TiQ format: ␣␣␣└selected_text
+            marker_idx = raw.find('└')
+            if marker_idx >= 0:
+                before = raw[:marker_idx]
+                before_clean = before.rstrip(self.INDENT_PLACEHOLDER)
+                overlap_content = overlap_text[1:] if overlap_text.startswith('└') else overlap_text
+                end_idx = marker_idx + len(overlap_text)
+                after = raw[end_idx:] if end_idx < len(raw) else ''
+                # Reconstruct: keep the overlap content, remove markers/placeholders
+                raw = before_clean + overlap_content + after
+        elif info.get('convention') == 'gat2':
+            # GAT2 format: ␣␣␣[selected_text]
+            marker_idx = raw.find('[')
+            if marker_idx >= 0:
+                before = raw[:marker_idx]
+                before_clean = before.rstrip(self.INDENT_PLACEHOLDER)
+                if overlap_text.startswith('[') and overlap_text.endswith(']'):
+                    overlap_content = overlap_text[1:-1]
+                else:
+                    overlap_content = overlap_text
+                end_idx = marker_idx + len(overlap_text)
+                after = raw[end_idx:] if end_idx < len(raw) else ''
+                # Reconstruct: keep the overlap content, remove markers/placeholders
+                raw = before_clean + overlap_content + after
+
+        block['raw_text'] = raw
+        block['text'] = raw
+        del block['overlap_info']
+        self.update_display()
+        self.mark_unsaved_changes()
 
     def insert_empty_line(self):
         """Insert an empty line after current block and try to set timestamps from neighbors."""
@@ -4054,5 +4274,6 @@ Engineered with DeepSeek V3.2
             event.accept()
         else:
             event.ignore()
+
 
 
