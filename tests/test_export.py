@@ -449,6 +449,189 @@ def test_tiq_overlap_partial_block(editor):
     assert "└overlap" in text
 
 
+
+# ----------------------------------------------------------------------
+# TiQ blank line and vertical bar tests
+# ----------------------------------------------------------------------
+
+@pytest.mark.timeout(60)
+def test_tiq_add_blank_line(editor):
+    """Empty line should appear between turns when add_blank_line=True."""
+    editor.srt_blocks = [
+        {
+            'index': 1,
+            'text': 'Hello',
+            'raw_text': 'Hello',
+            'speaker': 0,
+            'is_turn_start': True
+        },
+        {
+            'index': 2,
+            'text': 'World',
+            'raw_text': 'World',
+            'speaker': 1,
+            'is_turn_start': True
+        }
+    ]
+    editor.speakers = ["A", "B"]
+    text = generate_tiq_text(
+        editor,
+        include_timestamps=False,
+        add_blank_line=True,
+        concatenate_turns=True
+    )
+    lines = text.split('\n')
+    # Expect: 1 A: Hello, 2 (blank), 3 B: World
+    assert len(lines) == 3
+    assert 'A:' in lines[0] and 'Hello' in lines[0]
+    # Line 2 should be blank (only line number, no content)
+    line2_stripped = lines[1][lines[1].index(' ') + 1:] if ' ' in lines[1] else lines[1]
+    assert line2_stripped.strip() == ''
+    assert 'B:' in lines[2] and 'World' in lines[2]
+
+
+@pytest.mark.timeout(60)
+def test_tiq_no_blank_line_default(editor):
+    """No blank line when add_blank_line=False (default)."""
+    editor.srt_blocks = [
+        {
+            'index': 1,
+            'text': 'Hello',
+            'raw_text': 'Hello',
+            'speaker': 0,
+            'is_turn_start': True
+        },
+        {
+            'index': 2,
+            'text': 'World',
+            'raw_text': 'World',
+            'speaker': 1,
+            'is_turn_start': True
+        }
+    ]
+    editor.speakers = ["A", "B"]
+    text = generate_tiq_text(
+        editor,
+        include_timestamps=False,
+        add_blank_line=False,
+        concatenate_turns=True
+    )
+    lines = text.split('\n')
+    assert len(lines) == 2  # Just two lines, no blank
+
+
+@pytest.mark.timeout(60)
+def test_tiq_vertical_bar_on_overlap(editor):
+    """When add_blank_line and next turn starts with └, insert | above it.
+
+    The overlap line is emitted inline within the previous turn's output
+    (cross-speaker overlap), and the bar should appear BEFORE the overlap line.
+    """
+    editor.srt_blocks = [
+        {
+            'index': 1,
+            'text': 'take a look at THIS (segment 1)',
+            'raw_text': 'take a look at THIS (segment 1)',
+            'speaker': 0, 'is_turn_start': True
+        },
+        {
+            'index': 2,
+            'text': '           └This line overlaps',
+            'raw_text': '           └This line overlaps',
+            'speaker': 1, 'is_turn_start': True,
+            'overlap_info': {
+                'indent': 11,
+                'overlap_text': '└This line overlaps',
+                'prev_block_idx': 0,
+                'convention': 'tiq',
+                'text_before': '',
+                'text_after': ''
+            }
+        }
+    ]
+    editor.speakers = ["C", "D"]
+    text = generate_tiq_text(
+        editor,
+        include_timestamps=False,
+        add_blank_line=True,
+        concatenate_turns=True
+    )
+    lines = text.split('\n')
+    # Output structure:
+    #   1 C: take a look at THIS (segment 1)
+    #   2                      |              ← bar BEFORE overlap
+    #   3 D:                   └This line overlaps
+    assert len(lines) == 3, f"Expected 3 lines, got {len(lines)}:\n{text}"
+
+    def strip_line_num(l):
+        return l[l.index(' ') + 1:] if ' ' in l else l
+
+    bar_content = strip_line_num(lines[1])
+    ov_content = strip_line_num(lines[2])
+
+    # Overlap line has └ in it
+    colon_pos = ov_content.index('└') if '└' in ov_content else -1
+    assert colon_pos >= 0, f"No └ in overlap line: {ov_content}"
+    # Bar line should have '|' at exactly that same column
+    assert len(bar_content) >= colon_pos + 1, \
+        f"Bar content too short ({len(bar_content)}) for col {colon_pos}: {repr(bar_content)}"
+    assert bar_content[colon_pos] == '|', \
+        f"Expected '|' at col {colon_pos}, got {repr(bar_content[colon_pos])}: {repr(bar_content)}"
+    # All chars before the | should be spaces
+    assert bar_content[:colon_pos].count(' ') == colon_pos, \
+        f"Expected {colon_pos} spaces before |, got: {repr(bar_content[:colon_pos])}"
+    # Verify bar is BEFORE the overlap (line 1 is bar, line 2 is overlap)
+    assert '└' not in bar_content, "Bar line should not contain └"
+
+
+def test_tiq_vertical_bar_text_before(editor):
+    """No vertical bar when overlap block has text_before — just blank line.
+
+    The overlap line (└overlap) appears inline in X's output, then a blank
+    line, then Y's turn with its remaining text (some text more).
+    """
+    editor.srt_blocks = [
+        {
+            'index': 1,
+            'text': 'First line',
+            'raw_text': 'First line',
+            'speaker': 0, 'is_turn_start': True
+        },
+        {
+            'index': 2,
+            'text': 'some text └overlap more',
+            'raw_text': 'some text └overlap more',
+            'speaker': 1, 'is_turn_start': True,
+            'overlap_info': {
+                'indent': 12,
+                'overlap_text': '└overlap',
+                'prev_block_idx': 0,
+                'convention': 'tiq',
+                'text_before': 'some text',
+                'text_after': 'more'
+            }
+        }
+    ]
+    editor.speakers = ["X", "Y"]
+    text = generate_tiq_text(
+        editor,
+        include_timestamps=False,
+        add_blank_line=True,
+        concatenate_turns=True
+    )
+    lines = text.split('\n')
+    # Output structure:
+    #   1 X: First line
+    #   2 Y: └overlap               (cross-speaker overlap inside X's turn)
+    #   3                           (blank line — text_before exists, so no |)
+    #   4    some text more         (Y's actual turn text, wrapped/indented)
+    assert len(lines) == 4, f"Expected 4 lines, got {len(lines)}:\n{text}"
+    # Line 3 should be blank (no |)
+    line3_stripped = lines[2][lines[2].index(' ') + 1:] if ' ' in lines[2] else lines[2]
+    assert '|' not in line3_stripped, f"Unexpected '|' in blank line: {repr(line3_stripped)}"
+    assert line3_stripped.strip() == '', f"Line 3 not blank: {repr(line3_stripped)}"
+    # Line 4 should contain Y's text
+    assert 'some text' in lines[3] or 'more' in lines[3], f"Line 4 missing Y's text: {lines[3]}"
 # ----------------------------------------------------------------------
 # Old-format overlap detection and upgrade tests
 # ----------------------------------------------------------------------
