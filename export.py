@@ -1110,9 +1110,36 @@ def generate_tiq_text(
         for line_str, _ in wrapped_lines:
             content_lines.append(line_str)
     # Walk all segments and emit turn-by-turn with interleaved overlaps
-    for seg in all_segments:
+    for i, seg in enumerate(all_segments):
         if seg['type'] == 'turn':
             _emit_one_turn(seg['speaker'], seg['blocks'], seg.get('start_time'))
+            # Add blank line / vertical bar between turns when requested
+            if add_blank_line and i + 1 < len(all_segments):
+                next_seg = all_segments[i + 1]
+                if next_seg['type'] == 'turn':
+                    first_blk = next_seg['blocks'][0]
+                    info = first_blk.get('overlap_info')
+                    if not info and editor.INDENT_PLACEHOLDER in first_blk.get('raw_text', ''):
+                        info = _infer_overlap_info_from_raw_text(first_blk, editor.INDENT_PLACEHOLDER)
+                    if info and not info.get('text_before', '').strip():
+                        # Pure overlap: find └ column from the actual emitted overlap line
+                        # and insert the bar BEFORE that line
+                        next_prefix = _speaker_prefix(next_seg['speaker'])
+                        bar_col = 0
+                        overlap_idx = None
+                        for ci, cl in enumerate(content_lines):
+                            if '└' in cl and cl.startswith(next_prefix):
+                                bar_col = cl.index('└')
+                                overlap_idx = ci
+                                break
+                        if overlap_idx is not None:
+                            content_lines.insert(overlap_idx, ' ' * bar_col + '|')
+                        else:
+                            content_lines.append(' ' * bar_col + '|')
+                    else:
+                        content_lines.append('')
+                else:
+                    content_lines.append('')
         elif seg['type'] == 'other':
             block = seg['block']
             if block.get('is_empty'):
