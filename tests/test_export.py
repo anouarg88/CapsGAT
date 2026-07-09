@@ -4,7 +4,7 @@ import re
 from unittest.mock import patch
 from PyQt5.QtWidgets import QApplication
 from editor import SRTEditor
-from export import (
+from generators import (
     generate_gat2_text, generate_dresing_pehl_text, generate_tiq_text,
     generate_srt_text, time_to_seconds, time_to_ms
 )
@@ -641,7 +641,7 @@ INDENT_PL = '\u2423'  # ␣ - SRTEditor.INDENT_PLACEHOLDER
 
 def test_infer_overlap_info_gat2_old_format(editor):
     """_infer_overlap_info_from_raw_text should detect old GAT2 overlap markers."""
-    from export import _infer_overlap_info_from_raw_text
+    from generators import _infer_overlap_info_from_raw_text
     raw = f"before text{INDENT_PL}{INDENT_PL}{INDENT_PL}[overlap]after text"
     block = {'raw_text': raw}
     info = _infer_overlap_info_from_raw_text(block, INDENT_PL)
@@ -655,7 +655,7 @@ def test_infer_overlap_info_gat2_old_format(editor):
 
 def test_infer_overlap_info_tiq_old_format(editor):
     """_infer_overlap_info_from_raw_text should detect old TiQ overlap markers."""
-    from export import _infer_overlap_info_from_raw_text
+    from generators import _infer_overlap_info_from_raw_text
     raw = f"before text{INDENT_PL}{INDENT_PL}└overlap text"
     block = {'raw_text': raw}
     info = _infer_overlap_info_from_raw_text(block, INDENT_PL)
@@ -669,7 +669,7 @@ def test_infer_overlap_info_tiq_old_format(editor):
 
 def test_infer_overlap_info_no_placeholder(editor):
     """Should return None when no placeholder is present."""
-    from export import _infer_overlap_info_from_raw_text
+    from generators import _infer_overlap_info_from_raw_text
     block = {'raw_text': 'just normal text'}
     info = _infer_overlap_info_from_raw_text(block, INDENT_PL)
     assert info is None
@@ -677,7 +677,7 @@ def test_infer_overlap_info_no_placeholder(editor):
 
 def test_infer_overlap_info_placeholder_no_overlap(editor):
     """Should return None when ␣ is present but no overlap marker follows."""
-    from export import _infer_overlap_info_from_raw_text
+    from generators import _infer_overlap_info_from_raw_text
     raw = f"some{INDENT_PL}text"
     block = {'raw_text': raw}
     info = _infer_overlap_info_from_raw_text(block, INDENT_PL)
@@ -686,7 +686,7 @@ def test_infer_overlap_info_placeholder_no_overlap(editor):
 
 def test_export_with_old_format_gat2(editor):
     """GAT2 export with old-format blocks (no overlap_info) should still produce correct indentation."""
-    from export import generate_gat2_text
+    from generators import generate_gat2_text
     editor.srt_blocks = [
         {'index': 1, 'text': 'first part', 'raw_text': 'first part',
          'speaker': 0, 'is_turn_start': True, 'start_time': '00:00:01,000', 'end_time': '00:00:03,000'},
@@ -709,7 +709,7 @@ def test_export_with_old_format_gat2(editor):
 
 def test_export_with_old_format_tiq(editor):
     """TiQ export with old-format blocks (no overlap_info) should still produce correct indentation."""
-    from export import generate_tiq_text
+    from generators import generate_tiq_text
     editor.srt_blocks = [
         {'index': 1, 'text': 'first part', 'raw_text': 'first part',
          'speaker': 0, 'is_turn_start': True, 'start_time': '00:00:01,000', 'end_time': '00:00:03,000'},
@@ -737,7 +737,7 @@ def test_export_with_old_format_tiq(editor):
 
 def test_tiq_chained_overlap(editor):
     """TiQ: chained overlap where an overlap block itself is overlapped should show all overlaps."""
-    from export import generate_tiq_text
+    from generators import generate_tiq_text
     editor.srt_blocks = [
         {
             'index': 1,
@@ -792,7 +792,7 @@ def test_tiq_chained_overlap(editor):
 
 def test_gat2_chained_overlap(editor):
     """GAT2: chained overlap where an overlap block itself is overlapped should show all overlaps."""
-    from export import generate_gat2_text
+    from generators import generate_gat2_text
     editor.srt_blocks = [
         {
             'index': 1,
@@ -972,4 +972,3 @@ def test_tiq_overlap_does_not_wrap(editor):
     overlap_lines = [l for l in lines if '└' in l]
     assert len(overlap_lines) == 1, \
         f"Overlap should be on 1 line, got {len(overlap_lines)}:\n{text}"
-
