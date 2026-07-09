@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import patch, Mock
 from PyQt5.QtWidgets import QApplication
 from editor import SRTEditor
-from export import (
+from generators import (
     format_timestamp, time_to_seconds, time_to_ms, _ms_to_time as ms_to_time
 )
 

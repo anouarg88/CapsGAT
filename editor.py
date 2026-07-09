@@ -1,11 +1,15 @@
-from export import (
+from generators import (
     time_to_seconds, time_to_ms, format_timestamp, get_timestamp_width,
-    format_srt_time, strip_markup, escape_html, convert_markup_to_html,
+    format_srt_time,
     replace_indent_placeholders, generate_gat2_text, generate_dresing_pehl_text,
     generate_tiq_text, generate_srt_text, generate_transcript_text,
     _build_ordered_segments, _group_into_turns, _tokenize_with_pauses,
     _tokenize_cjk_with_pauses, _wrap_text as wrap_text, estimate_missing_timestamps,
     _ms_to_time as ms_to_time
+)
+from export import (
+    build_html_content, write_html_file, write_srt_file, write_txt_file,
+    write_docx_file
 )
 
 
@@ -1315,70 +1319,7 @@ class SRTEditor(QMainWindow):
     
 
 
-    def add_formatted_paragraph(self, doc, text, style_name=None):
-        """Add a paragraph to a python-docx document with appropriate runs."""
-        if not text:
-            if style_name:
-                doc.add_paragraph(style=style_name)
-            else:
-                doc.add_paragraph()
-            return
 
-        import re
-        # We'll split on markers, but keep them as tokens.
-        # Pattern matches any marker (start or end)
-        pattern = re.compile(r'(#@[BIU]|#@/[BIU])')
-        parts = []
-        last_end = 0
-        for m in pattern.finditer(text):
-            start, end = m.span()
-            if start > last_end:
-                parts.append(('text', text[last_end:start]))
-            parts.append(('marker', m.group()))
-            last_end = end
-        if last_end < len(text):
-            parts.append(('text', text[last_end:]))
-
-        if style_name:
-            p = doc.add_paragraph(style=style_name)
-        else:
-            p = doc.add_paragraph()
-        bold = italic = underline = False
-        run_text = ""
-
-        # Stack for nested formatting (though unlikely, we'll handle basic)
-        for typ, content in parts:
-            if typ == 'text':
-                run_text += content
-            else:  # marker
-                # Flush current run
-                if run_text:
-                    run = p.add_run(run_text)
-                    run.bold = bold
-                    run.italic = italic
-                    run.underline = underline
-                    run_text = ""
-                # Toggle state
-                if content == '#@B':
-                    bold = True
-                elif content == '#@/B':
-                    bold = False
-                elif content == '#@I':
-                    italic = True
-                elif content == '#@/I':
-                    italic = False
-                elif content == '#@U':
-                    underline = True
-                elif content == '#@/U':
-                    underline = False
-        # Flush final text
-        if run_text:
-            run = p.add_run(run_text)
-            run.bold = bold
-            run.italic = italic
-            run.underline = underline
-    
-    
     
     def update_ui(self):
         """Update UI elements based on current state"""
@@ -1867,6 +1808,7 @@ Editing:
 • E/F2: Edit segment content
 • T: Edit segment timestamp
 • Enter: Insert empty line
+• Ctrl+Del: Remove overlap
 
 Transcription Symbols:
 • *: Open symbols dialog
@@ -4111,7 +4053,6 @@ Engineered with DeepSeek V3.2
 
 
 
-
     def final_export(self, transcript_text, settings, project_info, unassigned_handling="skip"):
         format_extensions = {
             'html': '.html',
@@ -4143,56 +4084,17 @@ Engineered with DeepSeek V3.2
 
         try:
             if settings['format'] == 'srt':
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(transcript_text)
+                write_srt_file(transcript_text, file_path)
                 QMessageBox.information(self, "Success", f"Transcript exported to {file_path}")
 
             elif settings['format'] == 'docx':
-                try:
-                    import docx
-                    from docx.shared import Pt
-                    from docx.enum.text import WD_ALIGN_PARAGRAPH
-                    from docx.enum.style import WD_STYLE_TYPE
-
-                    doc = docx.Document()
-
-                    if settings.get('include_title', True) and project_info.get('name'):
-                        title = doc.add_heading(project_info['name'], 0)
-                        title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-                    if settings.get('include_memo', True) and project_info.get('memo'):
-                        doc.add_paragraph(f"Project Memo: {project_info['memo']}")
-
-                    if settings.get('include_audio', True) and self.audio_file_path:
-                        doc.add_paragraph(f"Audio File: {Path(self.audio_file_path).name}")
-
-                    doc.add_paragraph()
-
-                    styles = doc.styles
-                    style_name = "TranscriptBody"
-                    if style_name in [s.name for s in styles]:
-                        body_style = styles[style_name]
-                    else:
-                        body_style = styles.add_style(style_name, WD_STYLE_TYPE.PARAGRAPH)
-
-                    if settings.get('convention') in ('gat2', 'tiq'):
-                        body_style.font.name = 'Courier New'
-                    body_style.font.size = Pt(10)
-                    para_fmt = body_style.paragraph_format
-                    para_fmt.line_spacing = 1
-                    para_fmt.space_after = Pt(0)
-                    para_fmt.space_before = Pt(0)
-
-                    for line in transcript_text.split('\n'):
-                        if line.strip():
-                            self.add_formatted_paragraph(doc, line, style_name=style_name)
-                        else:
-                            doc.add_paragraph(style=style_name)
-
-                    doc.save(file_path)
+                result = write_docx_file(
+                    transcript_text, settings, project_info,
+                    self.audio_file_path, file_path
+                )
+                if result:
                     QMessageBox.information(self, "Success", f"Transcript exported to {file_path}")
-
-                except ImportError:
+                else:
                     # Fallback to plain text with .txt extension
                     new_path = os.path.splitext(file_path)[0] + '.txt'
                     QMessageBox.warning(
@@ -4202,64 +4104,17 @@ Engineered with DeepSeek V3.2
                         f"Exporting as plain text instead.\n\n"
                         f"Saved as: {new_path}"
                     )
-                    stripped = strip_markup(transcript_text)
-                    with open(new_path, 'w', encoding='utf-8') as f:
-                        f.write(stripped)
+                    write_txt_file(transcript_text, new_path)
 
             elif settings['format'] == 'html':
-                escaped_text = escape_html(transcript_text)
-                formatted = convert_markup_to_html(escaped_text)
-
-                header_lines = []
-                if settings.get('include_title', True) and project_info.get('name'):
-                    header_lines.append(f"<h1>{escape_html(project_info['name'])}</h1>")
-                if settings.get('include_memo', True) and project_info.get('memo'):
-                    header_lines.append(f"<p class=\"headerstyle\"><strong>Project Memo:</strong> {escape_html(project_info['memo'])}</p>")
-                if settings.get('include_audio', True) and self.audio_file_path:
-                    audio_name = Path(self.audio_file_path).name
-                    header_lines.append(f"<p class=\"headerstyle\"><strong>Audio File:</strong> {escape_html(audio_name)}</p>")
-                header = "\n".join(header_lines) + "\n" if header_lines else ""
-
-                font_family = "'Courier New', monospace"
-                if settings['convention'] == "dresing_pehl":
-                    font_family = "'Times New Roman', serif"
-
-                html_content = f"""<!DOCTYPE html>
-    <html>
-    <head>
-    <meta charset="UTF-8">
-    <title>Transcript - {escape_html(project_info.get('name', 'Untitled'))}</title>
-    <style>
-    body {{
-        font-family: {font_family};
-        font-size: 10pt;
-        line-height: 1.2;
-        margin: 20px;
-        white-space: pre-wrap;
-    }}
-    h1 {{
-        font-family: Arial, sans-serif;
-        color: #333;
-        padding-bottom: 10px;
-    }}
-    .headerstyle {{
-        font-family: Arial, sans-serif;
-        color: #333;
-    }}
-    </style>
-    </head>
-    <body>
-    {header}<br>{formatted}
-    </body>
-    </html>"""
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(html_content)
+                html_content = build_html_content(
+                    transcript_text, settings, project_info, self.audio_file_path
+                )
+                write_html_file(html_content, file_path)
                 QMessageBox.information(self, "Success", f"Transcript exported to {file_path}")
 
             else:  # plain text
-                stripped = strip_markup(transcript_text)
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(stripped)
+                write_txt_file(transcript_text, file_path)
                 QMessageBox.information(self, "Success", f"Transcript exported to {file_path}")
 
         except Exception as e:

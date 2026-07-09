@@ -15,10 +15,10 @@ from PyQt5.QtGui import QFont, QKeySequence
 
 from utils import logger
 from highlighting import FormattingMarkerHighlighter
-from export import (
-    generate_srt_text, generate_transcript_text, escape_html,
-    convert_markup_to_html, strip_markup
+from generators import (
+    generate_srt_text, generate_transcript_text, strip_markup
 )
+from export import build_html_content
 
 
 
@@ -1844,74 +1844,36 @@ class ExportPreviewDialog(QDialog):
             custom_delimiter=self.custom_delimiter_edit.text()
         )
 
-        # Build header
+        # Build header (plain text, used only for TXT preview; HTML header is built by build_html_content)
         header_lines = []
         if self.title_check.isChecked() and main.project_name:
-            if self.export_format == "html":
-                header_lines.append(f"<h1>{escape_html(main.project_name)}</h1>")
-            else:
-                header_lines.append(main.project_name)
-                header_lines.append("=" * len(main.project_name))
-                header_lines.append("")
+            header_lines.append(main.project_name)
+            header_lines.append("=" * len(main.project_name))
+            header_lines.append("")
         if self.memo_check.isChecked() and main.project_memo:
-            if self.export_format == "html":
-                header_lines.append(f'<p class="headerstyle"><strong>Project Memo:</strong> {escape_html(main.project_memo)}</p>')
-            else:
-                header_lines.append(f"Project Memo: {main.project_memo}")
-                header_lines.append("")
+            header_lines.append(f"Project Memo: {main.project_memo}")
+            header_lines.append("")
         if self.audio_check.isChecked() and main.audio_file_path:
             audio_name = Path(main.audio_file_path).name
-            if self.export_format == "html":
-                header_lines.append(f'<p class="headerstyle"><strong>Audio File:</strong> {escape_html(audio_name)}</p>')
-            else:
-                header_lines.append(f"Audio File: {audio_name}")
-                header_lines.append("")
+            header_lines.append(f"Audio File: {audio_name}")
+            header_lines.append("")
 
         header = "\n".join(header_lines) + "\n" if header_lines else ""
 
         if self.export_format == "html":
-            # For HTML, escape then convert markers
-            escaped_text = escape_html(transcript_text)
-            formatted = convert_markup_to_html(escaped_text)
-
-            # Choose transcript font by convention
-            if self.transcript_convention == "gat2":
-                font_family = "'Courier New', monospace"
-            elif self.transcript_convention == "tiq":
-                font_family = "'Courier New', monospace"
-            else:  # dresing_pehl or fallback
-                font_family = "'Times New Roman', serif"
-
-            full_html = f"""<!DOCTYPE html>
-    <html>
-    <head>
-    <meta charset="UTF-8">
-    <style>
-    body {{
-        font-family: {font_family};
-        font-size: 10pt;
-        line-height: 1.2;
-        margin: 0;
-        padding: 10px;
-        white-space: pre-wrap;
-    }}
-    h1 {{
-        font-family: Arial, sans-serif;
-        color: #333;
-        padding-bottom: 10px;
-        margin-top: 0;
-    }}
-    .headerstyle {{
-        font-family: Arial, sans-serif;
-        color: #333;
-    }}
-    </style>
-    </head>
-    <body>
-    {header}<br>{formatted}
-    </body>
-    </html>"""
-            self.preview_text.setHtml(full_html)
+            # Build HTML content using the shared builder
+            html_content = build_html_content(
+                transcript_text,
+                {
+                    'convention': self.transcript_convention,
+                    'include_title': self.title_check.isChecked(),
+                    'include_memo': self.memo_check.isChecked(),
+                    'include_audio': self.audio_check.isChecked(),
+                },
+                {'name': main.project_name, 'memo': main.project_memo},
+                main.audio_file_path
+            )
+            self.preview_text.setHtml(html_content)
         else:  # TXT
             # For plain text, strip markers
             stripped_text = strip_markup(transcript_text)
