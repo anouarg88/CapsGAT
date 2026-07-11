@@ -9,18 +9,18 @@
 ```
 main.py                  ← Entry point
    │
-   ├── editor.py         ← Main window & UI controller (4133 lines)
-   ├── dialogs.py        ← Dialog windows (2440 lines)
+   ├── editor.py         ← Main window & UI controller
+   ├── dialogs.py        ← Dialog windows
    │
-   ├── generators.py     ← Transcript text generation (1850 lines)
-   ├── export.py         ← File writing (HTML/DOCX/TXT/SRT) (256 lines)
+   ├── generators.py     ← Transcript text generation
+   ├── export.py         ← File writing (HTML/DOCX/TXT/SRT)
    │
-   ├── audio_players.py  ← Audio playback (424 lines)
-   ├── widgets.py        ← Custom UI widgets (136 lines)
-   ├── highlighting.py   ← Syntax highlighting (51 lines)
-   ├── utils.py          ← Shared utilities (16 lines)
+   ├── audio_players.py  ← Audio playback
+   ├── widgets.py        ← Custom UI widgets
+   ├── highlighting.py   ← Syntax highlighting
+   ├── utils.py          ← Shared utilities
    │
-   ├── tests/            ← Test suite (46 tests)
+   ├── tests/            ← Test suite
    ├── README.md         ← User-facing documentation
    └── build.yml         ← CI/CD for Windows/macOS/Linux
 ```
@@ -191,10 +191,10 @@ Both implement signals: `playback_started`, `playback_stopped`, `position_change
 
 | File | Tests | What it tests |
 |------|-------|--------------|
-| `tests/test_export.py` | 29 | GAT2/TiQ/Dresing&Pehl/SRT generation, overlap handling, blank lines, vertical bars |
+| `tests/test_export.py` | 39 | GAT2/TiQ/Dresing&Pehl/SRT generation, overlap handling, blank lines, vertical bars |
 | `tests/test_parsing.py` | 6 | SRT/JSON/TSV/TXT file parsing |
 | `tests/test_ui.py` | 7 | Timestamp formatting, time conversion, misc UI utilities |
-| **Total** | **42** | |
+| **Total** | **52** | |
 
 Run with: `python -m pytest tests/ -v`
 
