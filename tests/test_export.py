@@ -208,6 +208,80 @@ def test_time_conversion(editor):
     assert time_to_ms("00:01:30,500") == 90500
 
 # ----------------------------------------------------------------------
+# SRT time formatting tests
+# ----------------------------------------------------------------------
+@pytest.mark.timeout(60)
+def test_format_srt_time_dot_separated_ms():
+    """Dot-separated milliseconds (from ffmpeg/Whisper) should be converted to comma format."""
+    from generators import format_srt_time
+    result = format_srt_time("01:02:03.456")
+    assert result == "01:02:03,456", f"Got {result!r}"
+
+@pytest.mark.timeout(60)
+def test_format_srt_time_single_digit_ms():
+    """Single-digit milliseconds should be left-padded to 3 digits."""
+    from generators import format_srt_time
+    result = format_srt_time("01:02:03,4")
+    assert result == "01:02:03,004", f"Got {result!r}"
+
+@pytest.mark.timeout(60)
+def test_format_srt_time_two_digit_ms():
+    """Two-digit milliseconds should be left-padded to 3 digits."""
+    from generators import format_srt_time
+    result = format_srt_time("01:02:03,45")
+    assert result == "01:02:03,045", f"Got {result!r}"
+
+@pytest.mark.timeout(60)
+def test_format_srt_time_standard_format():
+    """Standard SRT format should pass through unchanged."""
+    from generators import format_srt_time
+    result = format_srt_time("01:02:03,456")
+    assert result == "01:02:03,456", f"Got {result!r}"
+
+@pytest.mark.timeout(60)
+def test_format_srt_time_two_digit_minutes():
+    """MM:SS format should be expanded to HH:MM:SS."""
+    from generators import format_srt_time
+    result = format_srt_time("02:03,400")
+    assert result == "00:02:03,400", f"Got {result!r}"
+
+@pytest.mark.timeout(60)
+def test_format_srt_time_no_ms():
+    """Time without milliseconds should get ,000 appended."""
+    from generators import format_srt_time
+    result = format_srt_time("01:02:03")
+    assert result == "01:02:03,000", f"Got {result!r}"
+
+@pytest.mark.timeout(60)
+def test_format_srt_time_empty():
+    """Empty string should return default SRT time."""
+    from generators import format_srt_time
+    result = format_srt_time("")
+    assert result == "00:00:00,000", f"Got {result!r}"
+
+@pytest.mark.timeout(60)
+def test_format_srt_time_none():
+    """None should return default SRT time."""
+    from generators import format_srt_time
+    result = format_srt_time(None)
+    assert result == "00:00:00,000", f"Got {result!r}"
+
+@pytest.mark.timeout(60)
+def test_format_srt_time_more_than_3_digit_ms():
+    """More than 3 digit milliseconds should be truncated."""
+    from generators import format_srt_time
+    result = format_srt_time("01:02:03,4567")
+    assert result == "01:02:03,456", f"Got {result!r}"
+
+@pytest.mark.timeout(60)
+def test_format_srt_time_dot_and_single_digit():
+    """Dot-separated with single digit ms should be padded."""
+    from generators import format_srt_time
+    result = format_srt_time("01:02:03.1")
+    assert result == "01:02:03,001", f"Got {result!r}"
+
+
+# ----------------------------------------------------------------------
 # Overlap export tests
 # ----------------------------------------------------------------------
 
