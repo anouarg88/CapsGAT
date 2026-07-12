@@ -121,19 +121,28 @@ def format_srt_time(time_str):
     if not time_str:
         return "00:00:00,000"
 
+    # Normalize dot-separated milliseconds to comma format (common from ffmpeg, Whisper, etc.)
+    time_str = time_str.replace('.', ',')
+
     if ',' in time_str:
-        return time_str
+        time_part, ms_part = time_str.split(',', 1)
+        # Pad or truncate milliseconds to exactly 3 digits
+        ms_part = ms_part.zfill(3)[:3]
+        parts = time_part.split(':')
+        if len(parts) == 3:
+            return f"{parts[0].zfill(2)}:{parts[1].zfill(2)}:{parts[2].zfill(2)},{ms_part}"
+        elif len(parts) == 2:
+            return f"00:{parts[0].zfill(2)}:{parts[1].zfill(2)},{ms_part}"
+        else:
+            return f"00:00:{parts[0].zfill(2)},{ms_part}"
     elif ':' in time_str:
         parts = time_str.split(':')
-        if len(parts) == 2:
+        if len(parts) == 3:
+            return f"{parts[0].zfill(2)}:{parts[1].zfill(2)}:{parts[2].zfill(2)},000"
+        elif len(parts) == 2:
             return f"00:{parts[0].zfill(2)}:{parts[1].zfill(2)},000"
-        elif len(parts) == 3:
-            time_part = parts[2]
-            if ',' in time_part:
-                time_part, ms_part = time_part.split(',')
-                return f"{parts[0].zfill(2)}:{parts[1].zfill(2)}:{time_part.zfill(2)},{ms_part.zfill(3)}"
-            else:
-                return f"{parts[0].zfill(2)}:{parts[1].zfill(2)}:{time_part.zfill(2)},000"
+        else:
+            return f"00:00:{parts[0].zfill(2)},000"
 
     return "00:00:00,000"
 
