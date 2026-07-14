@@ -194,7 +194,7 @@ For Ubuntu versions < 22.04, run from source (see below).
    ```bash/zsh
    pip install -r requirements.txt
    ```
-   (If installing dependencies from requirements.txt fails, which it might for some versions, run `PyQt5 python-docx numpy soundfile python-vlc` instead. Note that the fallback audio player will not be available - see step 4.)
+   (If installing dependencies from requirements.txt fails, which it might for some versions, run `pip install PyQt5 python-docx numpy soundfile python-vlc` instead. Note that the fallback audio player will not be available - see step 4.)
    
 4. Install VLC for full audio support (optional but highly recommended)
    ```bash
