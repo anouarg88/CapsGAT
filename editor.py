@@ -1968,6 +1968,17 @@ Engineered with DeepSeek V3.2
         
         return f"{hours:02d}:{minutes:02d}:{seconds:02d},{milliseconds:03d}"
      
+    def load_file(self):
+        if not self.check_unsaved_changes():
+            return
+            
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Open File", "", 
+            "All Supported Files (*.srt *.txt *.json *.tsv);;SRT Files (*.srt);;Text Files (*.txt);;JSON Files (*.json);;TSV Files (*.tsv)"
+        )
+        if file_path:
+            self.load_file_from_path(file_path)
+
     def load_file_from_path(self, file_path):
         """Load a subtitle file from given path."""
         print(f"load_file_from_path called with: {file_path}")  # DEBUG
@@ -2041,6 +2052,182 @@ Engineered with DeepSeek V3.2
         )
         if file_path:
             self.load_project_from_path(file_path)
+
+    def load_project_from_path(self, file_path):
+        """Load a CapsQual project file from the given path."""
+        self.undo_stack.clear()
+        self.redo_stack.clear()
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                project_data = json.load(f)
+
+            self.transcript.blocks = project_data['srt_blocks']
+            for block in self.transcript.blocks:
+                if 'raw_text' not in block:
+                    block['raw_text'] = block['text']
+                if 'overlap' in block:
+                    del block['overlap']
+                if block.get('overlap_info') and block.get('is_empty'):
+                    del block['is_empty']
+            # Check for old-format overlap blocks (␣ placeholders without overlap_info)
+            # and ask user to upgrade if found
+            self._check_and_upgrade_old_overlap_format()
+
+            self.current_block_index = project_data['current_block_index']
+            self.transcript.speakers = project_data['speakers']
+            # Use the actual project file path being opened, not the stored source_file
+            self.current_file_path = file_path
+            # Preserve original source file path separately for reference
+            self.source_file = project_data.get('source_file', '')
+            self.file_has_timestamps = project_data.get('file_has_timestamps', True)
+            self.project_name = project_data.get('project_name', '')
+            self.project_memo = project_data.get('project_memo', '')
+            self.playback_speed = project_data.get('playback_speed', 1.0)
+            self.cjk_mode = project_data.get('cjk_mode', False)
+            self.timestamp_style = project_data.get('timestamp_style', 'curly')
+            self.custom_timestamp_pattern = project_data.get('custom_timestamp_pattern', '{HH:mm:ss}')
+
+            font_data = project_data.get('text_display_font')
+            if font_data:
+                self.text_display_font = QFont(font_data['family'], font_data['size'])
+                self.text_display.setFont(self.text_display_font)
+
+            audio_path = project_data.get('audio_file_path')
+            if audio_path and Path(audio_path).exists():
+                self.audio_file_path = audio_path
+                self.original_audio_duration = 0
+                self.load_audio_file_for_project(audio_path, self.playback_speed)
+
+            viewer_theme = project_data.get('viewer_theme', 'light')
+            self.apply_viewer_theme(viewer_theme)
+
+            self.speed_knob.value = self.playback_speed
+            self.speed_knob.update()
+
+            self.add_to_recent(file_path)
+            self.update_display()
+            self.update_menu_state()
+            self.clear_unsaved_changes()
+
+            QMessageBox.information(self, "Success", f"Project loaded from {file_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Could not load project: {str(e)}")
+
+
+    def create_speaker_widgets(self):
+        for i in reversed(range(self.speaker_layout.count())): 
+            self.speaker_layout.itemAt(i).widget().setParent(None)
+        
+        self.speaker_layout.setSpacing(3)
+        self.speaker_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.speaker_widgets = []
+        for i, speaker in enumerate(self.speakers):
+            speaker_widget = QWidget()
+            speaker_layout = QHBoxLayout(speaker_widget)
+            speaker_layout.setSpacing(3)
+            speaker_layout.setContentsMargins(5, 2, 5, 2)
+            
+            color_label = QLabel("■")
+            color_label.setStyleSheet(f"color: {self.speaker_colors[i].name()}; font-size: 20px;")
+            
+            speaker_name_edit = QLineEdit(speaker)
+            speaker_name_edit.editingFinished.connect(lambda checked=False, idx=i: self.rename_speaker(idx))
+            speaker_name_edit.setFixedWidth(120)
+            speaker_name_edit.setMinimumHeight(18)
+            
+            speaker_btn = QPushButton(f"Assign ({i+1})")
+            speaker_btn.clicked.connect(lambda checked, idx=i: self.assign_speaker(idx))
+            speaker_btn.setMinimumHeight(18)
+            
+            if self.current_theme == "dark":
+                speaker_btn.setStyleSheet(f"""
+                    QPushButton {{ 
+                        background-color: {self.speaker_colors[i].name()}; 
+                        color: white;
+                        border: 2px solid #676767;
+                        padding: 1px 1px;
+                        font-weight: bold;
+                        min-width: 100px;
+                    }}
+                    QPushButton:hover {{
+                        background-color: {self.speaker_colors[i].lighter(120).name()};
+                        color: white;
+                    }}
+                """)
+            else:
+                speaker_btn.setStyleSheet(f"""
+                    QPushButton {{ 
+                        background-color: {self.speaker_colors[i].name()}; 
+                        border: 2px solid darkgray;
+                        padding: 1px 1px;
+                        font-weight: bold;
+                        min-width: 100px;
+                    }}
+                    QPushButton:hover {{
+                        background-color: {self.speaker_colors[i].lighter(120).name()};
+                    }}
+                """)
+            
+            speaker_layout.addWidget(color_label)
+            speaker_layout.addWidget(QLabel("Name:"))
+            speaker_layout.addWidget(speaker_name_edit)
+            speaker_layout.addStretch(1)
+            speaker_layout.addWidget(speaker_btn)
+            
+            centered_widget = QWidget()
+            centered_widget.setMinimumHeight(20)
+            centered_layout = QHBoxLayout(centered_widget)
+            centered_layout.setSpacing(0)
+            centered_layout.setContentsMargins(0, 0, 0, 0)
+            centered_layout.addStretch(1)
+            centered_layout.addWidget(speaker_widget)
+            centered_layout.addStretch(1)
+            
+            self.speaker_layout.addWidget(centered_widget)
+            self.speaker_widgets.append({
+                'name_edit': speaker_name_edit,
+                'button': speaker_btn
+            })
+
+    def rename_speaker(self, speaker_idx):
+        new_name = self.speaker_widgets[speaker_idx]['name_edit'].text()
+        if speaker_idx < len(self.speakers) and self.speakers[speaker_idx] != new_name:
+            self.push_undo()
+            self.speakers[speaker_idx] = new_name
+            self.update_display()
+            self.mark_unsaved_changes()
+
+    def count_blocks_for_speaker(self, speaker_idx):
+        """Count how many blocks are assigned to a specific speaker"""
+        count = 0
+        for block in self.srt_blocks:
+            if block.get('speaker') == speaker_idx:
+                count += 1
+        return count
+
+    def update_speaker_count(self, count):
+        while len(self.speakers) > count:
+            self.speakers.pop()
+        
+        while len(self.speakers) < count:
+            new_idx = len(self.speakers)
+            self.speakers.append(chr(65 + new_idx))
+        
+        self.speaker_colors = []
+        for i in range(len(self.speakers)):
+            if i < len(self.speaker_color_palette):
+                self.speaker_colors.append(self.speaker_color_palette[i])
+            else:
+                self.speaker_colors.append(QColor(200, 200, 200))
+        
+        self.create_speaker_widgets()
+        self.setup_shortcuts()
+        self.update_display()
+        self.mark_unsaved_changes()
+        
+        self.speaker_count_label.setText(str(count))
+        self.update_speaker_buttons()
 
     def load_audio_file_for_project(self, audio_path, speed):
         """Load audio file for a project (without showing file dialog)"""
@@ -3207,6 +3394,128 @@ Engineered with DeepSeek V3.2
             if self.audio_player:
                 self.audio_player.play()
 
+    def _detect_old_overlap_blocks(self):
+        """Scan srt_blocks for inline overlap placeholders without overlap_info metadata.
+        
+        Returns a list of (block_index, block) tuples for blocks that have
+        ␣ placeholders suggesting old-format overlap but no overlap_info.
+        """
+        old_blocks = []
+        for idx, block in enumerate(self.srt_blocks):
+            raw = block.get('raw_text', '')
+            if not raw:
+                continue
+            if self.INDENT_PLACEHOLDER in raw and not block.get('overlap_info'):
+                has_gat2_overlap = re.search(
+                    re.escape(self.INDENT_PLACEHOLDER) + r'+\[', raw
+                )
+                has_tiq_overlap = re.search(
+                    re.escape(self.INDENT_PLACEHOLDER) + r'+└', raw
+                )
+                if has_gat2_overlap or has_tiq_overlap:
+                    old_blocks.append((idx, block))
+        return old_blocks
+
+    def _upgrade_old_overlap_format(self, old_blocks):
+        """Reconstruct overlap_info metadata from inline placeholders in old-format blocks."""
+        import re as _re
+        count = 0
+        for idx, block in old_blocks:
+            raw = block.get('raw_text', '')
+            if not raw:
+                continue
+
+            ph_esc = _re.escape(self.INDENT_PLACEHOLDER)
+            tiq_match = _re.search(ph_esc + r'+(└)', raw)
+            gat2_match = _re.search(ph_esc + r'+(\[)', raw)
+
+            if tiq_match:
+                ph_start = tiq_match.start()
+                indent = raw[ph_start:tiq_match.start(1)].count(self.INDENT_PLACEHOLDER)
+                text_before = raw[:ph_start].strip()
+                overlap_text = raw[tiq_match.start(1):]
+                
+                prev_idx = idx - 1
+                while prev_idx >= 0:
+                    prev_block = self.srt_blocks[prev_idx]
+                    if prev_block.get('speaker') is not None:
+                        break
+                    prev_idx -= 1
+                
+                block['overlap_info'] = {
+                    'indent': indent,
+                    'overlap_text': overlap_text,
+                    'prev_block_idx': prev_idx if prev_idx >= 0 else None,
+                    'convention': 'tiq',
+                    'text_before': text_before,
+                    'text_after': ''
+                }
+                count += 1
+
+            elif gat2_match:
+                ph_start = gat2_match.start()
+                bracket_start = gat2_match.start(1)
+                indent = raw[ph_start:bracket_start].count(self.INDENT_PLACEHOLDER)
+                text_before = raw[:ph_start].strip()
+                close_bracket = raw.find(']', bracket_start)
+                if close_bracket == -1:
+                    continue
+                overlap_text = raw[bracket_start:close_bracket + 1]
+                text_after = raw[close_bracket + 1:].strip()
+                
+                prev_idx = idx - 1
+                while prev_idx >= 0:
+                    prev_block = self.srt_blocks[prev_idx]
+                    if prev_block.get('speaker') is not None:
+                        break
+                    prev_idx -= 1
+                
+                block['overlap_info'] = {
+                    'indent': indent,
+                    'overlap_text': overlap_text,
+                    'prev_block_idx': prev_idx if prev_idx >= 0 else None,
+                    'convention': 'gat2',
+                    'text_before': text_before,
+                    'text_after': text_after
+                }
+                count += 1
+
+        return count
+
+    def _check_and_upgrade_old_overlap_format(self):
+        """Check if loaded project has old-format overlap blocks and offer to upgrade."""
+        old_blocks = self._detect_old_overlap_blocks()
+        if not old_blocks:
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Overlap Format Update Available",
+            "This project file was created with an older version of CapsQual.\n\n"
+            "The way overlapping speech is handled has been improved:\n"
+            "• Overlap indentation now correctly accounts for concatenated turns and line wrapping.\n"
+            "• Older projects show the indentation correctly in the editor, but the export may not\n"
+            "  display overlap indentation properly.\n\n"
+            f"Found {len(old_blocks)} block(s) with old-format overlap markers.\n\n"
+            "Do you want CapsQual to automatically update this file to the new format?\n"
+            "The file will be updated in memory — you will need to save it afterwards.\n\n"
+            "If you choose 'No', the file will be loaded as-is, but overlap may not export correctly.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        upgraded_count = self._upgrade_old_overlap_format(old_blocks)
+        if upgraded_count > 0:
+            self.mark_unsaved_changes()
+            QMessageBox.information(
+                self,
+                "Overlap Format Updated",
+                f"Successfully updated {upgraded_count} block(s) to the new overlap format.\n\n"
+                "Please review the overlap positions and save the project to make the changes permanent."
+            )
+
     def remove_overlap_from_current(self):
         """Remove overlap markers and metadata from the current block."""
         if not self.srt_blocks:
@@ -3312,6 +3621,99 @@ Engineered with DeepSeek V3.2
             if 0 <= block_idx < len(self.srt_blocks):
                 self.current_block_index = block_idx
                 self.update_display()
+
+    def save_project(self, force_save_as=False):
+        if not self.srt_blocks:
+            return
+
+        file_path = None
+        default_name = ""
+
+        # --- Determine if we should show a Save As dialog ---
+        if not force_save_as and self.current_file_path:
+            # If current file is a .capsgat file, handle upgrade
+            if self.current_file_path.endswith('.capsgat'):
+                reply = QMessageBox.question(
+                    self,
+                    "Project Format Update",
+                    "This project was created with the older CapsGAT format (.capsgat).\n\n"
+                    "To save it, you must use the new CapsQual format (.capsqual).\n"
+                    "Would you like to save it as .capsqual now? (You will be prompted for a new filename.)",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.Yes
+                )
+                if reply == QMessageBox.No:
+                    return  # user cancelled save
+
+                # Build default save path in the same directory as the old file
+                old_dir = os.path.dirname(self.current_file_path)
+                base = os.path.basename(self.current_file_path)[:-8]  # remove '.capsgat'
+                default_name = os.path.join(old_dir, base + '.capsqual')
+                force_save_as = True   # force dialog
+            elif self.current_file_path.endswith('.capsqual'):
+                # It's a valid CapsQual project file – use it
+                file_path = self.current_file_path
+            else:
+                # Current file is a subtitle or other format – treat as unsaved
+                force_save_as = True
+
+        # --- If we need a Save As dialog, show it ---
+        if force_save_as or not file_path:
+            # Compute a default name if not already set
+            if not default_name:
+                if self.project_name:
+                    default_name = self.project_name.replace(" ", "_") + ".capsqual"
+                elif self.current_file_path:
+                    # For existing non-capsqual file, use its directory with new extension
+                    default_name = str(Path(self.current_file_path).with_suffix('.capsqual'))
+                else:
+                    default_name = "transcript_project.capsqual"
+
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Save Project As",
+                default_name,
+                "CapsQual Project (*.capsqual);;All Files (*)"
+            )
+            if not file_path:
+                return  # user cancelled
+
+            # Ensure the file has .capsqual extension
+            if not file_path.endswith('.capsqual'):
+                file_path += '.capsqual'
+
+        # --- Save the project ---
+        try:
+            project_data = {
+                'srt_blocks': self.srt_blocks,
+                'current_block_index': self.current_block_index,
+                'speakers': self.speakers,
+                # Save the original source path if we have it, otherwise the current file path
+                'source_file': getattr(self, 'source_file', self.current_file_path),
+                'file_has_timestamps': self.file_has_timestamps,
+                'audio_file_path': self.audio_file_path,
+                'project_name': self.project_name,
+                'project_memo': self.project_memo,
+                'text_display_font': {
+                    'family': self.text_display_font.family(),
+                    'size': self.text_display_font.pointSize()
+                },
+                'viewer_theme': self.current_theme,
+                'playback_speed': self.playback_speed,
+                'cjk_mode': self.cjk_mode,
+                'timestamp_style': self.timestamp_style,
+                'custom_timestamp_pattern': self.custom_timestamp_pattern
+            }
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(project_data, f, indent=2, ensure_ascii=False)
+
+            self.current_file_path = file_path
+            self.add_to_recent(file_path)
+            self.clear_unsaved_changes()
+            QMessageBox.information(self, "Success", f"Project saved to {file_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Could not save project: {str(e)}")
+
 
     def export_transcript(self):
         
