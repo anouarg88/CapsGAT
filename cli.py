@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 from transcript import Transcript
-from parsers import parse_srt, parse_text, parse_tsv, parse_json
+from parsers import parse_srt, parse_text, parse_tsv, parse_json, parse_vtt
 
 
 # ── Speaker-pattern handling ──────────────────────────────────────
@@ -101,7 +101,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # ── Input file (positional, optional) ──────────────────────
     parser.add_argument("input", nargs="?",
-                        help="Input file (.srt, .txt, .tsv, .json)")
+                        help="Input file (.srt, .vtt, .txt, .tsv, .json)")
 
     # ── Output options ─────────────────────────────────────────
     parser.add_argument("-o", "--output",
@@ -124,11 +124,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-d", "--diarization", default=True,
                         action=argparse.BooleanOptionalAction,
                         help="Include speaker diarization (default: True)")
-    parser.add_argument("-s", "--speaker",
+    parser.add_argument("-s", "--speaker", default="$:",
                         help=(
                             "Speaker detection pattern. "
                             'Use "$:" (Alice:), "[$]" ([Alice]), or "{$}" ({Alice}). '
-                            "When set, unmapped speakers are auto-assigned."
+                            "Default is \"$:\" (colon-separated speaker names). "
+                            "Pass empty string '' to disable."
                         ))
     parser.add_argument("--include-unassigned", action="store_true",
                         help="Include blocks without speaker assignment (default: skip)")
@@ -176,6 +177,8 @@ def run_convert(args: argparse.Namespace) -> int:
             blocks = parse_text(raw)
         elif ext == ".tsv":
             blocks = parse_tsv(raw)
+        elif ext == ".vtt":
+            blocks = parse_vtt(raw)
         elif ext == ".json":
             import json as _json
             data = _json.loads(raw)
@@ -204,7 +207,7 @@ def run_convert(args: argparse.Namespace) -> int:
     )
 
     # ── Handle unassigned blocks (run BEFORE generation) ─────
-    if args.include_unassigned and args.speaker is None:
+    if args.include_unassigned and not args.speaker:
         for block in blocks:
             if block["speaker"] is None and not block.get("is_pause") and not block.get("is_comment"):
                 block["speaker"] = 0

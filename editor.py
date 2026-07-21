@@ -45,7 +45,7 @@ from export import (
 )
 
 from transcript import Transcript
-from parsers import parse_srt, parse_text, parse_tsv, parse_json
+from parsers import parse_srt, parse_text, parse_tsv, parse_json, parse_vtt
 from highlighting import FormattingMarkerHighlighter
 from audio_players import SimpleAudioPlayer, VlcAudioPlayer, has_pyaudio
 from dialogs import (
@@ -1974,7 +1974,7 @@ Engineered with DeepSeek V3.2
             
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Open File", "", 
-            "All Supported Files (*.srt *.txt *.json *.tsv);;SRT Files (*.srt);;Text Files (*.txt);;JSON Files (*.json);;TSV Files (*.tsv)"
+            "All Supported Files (*.srt *.vtt *.txt *.json *.tsv);;SRT Files (*.srt);;VTT Files (*.vtt);;Text Files (*.txt);;JSON Files (*.json);;TSV Files (*.tsv)"
         )
         if file_path:
             self.load_file_from_path(file_path)
@@ -2012,6 +2012,13 @@ Engineered with DeepSeek V3.2
                 with open(file_path, 'r', encoding='utf-8') as f:
                     content = f.read()
                 self.transcript.blocks = parse_tsv(content)
+                self.update_menu_state()
+                self.file_has_timestamps = True
+
+            elif file_extension == '.vtt':
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                self.transcript.blocks = parse_vtt(content)
                 self.update_menu_state()
                 self.file_has_timestamps = True
 

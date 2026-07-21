@@ -1,7 +1,7 @@
 """Unit tests for parsing various subtitle formats."""
 import pytest
 import json
-from parsers import parse_srt, parse_text, parse_tsv, parse_json
+from parsers import parse_srt, parse_text, parse_tsv, parse_json, parse_vtt
 
 # ----------------------------------------------------------------------
 # Pure parser tests — no Qt, no editor instance needed
@@ -58,3 +58,79 @@ def test_parse_json_segments_format():
     assert len(blocks) == 1
     assert blocks[0]['text'] == "Hello"
     assert blocks[0]['start_time'] == "00:00:01,500"
+
+
+# ----------------------------------------------------------------------
+# VTT parsing
+# ----------------------------------------------------------------------
+
+def test_parse_vtt_basic():
+    """Basic WebVTT with WEBVTT header and dot-separated ms."""
+    content = """WEBVTT
+
+00:00:01.000 --> 00:00:02.500
+Hello world
+
+00:00:03.000 --> 00:00:04.500
+Second line
+"""
+    blocks = parse_vtt(content)
+    assert len(blocks) == 2
+    assert blocks[0]['text'] == "Hello world"
+    assert blocks[0]['start_time'] == "00:00:01,000"
+    assert blocks[0]['end_time'] == "00:00:02,500"
+    assert blocks[1]['text'] == "Second line"
+
+def test_parse_vtt_no_header():
+    """WebVTT content without the WEBVTT header should still parse."""
+    content = """00:00:01.000 --> 00:00:02.500
+Hello world
+"""
+    blocks = parse_vtt(content)
+    assert len(blocks) == 1
+    assert blocks[0]['text'] == "Hello world"
+
+def test_parse_vtt_with_cue_settings():
+    """VTT cues with settings after the timestamp should be ignored."""
+    content = """WEBVTT
+
+00:00:01.000 --> 00:00:02.500 align:start line:90%
+Hello world
+"""
+    blocks = parse_vtt(content)
+    assert len(blocks) == 1
+    assert blocks[0]['text'] == "Hello world"
+
+def test_parse_vtt_comma_separator():
+    """VTT with comma-separated milliseconds (non-standard but common)."""
+    content = """WEBVTT
+
+00:00:01,000 --> 00:00:02,500
+Hello world
+"""
+    blocks = parse_vtt(content)
+    assert len(blocks) == 1
+    assert blocks[0]['start_time'] == "00:00:01,000"
+
+def test_parse_vtt_header_only():
+    """Only a WEBVTT header with no cues should return empty list."""
+    content = "WEBVTT\n"
+    blocks = parse_vtt(content)
+    assert blocks == []
+
+def test_parse_vtt_speaker_prefix():
+    """VTT cues with Speaker: text should preserve the speaker prefix."""
+    content = """WEBVTT
+
+00:00:01.000 --> 00:00:02.500
+Alice: Hello world
+
+00:00:03.000 --> 00:00:04.500
+Bob: Hi there
+"""
+    blocks = parse_vtt(content)
+    assert len(blocks) == 2
+    assert blocks[0]['text'] == "Alice: Hello world"
+    assert blocks[1]['text'] == "Bob: Hi there"
+    # Speaker is not parsed by parse_vtt itself — that's CLI's job
+    assert blocks[0]['speaker'] is None

@@ -80,6 +80,85 @@ def auto_segment_tokens(tokens: list[str],
 
 # ── Parsers ───────────────────────────────────────────────────────
 
+_VTT_TIMESTAMP_RE = re.compile(
+    r'(\d{2}):(\d{2}):(\d{2})[.,](\d{3})\s*-->\s*'
+    r'(\d{2}):(\d{2}):(\d{2})[.,](\d{3})'
+)
+
+
+def parse_vtt(content: str) -> list[dict]:
+    """Parse WebVTT subtitle content into a list of block dicts.
+
+    Handles standard WebVTT format (including noScribe/Whisper output):
+
+        WEBVTT
+
+        00:00:01.000 --> 00:00:02.500
+        Alice: Hello world
+
+        00:00:03.000 --> 00:00:04.500 align:end
+        Bob: Hi there
+
+    Accepts both ``.`` and ``,`` as millisecond separators and ignores
+    optional cue settings after the ``-->`` line.
+    """
+    blocks: list[dict] = []
+    text = content.strip()
+
+    # Strip the WEBVTT header (first line) if present
+    if text.startswith("WEBVTT") or text.startswith("webvtt"):
+        first_newline = text.find('\n')
+        if first_newline != -1:
+            text = text[first_newline:].strip()
+        else:
+            return []  # header only, no cues
+
+    cues = text.split('\n\n')
+
+    for cue in cues:
+        lines = cue.strip().split('\n')
+        if not lines:
+            continue
+
+        time_line = None
+        text_start = 0
+
+        # Find the first line that looks like a timestamp
+        for i, line in enumerate(lines):
+            line = line.strip()
+            if '-->' in line:
+                time_line = line
+                text_start = i + 1
+                break
+
+        if time_line is None:
+            continue  # no timestamp in this cue block
+
+        # Parse the timestamp
+        m = _VTT_TIMESTAMP_RE.match(time_line)
+        if not m:
+            continue
+
+        text = '\n'.join(lines[text_start:]).strip() if text_start < len(lines) else ""
+
+        block_data = {
+            'index': len(blocks) + 1,
+            'start_time':
+                f"{m.group(1)}:{m.group(2)}:{m.group(3)},{m.group(4)}",
+            'start_ms': int(m.group(4)),
+            'end_time':
+                f"{m.group(5)}:{m.group(6)}:{m.group(7)},{m.group(8)}",
+            'end_ms': int(m.group(8)),
+            'text': text,
+            'raw_text': text,
+            'speaker': None,
+            'is_turn_start': True,
+        }
+        blocks.append(block_data)
+
+    return blocks
+
+
 def parse_srt(content: str) -> list[dict]:
     """Parse SRT subtitle content into a list of block dicts."""
     blocks: list[dict] = []

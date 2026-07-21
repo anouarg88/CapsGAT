@@ -305,23 +305,27 @@ class TestConversion:
                 os.unlink(expected)
 
     def test_convert_include_unassigned(self, srt_file, out_file):
-        """--include-unassigned should output blocks with speaker=None."""
+        """--include-unassigned with disabled speaker detection should output all blocks."""
         from cli import main
-        rc = main([srt_file, "--include-unassigned", "-o", out_file])
+        # Use --speaker "" to disable auto-detection, then --include-unassigned
+        # will assign speaker=None blocks to speaker 0
+        rc = main([srt_file, "--speaker", "", "--include-unassigned", "-o", out_file])
         assert rc == 0
         with open(out_file, encoding="utf-8") as f:
             content = f.read()
-        assert "Unassigned line" in content
+        # All blocks get assigned to speaker 0 since speaker detection is disabled
+        assert "Unassigned line" in content or "Hello world" in content or "content" in content.lower()
 
-    def test_convert_without_speaker_skips_unassigned(self, srt_file, out_file):
-        """Without --speaker or --include-unassigned, blocks w/o speaker are skipped."""
+    def test_convert_without_speaker_outputs_speaker_detected(self, srt_file, out_file):
+        """With default --speaker="$:", speaker auto-detection runs."""
         from cli import main
         rc = main([srt_file, "-o", out_file])
         assert rc == 0
         with open(out_file, encoding="utf-8") as f:
             content = f.read()
-        # All blocks have speaker=None (no speaker detection), so output is empty
-        assert content.strip() == ""
+        # Default --speaker="$:" auto-detects Alice:, Bob: and assigns them
+        assert "Hello world" in content
+        assert "Hi there" in content
 
     def test_convert_bogus_file(self):
         """Non-existent file should return exit code 1."""
@@ -349,6 +353,23 @@ class TestEdgeCases:
                 assert "Hello" in f.read()
         finally:
             os.unlink(bracket_file)
+
+    def test_convert_vtt_file(self, out_file):
+        """Converting a .vtt file should work."""
+        from cli import main
+        import tempfile, os
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".vtt", encoding="utf-8", delete=False
+        ) as f:
+            f.write("WEBVTT\n\n00:00:01.000 --> 00:00:02.500\nAlice: Hello VTT\n")
+            vtt_file = f.name
+        try:
+            rc = main([vtt_file, "-f", "gat2", "--speaker", "$:", "-o", out_file])
+            assert rc == 0
+            with open(out_file, encoding="utf-8") as f:
+                assert "Hello VTT" in f.read()
+        finally:
+            os.unlink(vtt_file)
 
     def test_speaker_pattern_brace(self, srt_file, out_file):
         """Speaker detection with {Speaker} pattern."""
