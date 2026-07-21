@@ -1,9 +1,7 @@
 """Unit tests for export functions (GAT2, Dresing & Pehl, TiQ, SRT)."""
 import pytest
 import re
-from unittest.mock import patch
-from PyQt5.QtWidgets import QApplication
-from editor import SRTEditor
+from transcript import Transcript, INDENT_PLACEHOLDER
 from generators import (
     generate_gat2_text, generate_dresing_pehl_text, generate_tiq_text,
     generate_srt_text, time_to_seconds, time_to_ms
@@ -12,20 +10,10 @@ from generators import (
 # ----------------------------------------------------------------------
 # Fixtures
 # ----------------------------------------------------------------------
-@pytest.fixture(scope="session")
-def app():
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication([])
-    yield app
-    app.quit()
-    app.processEvents()
-
 @pytest.fixture
-def editor(app):
-    with patch.object(SRTEditor, 'init_ui'):
-        editor = SRTEditor()
-        editor.srt_blocks = [
+def transcript():
+    return Transcript(
+        blocks=[
             {
                 'index': 1,
                 'start_time': '00:00:00,000',
@@ -63,18 +51,17 @@ def editor(app):
                 'is_turn_start': False,
                 'is_pause': True
             }
-        ]
-        editor.speakers = ["A", "B"]
-        editor.cjk_mode = False
-        yield editor
-        editor.close()
+        ],
+        speakers=["A", "B"],
+        cjk_mode=False
+    )
 
 # ----------------------------------------------------------------------
 # GAT2 export tests
 # ----------------------------------------------------------------------
 @pytest.mark.timeout(60)
-def test_gat2_basic_export(editor):
-    text = generate_gat2_text(editor, 
+def test_gat2_basic_export(transcript):
+    text = generate_gat2_text(transcript, 
         include_timestamps=True,
         timestamp_style="curly",
         include_diarization=True,
@@ -90,9 +77,9 @@ def test_gat2_basic_export(editor):
     assert "(.) Pause block" in text
 
 @pytest.mark.timeout(60)
-def test_gat2_concatenate_turns(editor):
+def test_gat2_concatenate_turns(transcript):
     # Disable timestamps to avoid interference
-    text = generate_gat2_text(editor, 
+    text = generate_gat2_text(transcript, 
         include_timestamps=False,
         concatenate_turns=True,
         delimiter_choice="space",
@@ -107,9 +94,9 @@ def test_gat2_concatenate_turns(editor):
     assert "Reply" in text
 
 @pytest.mark.timeout(60)
-def test_gat2_no_diarization(editor):
+def test_gat2_no_diarization(transcript):
     # GAT2 keeps diarization even if include_diarization is disabled.
-    text = generate_gat2_text(editor, 
+    text = generate_gat2_text(transcript, 
         include_timestamps=False,
         include_diarization=False
     )
@@ -121,9 +108,9 @@ def test_gat2_no_diarization(editor):
 # Dresing & Pehl export tests
 # ----------------------------------------------------------------------
 @pytest.mark.timeout(60)
-def test_dresing_pehl_basic(editor):
+def test_dresing_pehl_basic(transcript):
     # Disable timestamps for simpler content check
-    text = generate_dresing_pehl_text(editor, 
+    text = generate_dresing_pehl_text(transcript, 
         include_timestamps=False,
         include_diarization=True,
         add_blank_line=False
@@ -136,8 +123,8 @@ def test_dresing_pehl_basic(editor):
     assert "(.) Pause block" in text
 
 @pytest.mark.timeout(60)
-def test_dresing_pehl_no_timestamp(editor):
-    text = generate_dresing_pehl_text(editor, include_timestamps=False)
+def test_dresing_pehl_no_timestamp(transcript):
+    text = generate_dresing_pehl_text(transcript, include_timestamps=False)
     assert "#" not in text
     assert "{" not in text
 
@@ -145,9 +132,9 @@ def test_dresing_pehl_no_timestamp(editor):
 # TiQ export tests
 # ----------------------------------------------------------------------
 @pytest.mark.timeout(60)
-def test_tiq_basic(editor):
+def test_tiq_basic(transcript):
     # Keep timestamps to test format, but content check can be relaxed
-    text = generate_tiq_text(editor, 
+    text = generate_tiq_text(transcript, 
         include_timestamps=True,
         include_diarization=True,
         wrap_enabled=False,
@@ -162,8 +149,8 @@ def test_tiq_basic(editor):
     assert re.search(r'#\d{2}:\d{2}:\d{2}-\d#', text) or re.search(r'{\d{2}:\d{2}:\d{2}}', text)
 
 @pytest.mark.timeout(60)
-def test_tiq_wrapping(editor):
-    text = generate_tiq_text(editor, 
+def test_tiq_wrapping(transcript):
+    text = generate_tiq_text(transcript, 
         wrap_enabled=True,
         wrap_length=20,
         character_wrap=False,
@@ -175,16 +162,16 @@ def test_tiq_wrapping(editor):
 # SRT export tests
 # ----------------------------------------------------------------------
 @pytest.mark.timeout(60)
-def test_srt_export_basic(editor):
-    srt = generate_srt_text(editor, include_diarization=True, unassigned_handling="skip")
+def test_srt_export_basic(transcript):
+    srt = generate_srt_text(transcript, include_diarization=True, unassigned_handling="skip")
     assert "A: Hello world" in srt
     assert "B: Reply" in srt
     assert "00:00:00,000 --> 00:00:02,000" in srt
     assert "(.) Pause block" not in srt
 
 @pytest.mark.timeout(60)
-def test_srt_unassigned_handling(editor):
-    editor.srt_blocks.append({
+def test_srt_unassigned_handling(transcript):
+    transcript.blocks.append({
         'text': 'Unassigned text',
         'raw_text': 'Unassigned text',
         'speaker': None,
@@ -192,18 +179,18 @@ def test_srt_unassigned_handling(editor):
         'start_time': '00:00:08,000',
         'end_time': '00:00:09,000'
     })
-    srt = generate_srt_text(editor, unassigned_handling="skip")
+    srt = generate_srt_text(transcript, unassigned_handling="skip")
     assert "Unassigned text" not in srt
-    srt = generate_srt_text(editor, unassigned_handling="no_label")
+    srt = generate_srt_text(transcript, unassigned_handling="no_label")
     assert "Unassigned text" in srt
-    srt = generate_srt_text(editor, unassigned_handling="unknown")
+    srt = generate_srt_text(transcript, unassigned_handling="unknown")
     assert "Unknown: Unassigned text" in srt
 
 # ----------------------------------------------------------------------
 # Timestamp conversion tests
 # ----------------------------------------------------------------------
 @pytest.mark.timeout(60)
-def test_time_conversion(editor):
+def test_time_conversion(transcript):
     assert time_to_seconds("00:01:30,500") == 90.5
     assert time_to_ms("00:01:30,500") == 90500
 
@@ -286,9 +273,9 @@ def test_format_srt_time_dot_and_single_digit():
 # ----------------------------------------------------------------------
 
 @pytest.mark.timeout(60)
-def test_tiq_overlap_concatenated_no_wrap(editor):
+def test_tiq_overlap_concatenated_no_wrap(transcript):
     """TiQ: overlap block appears as continuation line with correct indentation."""
-    editor.srt_blocks = [
+    transcript.blocks = [
         {
             'index': 1,
             'text': 'take a look at THIS',
@@ -326,10 +313,10 @@ def test_tiq_overlap_concatenated_no_wrap(editor):
             }
         }
     ]
-    editor.speakers = ["Y", "A"]
+    transcript.speakers = ["Y", "A"]
 
     text = generate_tiq_text(
-        editor,
+        transcript,
         include_timestamps=False,
         wrap_enabled=False,
         concatenate_turns=True,
@@ -342,9 +329,9 @@ def test_tiq_overlap_concatenated_no_wrap(editor):
 
 
 @pytest.mark.timeout(60)
-def test_tiq_overlap_concatenated_wrapped(editor):
+def test_tiq_overlap_concatenated_wrapped(transcript):
     """TiQ: overlap with wrapping preserves indentation."""
-    editor.srt_blocks = [
+    transcript.blocks = [
         {
             'index': 1,
             'text': 'take a look at THIS',
@@ -381,10 +368,10 @@ def test_tiq_overlap_concatenated_wrapped(editor):
             }
         }
     ]
-    editor.speakers = ["Y", "A"]
+    transcript.speakers = ["Y", "A"]
 
     text = generate_tiq_text(
-        editor,
+        transcript,
         include_timestamps=False,
         wrap_enabled=True,
         wrap_length=50,
@@ -395,9 +382,9 @@ def test_tiq_overlap_concatenated_wrapped(editor):
     assert "illustrate" in text or "overlap" in text
 
 @pytest.mark.timeout(60)
-def test_gat2_overlap_concatenated(editor):
+def test_gat2_overlap_concatenated(transcript):
     """GAT2 concatenated: overlap block appears with correct indentation."""
-    editor.srt_blocks = [
+    transcript.blocks = [
         {
             'index': 1,
             'text': 'Hello world this is',
@@ -428,10 +415,10 @@ def test_gat2_overlap_concatenated(editor):
             'is_turn_start': True
         }
     ]
-    editor.speakers = ["A", "B"]
+    transcript.speakers = ["A", "B"]
 
     text = generate_gat2_text(
-        editor,
+        transcript,
         include_timestamps=False,
         wrap_enabled=False,
         concatenate_turns=True,
@@ -444,9 +431,9 @@ def test_gat2_overlap_concatenated(editor):
 
 
 @pytest.mark.timeout(60)
-def test_gat2_overlap_concatenated_wrapped(editor):
+def test_gat2_overlap_concatenated_wrapped(transcript):
     """GAT2 concatenated wrapped: overlap appears when wrapping enabled."""
-    editor.srt_blocks = [
+    transcript.blocks = [
         {
             'index': 1,
             'text': 'Short',
@@ -470,10 +457,10 @@ def test_gat2_overlap_concatenated_wrapped(editor):
             }
         }
     ]
-    editor.speakers = ["A", "B"]
+    transcript.speakers = ["A", "B"]
 
     text = generate_gat2_text(
-        editor,
+        transcript,
         include_timestamps=False,
         wrap_enabled=True,
         wrap_length=40,
@@ -483,9 +470,9 @@ def test_gat2_overlap_concatenated_wrapped(editor):
     )
     assert "[overlap text here]" in text
 @pytest.mark.timeout(60)
-def test_tiq_overlap_partial_block(editor):
+def test_tiq_overlap_partial_block(transcript):
     """TiQ: block with both normal text and overlap (text_before/text_after)."""
-    editor.srt_blocks = [
+    transcript.blocks = [
         {
             'index': 1,
             'text': 'Hello world',
@@ -509,10 +496,10 @@ def test_tiq_overlap_partial_block(editor):
             }
         }
     ]
-    editor.speakers = ["A"]
+    transcript.speakers = ["A"]
 
     text = generate_tiq_text(
-        editor,
+        transcript,
         include_timestamps=False,
         wrap_enabled=False,
         concatenate_turns=True,
@@ -529,9 +516,9 @@ def test_tiq_overlap_partial_block(editor):
 # ----------------------------------------------------------------------
 
 @pytest.mark.timeout(60)
-def test_tiq_add_blank_line(editor):
+def test_tiq_add_blank_line(transcript):
     """Empty line should appear between turns when add_blank_line=True."""
-    editor.srt_blocks = [
+    transcript.blocks = [
         {
             'index': 1,
             'text': 'Hello',
@@ -547,9 +534,9 @@ def test_tiq_add_blank_line(editor):
             'is_turn_start': True
         }
     ]
-    editor.speakers = ["A", "B"]
+    transcript.speakers = ["A", "B"]
     text = generate_tiq_text(
-        editor,
+        transcript,
         include_timestamps=False,
         add_blank_line=True,
         concatenate_turns=True
@@ -565,9 +552,9 @@ def test_tiq_add_blank_line(editor):
 
 
 @pytest.mark.timeout(60)
-def test_tiq_no_blank_line_default(editor):
+def test_tiq_no_blank_line_default(transcript):
     """No blank line when add_blank_line=False (default)."""
-    editor.srt_blocks = [
+    transcript.blocks = [
         {
             'index': 1,
             'text': 'Hello',
@@ -583,9 +570,9 @@ def test_tiq_no_blank_line_default(editor):
             'is_turn_start': True
         }
     ]
-    editor.speakers = ["A", "B"]
+    transcript.speakers = ["A", "B"]
     text = generate_tiq_text(
-        editor,
+        transcript,
         include_timestamps=False,
         add_blank_line=False,
         concatenate_turns=True
@@ -595,13 +582,13 @@ def test_tiq_no_blank_line_default(editor):
 
 
 @pytest.mark.timeout(60)
-def test_tiq_vertical_bar_on_overlap(editor):
+def test_tiq_vertical_bar_on_overlap(transcript):
     """When add_blank_line and next turn starts with └, insert | above it.
 
     The overlap line is emitted inline within the previous turn's output
     (cross-speaker overlap), and the bar should appear BEFORE the overlap line.
     """
-    editor.srt_blocks = [
+    transcript.blocks = [
         {
             'index': 1,
             'text': 'take a look at THIS (segment 1)',
@@ -623,9 +610,9 @@ def test_tiq_vertical_bar_on_overlap(editor):
             }
         }
     ]
-    editor.speakers = ["C", "D"]
+    transcript.speakers = ["C", "D"]
     text = generate_tiq_text(
-        editor,
+        transcript,
         include_timestamps=False,
         add_blank_line=True,
         concatenate_turns=True
@@ -658,13 +645,13 @@ def test_tiq_vertical_bar_on_overlap(editor):
     assert '└' not in bar_content, "Bar line should not contain └"
 
 
-def test_tiq_vertical_bar_text_before(editor):
+def test_tiq_vertical_bar_text_before(transcript):
     """No vertical bar when overlap block has text_before — just blank line.
 
     The overlap line (└overlap) appears inline in X's output, then a blank
     line, then Y's turn with its remaining text (some text more).
     """
-    editor.srt_blocks = [
+    transcript.blocks = [
         {
             'index': 1,
             'text': 'First line',
@@ -686,9 +673,9 @@ def test_tiq_vertical_bar_text_before(editor):
             }
         }
     ]
-    editor.speakers = ["X", "Y"]
+    transcript.speakers = ["X", "Y"]
     text = generate_tiq_text(
-        editor,
+        transcript,
         include_timestamps=False,
         add_blank_line=True,
         concatenate_turns=True
@@ -713,7 +700,7 @@ def test_tiq_vertical_bar_text_before(editor):
 INDENT_PL = '\u2423'  # ␣ - SRTEditor.INDENT_PLACEHOLDER
 
 
-def test_infer_overlap_info_gat2_old_format(editor):
+def test_infer_overlap_info_gat2_old_format(transcript):
     """_infer_overlap_info_from_raw_text should detect old GAT2 overlap markers."""
     from generators import _infer_overlap_info_from_raw_text
     raw = f"before text{INDENT_PL}{INDENT_PL}{INDENT_PL}[overlap]after text"
@@ -727,7 +714,7 @@ def test_infer_overlap_info_gat2_old_format(editor):
     assert info['convention'] == 'gat2'
 
 
-def test_infer_overlap_info_tiq_old_format(editor):
+def test_infer_overlap_info_tiq_old_format(transcript):
     """_infer_overlap_info_from_raw_text should detect old TiQ overlap markers."""
     from generators import _infer_overlap_info_from_raw_text
     raw = f"before text{INDENT_PL}{INDENT_PL}└overlap text"
@@ -741,7 +728,7 @@ def test_infer_overlap_info_tiq_old_format(editor):
     assert info['convention'] == 'tiq'
 
 
-def test_infer_overlap_info_no_placeholder(editor):
+def test_infer_overlap_info_no_placeholder(transcript):
     """Should return None when no placeholder is present."""
     from generators import _infer_overlap_info_from_raw_text
     block = {'raw_text': 'just normal text'}
@@ -749,7 +736,7 @@ def test_infer_overlap_info_no_placeholder(editor):
     assert info is None
 
 
-def test_infer_overlap_info_placeholder_no_overlap(editor):
+def test_infer_overlap_info_placeholder_no_overlap(transcript):
     """Should return None when ␣ is present but no overlap marker follows."""
     from generators import _infer_overlap_info_from_raw_text
     raw = f"some{INDENT_PL}text"
@@ -758,10 +745,10 @@ def test_infer_overlap_info_placeholder_no_overlap(editor):
     assert info is None
 
 
-def test_export_with_old_format_gat2(editor):
+def test_export_with_old_format_gat2(transcript):
     """GAT2 export with old-format blocks (no overlap_info) should still produce correct indentation."""
     from generators import generate_gat2_text
-    editor.srt_blocks = [
+    transcript.blocks = [
         {'index': 1, 'text': 'first part', 'raw_text': 'first part',
          'speaker': 0, 'is_turn_start': True, 'start_time': '00:00:01,000', 'end_time': '00:00:03,000'},
         {'index': 2, 'text': f'some text{INDENT_PL}{INDENT_PL}{INDENT_PL}[overlap]after',
@@ -769,9 +756,9 @@ def test_export_with_old_format_gat2(editor):
          'speaker': 1, 'is_turn_start': True, 'start_time': '00:00:02,000', 'end_time': '00:00:04,000',
          'overlap_info': None}  # explicitly no overlap_info
     ]
-    editor.speakers = ["A", "B"]
+    transcript.speakers = ["A", "B"]
     text = generate_gat2_text(
-        editor,
+        transcript,
         include_timestamps=False,
         wrap_enabled=False,
         concatenate_turns=True,
@@ -781,10 +768,10 @@ def test_export_with_old_format_gat2(editor):
     assert "[overlap]" in text
 
 
-def test_export_with_old_format_tiq(editor):
+def test_export_with_old_format_tiq(transcript):
     """TiQ export with old-format blocks (no overlap_info) should still produce correct indentation."""
     from generators import generate_tiq_text
-    editor.srt_blocks = [
+    transcript.blocks = [
         {'index': 1, 'text': 'first part', 'raw_text': 'first part',
          'speaker': 0, 'is_turn_start': True, 'start_time': '00:00:01,000', 'end_time': '00:00:03,000'},
         {'index': 2, 'text': f'some text{INDENT_PL}{INDENT_PL}└overlap more',
@@ -792,9 +779,9 @@ def test_export_with_old_format_tiq(editor):
          'speaker': 1, 'is_turn_start': True, 'start_time': '00:00:02,000', 'end_time': '00:00:04,000',
          'overlap_info': None}  # explicitly no overlap_info
     ]
-    editor.speakers = ["A", "B"]
+    transcript.speakers = ["A", "B"]
     text = generate_tiq_text(
-        editor,
+        transcript,
         include_timestamps=False,
         wrap_enabled=False,
         concatenate_turns=True,
@@ -809,10 +796,10 @@ def test_export_with_old_format_tiq(editor):
 # Chained overlap export tests
 # ----------------------------------------------------------------------
 
-def test_tiq_chained_overlap(editor):
+def test_tiq_chained_overlap(transcript):
     """TiQ: chained overlap where an overlap block itself is overlapped should show all overlaps."""
     from generators import generate_tiq_text
-    editor.srt_blocks = [
+    transcript.blocks = [
         {
             'index': 1,
             'text': 'this is an example to illustrate the issue at hand',
@@ -851,9 +838,9 @@ def test_tiq_chained_overlap(editor):
             }
         }
     ]
-    editor.speakers = ["C", "D"]
+    transcript.speakers = ["C", "D"]
     text = generate_tiq_text(
-        editor,
+        transcript,
         include_timestamps=False,
         wrap_enabled=False,
         concatenate_turns=True,
@@ -864,10 +851,10 @@ def test_tiq_chained_overlap(editor):
     assert "\u2514This one" in text
 
 
-def test_gat2_chained_overlap(editor):
+def test_gat2_chained_overlap(transcript):
     """GAT2: chained overlap where an overlap block itself is overlapped should show all overlaps."""
     from generators import generate_gat2_text
-    editor.srt_blocks = [
+    transcript.blocks = [
         {
             'index': 1,
             'text': 'this is an example to illustrate the issue at hand',
@@ -906,9 +893,9 @@ def test_gat2_chained_overlap(editor):
             }
         }
     ]
-    editor.speakers = ["C", "D"]
+    transcript.speakers = ["C", "D"]
     text = generate_gat2_text(
-        editor,
+        transcript,
         include_timestamps=False,
         wrap_enabled=False,
         concatenate_turns=True,
@@ -924,7 +911,7 @@ def test_gat2_chained_overlap(editor):
 # ----------------------------------------------------------------------
 
 @pytest.mark.timeout(60)
-def test_tiq_overlap_wrap_ordering(editor):
+def test_tiq_overlap_wrap_ordering(transcript):
     """TiQ: overlap at wrap boundary should not invert line order.
 
     Regression test for the bug where overlap line appeared between
@@ -932,7 +919,7 @@ def test_tiq_overlap_wrap_ordering(editor):
     """
     text_a = "take a look at THIS (segment 1) this is a line to illustrate the current issue with overlapping speech."
     text_b = "This line overlaps"
-    editor.srt_blocks = [
+    transcript.blocks = [
         {
             'index': 1,
             'text': text_a,
@@ -960,11 +947,11 @@ def test_tiq_overlap_wrap_ordering(editor):
             }
         }
     ]
-    editor.speakers = ["C", "D"]
+    transcript.speakers = ["C", "D"]
 
     for wl in range(58, 68):
         text = generate_tiq_text(
-            editor,
+            transcript,
             include_timestamps=False,
             wrap_enabled=True,
             wrap_length=wl,
@@ -996,12 +983,12 @@ def test_tiq_overlap_wrap_ordering(editor):
 
 
 @pytest.mark.timeout(60)
-def test_tiq_overlap_does_not_wrap(editor):
+def test_tiq_overlap_does_not_wrap(transcript):
     """TiQ: when overlap is longer than remaining space on target line,
     the base line should break early so the overlap fits on one line."""
     text_a = "This is a short line."
     text_b = "This long overlapping text needs more room than the target line has left"
-    editor.srt_blocks = [
+    transcript.blocks = [
         {
             'index': 1,
             'text': text_a,
@@ -1029,10 +1016,10 @@ def test_tiq_overlap_does_not_wrap(editor):
             }
         }
     ]
-    editor.speakers = ["Y", "A"]
+    transcript.speakers = ["Y", "A"]
 
     text = generate_tiq_text(
-        editor,
+        transcript,
         include_timestamps=False,
         wrap_enabled=True,
         wrap_length=50,

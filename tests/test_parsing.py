@@ -1,36 +1,16 @@
 """Unit tests for parsing various subtitle formats."""
 import pytest
 import json
-from unittest.mock import patch
-from PyQt5.QtWidgets import QApplication
-from editor import SRTEditor
+from parsers import parse_srt, parse_text, parse_tsv, parse_json
 
 # ----------------------------------------------------------------------
-# Fixture to create a minimal editor (UI mocked)
+# Pure parser tests — no Qt, no editor instance needed
 # ----------------------------------------------------------------------
-@pytest.fixture(scope="module")
-def app():
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication([])
-    yield app
-
-@pytest.fixture
-def editor(app):
-    with patch.object(SRTEditor, 'init_ui'):
-        editor = SRTEditor()
-        # Ensure required attributes exist
-        editor.srt_blocks = []
-        editor.speakers = ["A", "B", "C", "D"]
-        editor.cjk_mode = False
-        yield editor
-        editor.has_unsaved_changes = False
-        editor.close()
 
 # ----------------------------------------------------------------------
 # SRT parsing
 # ----------------------------------------------------------------------
-def test_parse_srt_basic(editor):
+def test_parse_srt_basic():
     content = """1
 00:00:01,000 --> 00:00:04,000
 Hello world
@@ -38,57 +18,43 @@ Hello world
 2
 00:00:05,000 --> 00:00:07,500
 Second line"""
-    blocks = editor.parse_srt(content)
+    blocks = parse_srt(content)
     assert len(blocks) == 2
     assert blocks[0]['text'] == "Hello world"
     assert blocks[0]['start_time'] == "00:00:01,000"
     assert blocks[0]['end_time'] == "00:00:04,000"
     assert blocks[1]['text'] == "Second line"
 
-def test_parse_srt_malformed(editor):
+def test_parse_srt_malformed():
     content = "1\n00:00:01,000 --> 00:00:04,000"
-    blocks = editor.parse_srt(content)
+    blocks = parse_srt(content)
     assert blocks == []
 
-def test_parse_text_basic(editor):
+def test_parse_text_basic():
     content = "Line one\nLine two\n\nLine three"
-    blocks = editor.parse_text(content)
+    blocks = parse_text(content)
     assert len(blocks) == 3
     assert blocks[0]['text'] == "Line one"
     assert blocks[1]['text'] == "Line two"
     assert blocks[2]['text'] == "Line three"
 
-def test_parse_tsv_basic(editor):
+def test_parse_tsv_basic():
     content = "start\tend\ttext\n1000\t2000\tHello\n2000\t3000\tWorld"
-    blocks = editor.parse_tsv(content)
+    blocks = parse_tsv(content)
     assert len(blocks) == 2
     assert blocks[0]['start_time'] == "00:00:01,000"
     assert blocks[0]['end_time'] == "00:00:02,000"
     assert blocks[0]['text'] == "Hello"
 
-def test_parse_json_tokens_format(editor):
+def test_parse_json_tokens_format():
     data = {"tokens": ["Hello", " ", "world"], "timestamps": [0.5, 0.6, 0.7]}
-    with patch('editor.JsonImportDialog') as mock_dialog:
-        mock_dialog.return_value.exec_.return_value = 1  # QDialog.Accepted
-        mock_dialog.return_value.get_import_option.return_value = "one_block"
-        blocks = editor.parse_json(data)
-    mock_dialog.assert_called_once_with(has_tokens=True, parent=editor)
-    mock_dialog.return_value.exec_.assert_called_once()
-    mock_dialog.return_value.get_import_option.assert_called_once()
+    blocks = parse_json(data, import_option="one_block")
     assert len(blocks) == 1
     assert blocks[0]['text'] == "Hello world"
 
-def test_parse_json_tokens_format_non_interactive(editor):
-    data = {"tokens": ["Hello", " ", "world"], "timestamps": [0.5, 0.6, 0.7]}
-    with patch('editor.JsonImportDialog') as mock_dialog:
-        blocks = editor.parse_json(data, import_option="one_block")
-    mock_dialog.assert_not_called()
-    assert len(blocks) == 1
-    assert blocks[0]['text'] == "Hello world"
-
-def test_parse_json_segments_format(editor):
+def test_parse_json_segments_format():
     data = {"segments": [{"start": 1.5, "end": 3.2, "text": "Hello"}]}
-    blocks = editor.parse_json(data)
+    blocks = parse_json(data)
     assert len(blocks) == 1
     assert blocks[0]['text'] == "Hello"
     assert blocks[0]['start_time'] == "00:00:01,500"
