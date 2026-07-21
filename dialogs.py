@@ -1816,7 +1816,7 @@ class ExportPreviewDialog(QDialog):
             custom = self.ts_custom_edit.text()
 
         if self.export_format == "srt":
-            srt_text = generate_srt_text(main, 
+            srt_text = generate_srt_text(main.transcript,
                 include_diarization=self.diarization_check.isChecked(),
                 unassigned_handling="skip"
             )
@@ -1829,7 +1829,7 @@ class ExportPreviewDialog(QDialog):
             return
 
         # Generate transcript text (includes markers)
-        transcript_text = generate_transcript_text(main, 
+        transcript_text = generate_transcript_text(main.transcript, 
             include_timestamps=self.current_include_timestamps,
             timestamp_style=ts_style,
             custom_pattern=custom,

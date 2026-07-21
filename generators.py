@@ -7,10 +7,14 @@ Renamed from export.py to generators.py to reflect that this module
 generates transcript text (as opposed to parsing input files).
 """
 
+from __future__ import annotations
+
 import os
 import re
 import json
 from pathlib import Path
+
+from transcript import Transcript, INDENT_PLACEHOLDER, PAUSE_PATTERN
 
 
 # ──────────────────────────────────────────────
@@ -189,7 +193,7 @@ def replace_indent_placeholders(text, indent_placeholder, cjk_mode=False, for_ex
 # ──────────────────────────────────────────────
 
 def generate_gat2_text(
-    editor,
+    transcript: Transcript,
     include_timestamps=True,
     timestamp_style="curly",
     custom_pattern=None,
@@ -203,10 +207,10 @@ def generate_gat2_text(
     custom_delimiter=""
 ):
     """Generate GAT2 convention transcript text."""
-    if not editor.srt_blocks:
+    if not transcript.blocks:
         return ""
 
-    cjk_mode = editor.cjk_mode
+    cjk_mode = transcript.cjk_mode
 
     # Determine delimiter
     if delimiter_choice == "default":
@@ -220,13 +224,13 @@ def generate_gat2_text(
         return (b['speaker'] is not None) or b.get('is_pause') or b.get('is_comment')
 
     if concatenate_turns:
-        turns = _group_into_turns(editor, include_timestamps)
+        turns = _group_into_turns(transcript, include_timestamps)
         if not turns:
             return ""
 
         max_speaker_length = 2
         for turn in turns:
-            speaker_label = editor.speakers[turn['speaker']] + ":"
+            speaker_label = transcript.speakers[turn['speaker']] + ":"
             max_speaker_length = max(max_speaker_length, len(speaker_label))
 
         total_turns = len(turns)
@@ -243,12 +247,12 @@ def generate_gat2_text(
         for turn in turns:
             for b in turn['blocks']:
                 info = b.get('overlap_info')
-                if not info and editor.INDENT_PLACEHOLDER in b.get('raw_text', ''):
-                    info = _infer_overlap_info_from_raw_text(b, editor.INDENT_PLACEHOLDER)
+                if not info and INDENT_PLACEHOLDER in b.get('raw_text', ''):
+                    info = _infer_overlap_info_from_raw_text(b, INDENT_PLACEHOLDER)
                 if info:
                     tgt = info.get('prev_block_idx')
                     if tgt is not None:
-                        tgt_block = editor.srt_blocks[tgt]
+                        tgt_block = transcript.blocks[tgt]
                         if tgt_block['speaker'] != turn['speaker']:
                             if tgt not in overlap_map:
                                 overlap_map[tgt] = []
@@ -258,13 +262,13 @@ def generate_gat2_text(
                             })
         def _block_text_gat2(b):
             info = b.get('overlap_info')
-            if not info and editor.INDENT_PLACEHOLDER in b.get('raw_text', ''):
-                info = _infer_overlap_info_from_raw_text(b, editor.INDENT_PLACEHOLDER)
+            if not info and INDENT_PLACEHOLDER in b.get('raw_text', ''):
+                info = _infer_overlap_info_from_raw_text(b, INDENT_PLACEHOLDER)
             if info:
-                bt = replace_indent_placeholders(info.get('text_before', ''), editor.INDENT_PLACEHOLDER, cjk_mode, for_export=True)
-                at = replace_indent_placeholders(info.get('text_after', ''), editor.INDENT_PLACEHOLDER, cjk_mode, for_export=True)
+                bt = replace_indent_placeholders(info.get('text_before', ''), INDENT_PLACEHOLDER, cjk_mode, for_export=True)
+                at = replace_indent_placeholders(info.get('text_after', ''), INDENT_PLACEHOLDER, cjk_mode, for_export=True)
                 return (bt + " " + at).strip() or bt or at
-            return replace_indent_placeholders(b['raw_text'], editor.INDENT_PLACEHOLDER, cjk_mode, for_export=True).strip()
+            return replace_indent_placeholders(b['raw_text'], INDENT_PLACEHOLDER, cjk_mode, for_export=True).strip()
         output_lines = []
 
         for turn_idx, turn in enumerate(turns, start=1):
@@ -277,10 +281,10 @@ def generate_gat2_text(
             
             # Check if any overlaps (cross-speaker or same-speaker) target this turn
             has_overlap = any(
-                b.get('overlap_info') or (editor.INDENT_PLACEHOLDER in b.get('raw_text', '') and _infer_overlap_info_from_raw_text(b, editor.INDENT_PLACEHOLDER))
+                b.get('overlap_info') or (INDENT_PLACEHOLDER in b.get('raw_text', '') and _infer_overlap_info_from_raw_text(b, INDENT_PLACEHOLDER))
                 for b in turn['blocks']
             )
-            from_overlap_map = any(editor.srt_blocks.index(b) in overlap_map for b in turn['blocks'])
+            from_overlap_map = any(transcript.blocks.index(b) in overlap_map for b in turn['blocks'])
             
             if not turn_text and not has_overlap and not from_overlap_map:
                 continue
@@ -296,7 +300,7 @@ def generate_gat2_text(
             else:
                 timestamp = ""
 
-            speaker_part = editor.speakers[turn['speaker']] + ":"
+            speaker_part = transcript.speakers[turn['speaker']] + ":"
             speaker_part = speaker_part.ljust(max_speaker_length) + "   "
             left_part = timestamp + line_num_part + speaker_part
 
@@ -306,7 +310,7 @@ def generate_gat2_text(
                 if wrap_enabled and wrap_length > 0:
                     aw = wrap_length - len(left_part)
                     if aw < 10: aw = 40
-                    lines = _wrap_text(editor, turn_text, aw, character_wrap, first_line_only_indent=True)                    # ── Overlap-aware line re-break for GAT2 ──
+                    lines = _wrap_text(transcript, turn_text, aw, character_wrap, first_line_only_indent=True)                    # ── Overlap-aware line re-break for GAT2 ──
                     # Convert to tuple format for _rebreak_turn_line_for_overlap
                     wrapped_tuples = []
                     tc = 0
@@ -314,7 +318,7 @@ def generate_gat2_text(
                         wrapped_tuples.append((line, tc))
                         tc += len(line)
                     for b in turn['blocks']:
-                        bidx_g = editor.srt_blocks.index(b)
+                        bidx_g = transcript.blocks.index(b)
                         if bidx_g in overlap_map:
                             for ov in overlap_map[bidx_g]:
                                 info = ov['overlap_info']
@@ -334,7 +338,7 @@ def generate_gat2_text(
                                         if col + ov_len > aw and col < line_end - 1:
                                             wrapped_tuples, _ = _rebreak_turn_line_for_overlap(
                                                 turn_text, wrapped_tuples, li, pos,
-                                                aw, left_part, editor, cjk_mode, delimiter
+                                                aw, left_part, transcript, cjk_mode, delimiter
                                             )
                                         break
                     lines = [t[0] for t in wrapped_tuples]
@@ -347,7 +351,7 @@ def generate_gat2_text(
                     wrapped_lines.append(left_part + turn_text)
             overlaps_after = []
             for b in turn['blocks']:
-                bidx = editor.srt_blocks.index(b)
+                bidx = transcript.blocks.index(b)
                 if bidx in overlap_map:
                     for ov in overlap_map[bidx]:
                         info = ov['overlap_info']
@@ -372,12 +376,11 @@ def generate_gat2_text(
                         overlaps_after.append((line_idx, ov))
 
             # Same-speaker overlaps
-            # Same-speaker overlaps
             for b in turn['blocks']:
-                if b.get('overlap_info') or (editor.INDENT_PLACEHOLDER in b.get('raw_text', '') and _infer_overlap_info_from_raw_text(b, editor.INDENT_PLACEHOLDER)):
-                    info = b.get('overlap_info') or _infer_overlap_info_from_raw_text(b, editor.INDENT_PLACEHOLDER)
+                if b.get('overlap_info') or (INDENT_PLACEHOLDER in b.get('raw_text', '') and _infer_overlap_info_from_raw_text(b, INDENT_PLACEHOLDER)):
+                    info = b.get('overlap_info') or _infer_overlap_info_from_raw_text(b, INDENT_PLACEHOLDER)
                     tgt = info.get('prev_block_idx')
-                    if tgt is None or (tgt is not None and editor.srt_blocks[tgt]['speaker'] == turn['speaker']):
+                    if tgt is None or (tgt is not None and transcript.blocks[tgt]['speaker'] == turn['speaker']):
                         overlaps_after.append((len(wrapped_lines) - 1 if wrapped_lines else 0,
                                              {'overlap_info': info, 'overlap_speaker': turn['speaker']}))
             # Insert overlaps from bottom up
@@ -391,12 +394,12 @@ def generate_gat2_text(
             for line_idx, ov in overlaps_after:
                 info = ov['overlap_info']
                 osp_speaker = ov['overlap_speaker']
-                osp_label = editor.speakers[osp_speaker] + ":"
+                osp_label = transcript.speakers[osp_speaker] + ":"
                 osp_label = osp_label.ljust(max_speaker_length) + "   "
                 osp_left = timestamp_padding + " " * len(line_num_part) + osp_label
 
                 aw = (wrap_length - len(osp_left)) if (wrap_enabled and wrap_length > 0) else 0
-                col = _compute_overlap_export_indent(editor, info, aw, cjk_mode, delimiter)
+                col = _compute_overlap_export_indent(transcript, info, aw, cjk_mode, delimiter)
                 ol = " " * col + info['overlap_text']
 
                 insert_count = 0
@@ -420,7 +423,7 @@ def generate_gat2_text(
                         nxt = wrapped_lines[next_idx]
                         if nxt.startswith(' ' * len(left_part)):
                             rest = nxt[len(left_part):].lstrip()
-                            if rest and not any(rest.startswith(s) for s in editor.speakers):
+                            if rest and not any(rest.startswith(s) for s in transcript.speakers):
                                 wrapped_lines[next_idx] = left_part + nxt[len(left_part):]
 
             output_lines.extend(wrapped_lines)
@@ -431,14 +434,14 @@ def generate_gat2_text(
         return '\n'.join(output_lines)
 
     else:
-        included_blocks = [b for b in editor.srt_blocks if is_valid_block(b)]
+        included_blocks = [b for b in transcript.blocks if is_valid_block(b)]
         if not included_blocks:
             return ""
 
         max_speaker_length = 2
         for b in included_blocks:
             if b['speaker'] is not None and b.get('is_turn_start', True):
-                speaker_label = editor.speakers[b['speaker']] + ":"
+                speaker_label = transcript.speakers[b['speaker']] + ":"
                 max_speaker_length = max(max_speaker_length, len(speaker_label))
 
         total_lines = len(included_blocks)
@@ -457,7 +460,7 @@ def generate_gat2_text(
             line_number_part = f"{line_num:0{line_digits}d}   "
 
             if block.get('is_turn_start', True) and block['speaker'] is not None:
-                speaker_part = editor.speakers[block['speaker']] + ":"
+                speaker_part = transcript.speakers[block['speaker']] + ":"
                 speaker_part = speaker_part.ljust(max_speaker_length) + "   "
             else:
                 speaker_part = " " * (max_speaker_length + 3)
@@ -476,13 +479,13 @@ def generate_gat2_text(
                 timestamp = ""
 
             left_part = timestamp + line_number_part + speaker_part
-            text = replace_indent_placeholders(block['raw_text'], editor.INDENT_PLACEHOLDER, cjk_mode, for_export=True)
+            text = replace_indent_placeholders(block['raw_text'], INDENT_PLACEHOLDER, cjk_mode, for_export=True)
 
             if wrap_enabled and wrap_length > 0:
                 available_width = wrap_length - len(left_part)
                 if available_width < 10:
                     available_width = 40
-                lines = _wrap_text(editor, text, available_width, character_wrap, first_line_only_indent=True)
+                lines = _wrap_text(transcript, text, available_width, character_wrap, first_line_only_indent=True)
                 for idx, line in enumerate(lines):
                     if idx == 0:
                         output_lines.append(left_part + line)
@@ -501,7 +504,7 @@ def generate_gat2_text(
 
 
 def generate_dresing_pehl_text(
-    editor,
+    transcript: Transcript,
     include_timestamps=True,
     timestamp_style="hash",
     custom_pattern=None,
@@ -512,10 +515,10 @@ def generate_dresing_pehl_text(
     custom_delimiter=""
 ):
     """Generate Dresing & Pehl convention transcript text."""
-    if not editor.srt_blocks:
+    if not transcript.blocks:
         return ""
 
-    cjk_mode = editor.cjk_mode
+    cjk_mode = transcript.cjk_mode
 
     if delimiter_choice == "default":
         delimiter = " " if not cjk_mode else ""
@@ -524,21 +527,21 @@ def generate_dresing_pehl_text(
     else:
         delimiter = " "
 
-    segments = _build_ordered_segments(editor, include_timestamps)
+    segments = _build_ordered_segments(transcript, include_timestamps)
     output_lines = []
     output_lines.append("")
 
     for seg in segments:
         if seg['type'] == 'turn':
             turn_text = delimiter.join(
-                replace_indent_placeholders(b['raw_text'], editor.INDENT_PLACEHOLDER, cjk_mode, for_export=True).strip()
+                replace_indent_placeholders(b['raw_text'], INDENT_PLACEHOLDER, cjk_mode, for_export=True).strip()
                 for b in seg['blocks'] if b['text'].strip()
             )
             if not turn_text:
                 continue
 
             if include_diarization:
-                line = f"{editor.speakers[seg['speaker']]}: {turn_text}"
+                line = f"{transcript.speakers[seg['speaker']]}: {turn_text}"
             else:
                 line = turn_text
 
@@ -558,7 +561,7 @@ def generate_dresing_pehl_text(
             if block.get('is_empty'):
                 output_lines.append("")
                 continue
-            text = replace_indent_placeholders(block['raw_text'], editor.INDENT_PLACEHOLDER, cjk_mode, for_export=True).strip()
+            text = replace_indent_placeholders(block['raw_text'], INDENT_PLACEHOLDER, cjk_mode, for_export=True).strip()
             if text:
                 output_lines.append(text)
                 if add_blank_line:
@@ -567,7 +570,7 @@ def generate_dresing_pehl_text(
     return '\n'.join(output_lines)
 
 
-def _build_ordered_segments(editor, include_timestamps=False):
+def _build_ordered_segments(transcript: Transcript, include_timestamps=False):
     """Build ordered segments from srt_blocks, grouping consecutive same-speaker blocks into turns.
     
     Returns a list of segments, each with:
@@ -578,7 +581,7 @@ def _build_ordered_segments(editor, include_timestamps=False):
     segments = []
     current_turn = None
     
-    for block in editor.srt_blocks:
+    for block in transcript.blocks:
         speaker = block.get('speaker')
         
         # Skip unassigned blocks that aren't pause/comment
@@ -616,7 +619,7 @@ def _build_ordered_segments(editor, include_timestamps=False):
 
 
 def _rebreak_turn_line_for_overlap(turn_text, wrapped_lines, line_idx, overlap_col,
-                                    max_width, prefix, editor, cjk_mode, delimiter):
+                                    max_width, prefix, transcript: Transcript, cjk_mode, delimiter):
     """Push content after overlap_col to next line to give overlap room.
     
     Only modifies the line at line_idx by splitting its content at overlap_col.
@@ -665,7 +668,7 @@ def _rebreak_turn_line_for_overlap(turn_text, wrapped_lines, line_idx, overlap_c
 
 
 def generate_tiq_text(
-    editor,
+    transcript: Transcript,
     include_timestamps=True,
     timestamp_style="hash",
     custom_pattern=None,
@@ -679,10 +682,10 @@ def generate_tiq_text(
     custom_delimiter=""
 ):
     """Generate TiQ convention transcript text."""
-    if not editor.srt_blocks:
+    if not transcript.blocks:
         return ""
 
-    cjk_mode = editor.cjk_mode
+    cjk_mode = transcript.cjk_mode
 
     if delimiter_choice == "default":
         delimiter = " " if not cjk_mode else ""
@@ -693,14 +696,14 @@ def generate_tiq_text(
 
     max_speaker_width = 0
     if include_diarization:
-        for speaker in editor.speakers:
+        for speaker in transcript.speakers:
             label = f"{speaker}: "
             max_speaker_width = max(max_speaker_width, len(label))
     else:
         max_speaker_width = 0
 
     # Build all blocks as flat list with their segment info
-    all_segments = _build_ordered_segments(editor, include_timestamps)
+    all_segments = _build_ordered_segments(transcript, include_timestamps)
     
     # First pass: collect all overlaps pointing at other speakers' turns
     # overlap_map: { target_block_idx: [overlap_info, ...] }
@@ -709,13 +712,13 @@ def generate_tiq_text(
         if seg['type'] == 'turn':
             for b in seg['blocks']:
                 info = b.get('overlap_info')
-                if not info and editor.INDENT_PLACEHOLDER in b.get('raw_text', ''):
-                    info = _infer_overlap_info_from_raw_text(b, editor.INDENT_PLACEHOLDER)
+                if not info and INDENT_PLACEHOLDER in b.get('raw_text', ''):
+                    info = _infer_overlap_info_from_raw_text(b, INDENT_PLACEHOLDER)
                 if info:
                     tgt = info.get('prev_block_idx')
                     if tgt is not None:
                         # Check if target is in a different speaker's turn
-                        tgt_block = editor.srt_blocks[tgt]
+                        tgt_block = transcript.blocks[tgt]
                         if tgt_block['speaker'] != seg['speaker']:
                             if tgt not in overlap_map:
                                 overlap_map[tgt] = []
@@ -732,7 +735,7 @@ def generate_tiq_text(
     
     def _speaker_prefix(speaker_idx):
         if include_diarization and speaker_idx is not None:
-            return f"{editor.speakers[speaker_idx]}: ".ljust(max_speaker_width)
+            return f"{transcript.speakers[speaker_idx]}: ".ljust(max_speaker_width)
         return " " * max_speaker_width
     
     def _emit_turn_text(text, prefix, ts=None):
@@ -743,8 +746,8 @@ def generate_tiq_text(
             ts_str = " " + format_timestamp(ts, timestamp_style, custom_pattern)
         if wrap_enabled and cw > 10:
             if character_wrap: tokens = list(text)
-            elif cjk_mode: tokens = _tokenize_cjk_with_pauses(editor, text)
-            else: tokens = _tokenize_with_pauses(editor, text)
+            elif cjk_mode: tokens = _tokenize_cjk_with_pauses(text)
+            else: tokens = _tokenize_with_pauses(text)
             if ts_str: tokens.append(ts_str)
             lines = []; cl = ""
             for token in tokens:
@@ -768,7 +771,7 @@ def generate_tiq_text(
             content_lines.append(prefix + text + ts_str)
     
     def _emit_overlap_line(info, speaker_idx, prefix, cw):
-        col = _compute_overlap_export_indent(editor, info, cw if (wrap_enabled and cw > 10) else 0, cjk_mode, delimiter)
+        col = _compute_overlap_export_indent(transcript, info, cw if (wrap_enabled and cw > 10) else 0, cjk_mode, delimiter)
         osp = _speaker_prefix(speaker_idx)
         ol = " " * col + info['overlap_text']
         if wrap_enabled and cw > 10:
@@ -784,13 +787,13 @@ def generate_tiq_text(
     def _block_text(b):
         """Get exportable text for a block, excluding overlap portion."""
         info = b.get('overlap_info')
-        if not info and editor.INDENT_PLACEHOLDER in b.get('raw_text', ''):
-            info = _infer_overlap_info_from_raw_text(b, editor.INDENT_PLACEHOLDER)
+        if not info and INDENT_PLACEHOLDER in b.get('raw_text', ''):
+            info = _infer_overlap_info_from_raw_text(b, INDENT_PLACEHOLDER)
         if info:
-            bt = replace_indent_placeholders(info.get('text_before', ''), editor.INDENT_PLACEHOLDER, cjk_mode, for_export=True)
-            at = replace_indent_placeholders(info.get('text_after', ''), editor.INDENT_PLACEHOLDER, cjk_mode, for_export=True)
+            bt = replace_indent_placeholders(info.get('text_before', ''), INDENT_PLACEHOLDER, cjk_mode, for_export=True)
+            at = replace_indent_placeholders(info.get('text_after', ''), INDENT_PLACEHOLDER, cjk_mode, for_export=True)
             return (bt + " " + at).strip() or bt or at
-        return replace_indent_placeholders(b['raw_text'], editor.INDENT_PLACEHOLDER, cjk_mode, for_export=True)
+        return replace_indent_placeholders(b['raw_text'], INDENT_PLACEHOLDER, cjk_mode, for_export=True)
     # Store wrapped lines per first-block-index for overlap column calculation
     _turn_wrapped_map = {}
     def _emit_one_turn(speaker, blocks, start_time):
@@ -809,7 +812,7 @@ def generate_tiq_text(
         # (cross-speaker overlaps from overlap_map)
         has_overlap_target = False
         for b in blocks:
-            bidx = editor.srt_blocks.index(b)
+            bidx = transcript.blocks.index(b)
             if bidx in overlap_map:
                 has_overlap_target = True
                 break
@@ -817,11 +820,11 @@ def generate_tiq_text(
         if not has_overlap_target:
             for b in blocks:
                 info = b.get('overlap_info')
-                if not info and editor.INDENT_PLACEHOLDER in b.get('raw_text', ''):
-                    info = _infer_overlap_info_from_raw_text(b, editor.INDENT_PLACEHOLDER)
+                if not info and INDENT_PLACEHOLDER in b.get('raw_text', ''):
+                    info = _infer_overlap_info_from_raw_text(b, INDENT_PLACEHOLDER)
                 if info:
                     tgt = info.get('prev_block_idx')
-                    if tgt is None or (tgt is not None and editor.srt_blocks[tgt]['speaker'] == speaker):
+                    if tgt is None or (tgt is not None and transcript.blocks[tgt]['speaker'] == speaker):
                         has_overlap_target = True
                         break
         
@@ -839,7 +842,7 @@ def generate_tiq_text(
         # ── Collect overlap targets for this turn ──
         overlap_targets = []  # (char_pos_in_turn_text, overlap_text_len, speaker_idx)
         for b in blocks:
-            bidx = editor.srt_blocks.index(b)
+            bidx = transcript.blocks.index(b)
             if bidx in overlap_map:
                 for ov in overlap_map[bidx]:
                     info = ov['overlap_info']
@@ -854,11 +857,11 @@ def generate_tiq_text(
                     overlap_targets.append((pos, len(info['overlap_text']), ov['overlap_speaker']))
         for b in blocks:
             info = b.get('overlap_info')
-            if not info and editor.INDENT_PLACEHOLDER in b.get('raw_text', ''):
-                info = _infer_overlap_info_from_raw_text(b, editor.INDENT_PLACEHOLDER)
+            if not info and INDENT_PLACEHOLDER in b.get('raw_text', ''):
+                info = _infer_overlap_info_from_raw_text(b, INDENT_PLACEHOLDER)
             if info:
                 tgt = info.get('prev_block_idx')
-                if tgt is None or (tgt is not None and editor.srt_blocks[tgt]['speaker'] == speaker):
+                if tgt is None or (tgt is not None and transcript.blocks[tgt]['speaker'] == speaker):
                     pos = 0
                     for b2 in blocks:
                         if b2 is b:
@@ -872,8 +875,8 @@ def generate_tiq_text(
 
         if cw_actual and turn_text:
             if character_wrap: tokens = list(turn_text)
-            elif cjk_mode: tokens = _tokenize_cjk_with_pauses(editor, turn_text)
-            else: tokens = _tokenize_with_pauses(editor, turn_text)
+            elif cjk_mode: tokens = _tokenize_cjk_with_pauses(turn_text)
+            else: tokens = _tokenize_with_pauses(turn_text)
             if ts_str: tokens.append(ts_str)
             cl = ""; cum = 0; ov_ptr = 0
 
@@ -953,7 +956,7 @@ def generate_tiq_text(
         # (do this BEFORE overlap insertion so the column is available to other turns)
         if blocks:
             first_block = blocks[0]
-            first_idx = editor.srt_blocks.index(first_block)
+            first_idx = transcript.blocks.index(first_block)
             prefix_len = len(prefix)
             pre_lines = []
             pc = 0
@@ -966,7 +969,7 @@ def generate_tiq_text(
         # Collect overlaps targeting blocks in this turn, finding the line to insert after        # Collect overlaps targeting blocks in this turn, finding the line to insert after
         overlaps_after_line = []  # (line_index, overlap_info)
         for b in blocks:
-            bidx = editor.srt_blocks.index(b)
+            bidx = transcript.blocks.index(b)
             if bidx in overlap_map:
                 for ov in overlap_map[bidx]:
                     info = ov['overlap_info']
@@ -1012,10 +1015,10 @@ def generate_tiq_text(
 
         # Same-speaker overlaps go at end
         for b in blocks:
-            if b.get('overlap_info') or (editor.INDENT_PLACEHOLDER in b.get('raw_text', '') and _infer_overlap_info_from_raw_text(b, editor.INDENT_PLACEHOLDER)):
-                info = b.get('overlap_info') or _infer_overlap_info_from_raw_text(b, editor.INDENT_PLACEHOLDER)
+            if b.get('overlap_info') or (INDENT_PLACEHOLDER in b.get('raw_text', '') and _infer_overlap_info_from_raw_text(b, INDENT_PLACEHOLDER)):
+                info = b.get('overlap_info') or _infer_overlap_info_from_raw_text(b, INDENT_PLACEHOLDER)
                 tgt = info.get('prev_block_idx')
-                if tgt is None or (tgt is not None and editor.srt_blocks[tgt]['speaker'] == speaker and b['speaker'] == speaker):
+                if tgt is None or (tgt is not None and transcript.blocks[tgt]['speaker'] == speaker and b['speaker'] == speaker):
                     insert_at = max(0, len(wrapped_lines) - 1)
                     overlaps_after_line.append((insert_at, 0, {'overlap_info': info, 'overlap_speaker': speaker}))
 
@@ -1042,7 +1045,7 @@ def generate_tiq_text(
             # (e.g., target block has no base text = 100% overlap block),
             # use _compute_overlap_export_indent which handles this case.
             if col == 0 and overlap_pos > 0 and (not wrapped_lines or overlap_pos >= (wrapped_lines[-1][1] + len(wrapped_lines[-1][0]))):
-                fcol = _compute_overlap_export_indent(editor, info, cw_actual, cjk_mode, delimiter)
+                fcol = _compute_overlap_export_indent(transcript, info, cw_actual, cjk_mode, delimiter)
                 if fcol > 0:
                     col = fcol
             ol = " " * col + info['overlap_text']
@@ -1063,7 +1066,7 @@ def generate_tiq_text(
             # This handles the case where e.g., A overlaps D's overlap line.
             source_block = ov.get('overlap_block')
             if source_block is not None:
-                src_idx = editor.srt_blocks.index(source_block)
+                src_idx = transcript.blocks.index(source_block)
                 if src_idx in overlap_map:
                     # Iterate over a copy since we may delete from overlap_map
                     for chain_ov in list(overlap_map[src_idx]):
@@ -1109,7 +1112,7 @@ def generate_tiq_text(
                 nxt_str = wrapped_lines[next_idx][0]
                 if nxt_str.startswith(" " * len(prefix)):
                     rest = nxt_str[len(prefix):].lstrip()
-                    if rest and not any(rest.startswith(s) for s in editor.speakers):
+                    if rest and not any(rest.startswith(s) for s in transcript.speakers):
                         wrapped_lines[next_idx] = (prefix + nxt_str[len(prefix):], wrapped_lines[next_idx][1])
         
         # Remove chain overlap sources from overlap_map so they aren't
@@ -1130,8 +1133,8 @@ def generate_tiq_text(
                 if next_seg['type'] == 'turn':
                     first_blk = next_seg['blocks'][0]
                     info = first_blk.get('overlap_info')
-                    if not info and editor.INDENT_PLACEHOLDER in first_blk.get('raw_text', ''):
-                        info = _infer_overlap_info_from_raw_text(first_blk, editor.INDENT_PLACEHOLDER)
+                    if not info and INDENT_PLACEHOLDER in first_blk.get('raw_text', ''):
+                        info = _infer_overlap_info_from_raw_text(first_blk, INDENT_PLACEHOLDER)
                     if info and not info.get('text_before', '').strip():
                         # Pure overlap: find └ column from the actual emitted overlap line
                         # and insert the bar BEFORE that line
@@ -1155,15 +1158,15 @@ def generate_tiq_text(
             block = seg['block']
             if block.get('is_empty'):
                 content_lines.append(""); continue
-            text = replace_indent_placeholders(block['raw_text'], editor.INDENT_PLACEHOLDER, cjk_mode, for_export=True).strip()
+            text = replace_indent_placeholders(block['raw_text'], INDENT_PLACEHOLDER, cjk_mode, for_export=True).strip()
             if text:
                 sp = " " * max_speaker_width
                 if wrap_enabled and wrap_length > 0:
                     cw2 = wrap_length - line_num_padding - len(sp)
                     if cw2 > 10:
                         if character_wrap: tokens = list(text)
-                        elif cjk_mode: tokens = _tokenize_cjk_with_pauses(editor, text)
-                        else: tokens = _tokenize_with_pauses(editor, text)
+                        elif cjk_mode: tokens = _tokenize_cjk_with_pauses(text)
+                        else: tokens = _tokenize_with_pauses(text)
                         lines = []; cl = ""
                         for token in tokens:
                             if not token: continue
@@ -1197,11 +1200,11 @@ def generate_tiq_text(
     
     return '\n'.join(output_lines)
 
-def _group_into_turns(editor, include_timestamps=False):
+def _group_into_turns(transcript: Transcript, include_timestamps=False):
     """Group consecutive blocks with the same speaker into turns."""
     turns = []
     current_turn = None
-    for block in editor.srt_blocks:
+    for block in transcript.blocks:
         # Skip pause/comment/empty blocks, but NEVER skip blocks with overlap_info
         if not block.get('overlap_info') and (block.get('is_pause') or block.get('is_comment') or block.get('is_empty')):
             continue
@@ -1225,11 +1228,11 @@ def _group_into_turns(editor, include_timestamps=False):
     return turns
 
 
-def _tokenize_with_pauses(editor, text):
+def _tokenize_with_pauses(text):
     """Split text into tokens, keeping pause symbols whole and spaces as separate tokens."""
     tokens = []
     last_end = 0
-    for match in editor.pause_pattern.finditer(text):
+    for match in PAUSE_PATTERN.finditer(text):
         start, end = match.span()
         if start > last_end:
             preceding = text[last_end:start]
@@ -1244,12 +1247,12 @@ def _tokenize_with_pauses(editor, text):
     return tokens
 
 
-def _tokenize_cjk_with_pauses(editor, text):
+def _tokenize_cjk_with_pauses(text):
     """Split CJK text into tokens: either a single character, or a whole pause symbol."""
     tokens = []
     i = 0
     while i < len(text):
-        m = editor.pause_pattern.match(text, i)
+        m = PAUSE_PATTERN.match(text, i)
         if m:
             tokens.append(m.group())
             i = m.end()
@@ -1259,7 +1262,7 @@ def _tokenize_cjk_with_pauses(editor, text):
     return tokens
 
 
-def _wrap_text(editor, text, max_width, character_wrap=False, first_line_only_indent=True):
+def _wrap_text(transcript: Transcript, text, max_width, character_wrap=False, first_line_only_indent=True):
     """Wrap text to max_width characters.
 
     - If character_wrap: break at exact character positions.
@@ -1272,7 +1275,7 @@ def _wrap_text(editor, text, max_width, character_wrap=False, first_line_only_in
     if character_wrap:
         return [text[i:i+max_width] for i in range(0, len(text), max_width)]
 
-    tokens = _tokenize_with_pauses(editor, text)
+    tokens = _tokenize_with_pauses(text)
 
     lines = []
     current_line = ''
@@ -1309,12 +1312,12 @@ def _wrap_text(editor, text, max_width, character_wrap=False, first_line_only_in
     return lines
 
 
-def estimate_missing_timestamps(editor):
+def estimate_missing_timestamps(transcript: Transcript):
     """Estimate timestamps for blocks that don't have them."""
-    if not editor.srt_blocks:
+    if not transcript.blocks:
         return []
 
-    blocks = editor.srt_blocks.copy()
+    blocks = transcript.blocks.copy()
 
     timestamped_blocks = []
     for i, block in enumerate(blocks):
@@ -1395,7 +1398,7 @@ def _ms_to_time(ms):
 
 
 
-def _find_overlap_column(turn_text, char_pos, max_width, editor, cjk_mode, delimiter):
+def _find_overlap_column(turn_text, char_pos, max_width, transcript: Transcript, cjk_mode, delimiter):
     """Find the column position in wrapped output for a character position in turn text.
     
     Returns the column number (0-based from left margin) where overlap should be placed.
@@ -1405,9 +1408,9 @@ def _find_overlap_column(turn_text, char_pos, max_width, editor, cjk_mode, delim
         return char_pos
     
     if cjk_mode:
-        tokens = _tokenize_cjk_with_pauses(editor, turn_text)
+        tokens = _tokenize_cjk_with_pauses(turn_text)
     else:
-        tokens = _tokenize_with_pauses(editor, turn_text)
+        tokens = _tokenize_with_pauses(turn_text)
     
     lines = []
     line_starts = [0]  # cumulative char position at start of each line
@@ -1452,7 +1455,7 @@ def _find_overlap_column(turn_text, char_pos, max_width, editor, cjk_mode, delim
     return col_in_line
 
 
-def _compute_overlap_export_indent(editor, overlap_info, max_width, cjk_mode, delimiter,
+def _compute_overlap_export_indent(transcript: Transcript, overlap_info, max_width, cjk_mode, delimiter,
                                     pre_wrapped_lines=None):
     """Compute the wrapping-aware column for an overlap line at export time.
     
@@ -1465,28 +1468,28 @@ def _compute_overlap_export_indent(editor, overlap_info, max_width, cjk_mode, de
     if prev_block_idx is None:
         return overlap_info.get('indent', 0)
     
-    prev_block = editor.srt_blocks[prev_block_idx]
+    prev_block = transcript.blocks[prev_block_idx]
     prev_speaker = prev_block['speaker']
     # Build the previous speaker's full turn text
     turn_blocks = []
     i = prev_block_idx
-    while i >= 0 and editor.srt_blocks[i]['speaker'] == prev_speaker:
-        turn_blocks.insert(0, editor.srt_blocks[i])
-        if editor.srt_blocks[i].get('is_turn_start', False):
+    while i >= 0 and transcript.blocks[i]['speaker'] == prev_speaker:
+        turn_blocks.insert(0, transcript.blocks[i])
+        if transcript.blocks[i].get('is_turn_start', False):
             break
         i -= 1
     i = prev_block_idx + 1
-    while i < len(editor.srt_blocks) and editor.srt_blocks[i]['speaker'] == prev_speaker:
-        if editor.srt_blocks[i].get('is_turn_start', False):
+    while i < len(transcript.blocks) and transcript.blocks[i]['speaker'] == prev_speaker:
+        if transcript.blocks[i].get('is_turn_start', False):
             break
-        turn_blocks.append(editor.srt_blocks[i])
+        turn_blocks.append(transcript.blocks[i])
         i += 1
     
     # Build turn text and find overlap position
     turn_parts = []
     overlap_char_pos = 0
     cur_pos = 0
-    prev_block_obj = editor.srt_blocks[prev_block_idx]
+    prev_block_obj = transcript.blocks[prev_block_idx]
     prev_has_no_base_text = False
 
     for b in turn_blocks:
@@ -1511,7 +1514,7 @@ def _compute_overlap_export_indent(editor, overlap_info, max_width, cjk_mode, de
             elif b['overlap_info'].get('text_after', ''):
                 raw = b['overlap_info']['text_after']
         else:
-            raw = replace_indent_placeholders(b['raw_text'], editor.INDENT_PLACEHOLDER, editor.cjk_mode, for_export=True)
+            raw = replace_indent_placeholders(b['raw_text'], INDENT_PLACEHOLDER, transcript.cjk_mode, for_export=True)
         
         if not raw.strip():
             if b is prev_block_obj:
@@ -1561,7 +1564,7 @@ def _compute_overlap_export_indent(editor, overlap_info, max_width, cjk_mode, de
                 return 0
         return 0  # fallback
     
-    col = _find_overlap_column(turn_text, overlap_char_pos, max_width, editor, cjk_mode, delimiter)
+    col = _find_overlap_column(turn_text, overlap_char_pos, max_width, transcript, cjk_mode, delimiter)
     return col
 
 
@@ -1677,7 +1680,7 @@ def _wrap_with_indent(line, max_width, indent):
 
 
 def generate_transcript_text(
-    editor,
+    transcript,
     include_timestamps=True,
     timestamp_style="hash",
     custom_pattern=None,
@@ -1694,27 +1697,27 @@ def generate_transcript_text(
     """Route to the correct convention-specific generator."""
     if convention == "dresing_pehl":
         return generate_dresing_pehl_text(
-            editor, include_timestamps, timestamp_style, custom_pattern, include_diarization,
+            transcript, include_timestamps, timestamp_style, custom_pattern, include_diarization,
             add_blank_line, concatenate_turns, delimiter_choice, custom_delimiter)
     elif convention == "tiq":
         return generate_tiq_text(
-            editor, include_timestamps, timestamp_style, custom_pattern, include_diarization,
+            transcript, include_timestamps, timestamp_style, custom_pattern, include_diarization,
             wrap_enabled, wrap_length, character_wrap, add_blank_line,
             concatenate_turns, delimiter_choice, custom_delimiter)
     else:  # gat2
         return generate_gat2_text(
-            editor, include_timestamps, timestamp_style, custom_pattern, include_diarization,
+            transcript, include_timestamps, timestamp_style, custom_pattern, include_diarization,
             wrap_enabled, wrap_length, character_wrap, add_blank_line,
             concatenate_turns, delimiter_choice, custom_delimiter)
 
 
-def generate_srt_text(editor, include_diarization=True, unassigned_handling="skip"):
+def generate_srt_text(transcript: Transcript, include_diarization=True, unassigned_handling="skip"):
     """Generate SRT format text with optional diarization."""
-    if not editor.file_has_timestamps:
+    if not transcript.file_has_timestamps:
         return ("SRT export requires timestamp information. Original file does not contain timestamps.\n\n"
                 "Note: SRT files require precise timing information for each subtitle.")
 
-    blocks_with_timestamps = estimate_missing_timestamps(editor)
+    blocks_with_timestamps = estimate_missing_timestamps(transcript)
 
     srt_blocks = []
     subtitle_index = 1
@@ -1733,10 +1736,10 @@ def generate_srt_text(editor, include_diarization=True, unassigned_handling="ski
         else:
             speaker_prefix = ""
             if include_diarization:
-                speaker_prefix = f"{editor.speakers[block['speaker']]}: "
+                speaker_prefix = f"{transcript.speakers[block['speaker']]}: "
 
-        cjk_mode = editor.cjk_mode
-        formatted = replace_indent_placeholders(block['raw_text'], editor.INDENT_PLACEHOLDER, cjk_mode, for_export=True).lstrip()
+        cjk_mode = transcript.cjk_mode
+        formatted = replace_indent_placeholders(block['raw_text'], INDENT_PLACEHOLDER, cjk_mode, for_export=True).lstrip()
         formatted = strip_markup(formatted)
 
         start_time = format_srt_time(block['start_time'])

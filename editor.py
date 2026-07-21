@@ -1,16 +1,3 @@
-from generators import (
-    time_to_seconds, time_to_ms, format_timestamp, get_timestamp_width,
-    format_srt_time,
-    replace_indent_placeholders, generate_gat2_text, generate_dresing_pehl_text,
-    generate_tiq_text, generate_srt_text, generate_transcript_text,
-    _build_ordered_segments, _group_into_turns, _tokenize_with_pauses,
-    _tokenize_cjk_with_pauses, _wrap_text as wrap_text, estimate_missing_timestamps,
-    _ms_to_time as ms_to_time
-)
-from export import (
-    build_html_content, write_html_file, write_srt_file, write_txt_file,
-    write_docx_file
-)
 
 
 """Main SRT/transcript editor window for CapsQual."""
@@ -25,10 +12,10 @@ from pathlib import Path
 from datetime import datetime
 from collections import deque
 import queue
-import copy
 import threading
 import string
 import time
+import copy
 
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QVBoxLayout, QHBoxLayout,
@@ -43,6 +30,22 @@ from PyQt5.QtCore import Qt, QTimer, QUrl, pyqtSignal, QPoint, QRect, QElapsedTi
 from PyQt5.QtGui import QFont, QKeySequence, QColor, QTextCharFormat, QTextCursor, QIcon, QPixmap
 
 from utils import resource_path, logger
+from generators import (
+    time_to_seconds, time_to_ms, format_timestamp, get_timestamp_width,
+    format_srt_time,
+    replace_indent_placeholders, generate_gat2_text, generate_dresing_pehl_text,
+    generate_tiq_text, generate_srt_text, generate_transcript_text,
+    _build_ordered_segments, _group_into_turns, _tokenize_with_pauses,
+    _tokenize_cjk_with_pauses, _wrap_text as wrap_text, estimate_missing_timestamps,
+    _ms_to_time as ms_to_time
+)
+from export import (
+    build_html_content, write_html_file, write_srt_file, write_txt_file,
+    write_docx_file
+)
+
+from transcript import Transcript
+from parsers import parse_srt, parse_text, parse_tsv, parse_json
 from highlighting import FormattingMarkerHighlighter
 from audio_players import SimpleAudioPlayer, VlcAudioPlayer, has_pyaudio
 from dialogs import (
@@ -145,14 +148,47 @@ class CollapsibleSplitter(QSplitter):
 
 class SRTEditor(QMainWindow):
     # Constant for placeholder character (visible in viewer)
-    INDENT_PLACEHOLDER = '␣'  # U+2423 OPEN BOX
+    INDENT_PLACEHOLDER = '␣'  # U+2423 OPEN BOX — kept for backward compat
+
+    # ── transcript-backed properties ──────────────────────────
+    @property
+    def srt_blocks(self):
+        return self.transcript.blocks
+
+    @srt_blocks.setter
+    def srt_blocks(self, value):
+        self.transcript.blocks = value
+
+    @property
+    def speakers(self):
+        return self.transcript.speakers
+
+    @speakers.setter
+    def speakers(self, value):
+        self.transcript.speakers = value
+
+    @property
+    def cjk_mode(self):
+        return self.transcript.cjk_mode
+
+    @cjk_mode.setter
+    def cjk_mode(self, value):
+        self.transcript.cjk_mode = value
+
+    @property
+    def file_has_timestamps(self):
+        return self.transcript.file_has_timestamps
+
+    @file_has_timestamps.setter
+    def file_has_timestamps(self, value):
+        self.transcript.file_has_timestamps = value
 
     def __init__(self, splash=None):
         super().__init__()
         self.splash = splash
-        self.srt_blocks = []
+        self.transcript = Transcript()
         self.current_block_index = 0
-        self.speakers = ["A", "B", "C", "D"]
+
         self.speaker_color_palette = [
             QColor(220, 240, 255),  # Light blue
             QColor(255, 220, 220),  # Light red
@@ -163,23 +199,22 @@ class SRTEditor(QMainWindow):
             QColor(200, 230, 230),  # Light cyan
             QColor(255, 210, 230)   # Light pink
         ]
-    
+
         # Initialize speaker colors from palette
         self.speaker_colors = self.speaker_color_palette[:4]  # First 4 colors for initial speakers
-        
+
         self.recent_files = []
         self.max_recent = 10
         self.load_recent_files()
-        
+
         self.undo_stack = []
         self.redo_stack = []
         self.max_undo = 100
-        
+
         self.context_blocks = 5
         self.current_file_path = None
-        self.file_has_timestamps = True
-        self.timestamp_style="curly"
-        self.custom_timestamp_pattern="{HH:mm:ss}"
+        self.timestamp_style = "curly"
+        self.custom_timestamp_pattern = "{HH:mm:ss}"
         self.audio_file_path = None
         self.project_name = ""
         self.project_memo = ""
@@ -190,29 +225,20 @@ class SRTEditor(QMainWindow):
         self.segment_sync_buffer = 0
         self.original_audio_duration = 0
         self.last_symbol_category = 0
-        self.cjk_mode = False
-        
+
         # VLC audio player
         self.audio_player = None
         self.is_playing = False
         self.auto_sync_enabled = False
         self.auto_pause_enabled = False
-        
+
         # Timer for UI updates
         self.ui_update_timer = QTimer()
         self.ui_update_timer.timeout.connect(self.update_ui)
         self.ui_update_timer.start(50)
-    
-        
+
         self.update_splash("Creating user interface...")
         self.init_ui()
-        
-           
-        # Regex for pause symbols (atomic tokens)
-        self.pause_pattern = re.compile(
-            r'\(\.\)|\(-+\)|\(\d+(?:\.\d+)?\)|°h+|h+°|@\(\.\)@|@\(\d+s\)@|//|<<.*?>>|\[.*?\]|\(\(.*?\)\)|└'
-        )
-
     
     def time_label_clicked(self, event):
         self.jump_to_time()
@@ -1943,760 +1969,68 @@ Engineered with DeepSeek V3.2
         return f"{hours:02d}:{minutes:02d}:{seconds:02d},{milliseconds:03d}"
      
     def load_file_from_path(self, file_path):
-        """Load a subtitle file from given path"""
+        """Load a subtitle file from given path."""
         print(f"load_file_from_path called with: {file_path}")  # DEBUG
         try:
             file_extension = Path(file_path).suffix.lower()
-            
+
             if file_extension == '.srt':
                 with open(file_path, 'r', encoding='utf-8') as f:
                     content = f.read()
-                self.srt_blocks = self.parse_srt(content)
+                self.transcript.blocks = parse_srt(content)
                 self.update_menu_state()
                 self.file_has_timestamps = True
-                
-                
+
+
             elif file_extension == '.txt':
                 with open(file_path, 'r', encoding='utf-8') as f:
                     content = f.read()
-                self.srt_blocks = self.parse_text(content)
+                self.transcript.blocks = parse_text(content)
                 self.update_menu_state()
                 self.file_has_timestamps = False
-                
+
             elif file_extension == '.json':
                 with open(file_path, 'r', encoding='utf-8') as f:
                     content = json.load(f)
-                self.srt_blocks = self.parse_json(content)
+                self.transcript.blocks = parse_json(content)
                 self.update_menu_state()
-                self.file_has_timestamps = any(block.get('start_time') for block in self.srt_blocks)
-                
+                self.file_has_timestamps = any(block.get('start_time')
+                                               for block in self.transcript.blocks)
+
             elif file_extension == '.tsv':
                 with open(file_path, 'r', encoding='utf-8') as f:
                     content = f.read()
-                self.srt_blocks = self.parse_tsv(content)
+                self.transcript.blocks = parse_tsv(content)
                 self.update_menu_state()
                 self.file_has_timestamps = True
-            
+
             self.current_block_index = 0
             self.current_file_path = file_path
-            
+
             # Only enable auto-sync checkbox and play from segment button if we have timestamps AND audio is loaded
             self.auto_sync_check.setEnabled(self.file_has_timestamps and self.audio_file_path is not None)
             self.btn_play_segment.setEnabled(self.audio_file_path is not None and self.file_has_timestamps)
             # Auto-pause is always enabled when audio is loaded
             self.auto_pause_check.setEnabled(self.audio_file_path is not None)
-            
+
             # Ensure checkboxes reflect the actual state
             self.auto_sync_check.setChecked(self.auto_sync_enabled)
             self.auto_pause_check.setChecked(self.auto_pause_enabled)
-            
+
             self.add_to_recent(file_path)
-            
+
             self.update_display()
             self.mark_unsaved_changes()
             self.undo_stack.clear()
             self.redo_stack.clear()
             self.update_undo_redo_actions()
-            
+
+            # Clear search highlights
+            self.clear_search_highlights()
+
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Could not load file: {str(e)}")
-            
-    def load_project_from_path(self, file_path):
-        """Load a CapsQual project file from the given path."""
-        self.undo_stack.clear()
-        self.redo_stack.clear()
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                project_data = json.load(f)
-
-            self.srt_blocks = project_data['srt_blocks']
-            for block in self.srt_blocks:
-                if 'raw_text' not in block:
-                    block['raw_text'] = block['text']
-                if 'overlap' in block:
-                    del block['overlap']
-                if block.get('overlap_info') and block.get('is_empty'):
-                    del block['is_empty']
-            # Check for old-format overlap blocks (␣ placeholders without overlap_info)
-            # and ask user to upgrade if found
-            self._check_and_upgrade_old_overlap_format()
-
-            self.current_block_index = project_data['current_block_index']
-            self.speakers = project_data['speakers']
-            # Use the actual project file path being opened, not the stored source_file
-            # (source_file was the original subtitle path or a stale path from Save As)
-            self.current_file_path = file_path
-            # Preserve original source file path separately for reference
-            self.source_file = project_data.get('source_file', '')
-            self.file_has_timestamps = project_data.get('file_has_timestamps', True)
-            self.project_name = project_data.get('project_name', '')
-            self.project_memo = project_data.get('project_memo', '')
-            self.playback_speed = project_data.get('playback_speed', 1.0)
-            self.cjk_mode = project_data.get('cjk_mode', False)
-            self.timestamp_style = project_data.get('timestamp_style', 'curly')
-            self.custom_timestamp_pattern = project_data.get('custom_timestamp_pattern', '{HH:mm:ss}')
-
-            font_data = project_data.get('text_display_font')
-            if font_data:
-                self.text_display_font = QFont(font_data['family'], font_data['size'])
-                self.text_display.setFont(self.text_display_font)
-
-            audio_path = project_data.get('audio_file_path')
-            if audio_path and Path(audio_path).exists():
-                self.audio_file_path = audio_path
-                self.original_audio_duration = 0
-                self.load_audio_file_for_project(audio_path, self.playback_speed)
-
-            viewer_theme = project_data.get('viewer_theme', 'light')
-            self.apply_viewer_theme(viewer_theme)
-
-            self.speed_knob.value = self.playback_speed
-            self.speed_knob.update()
-
-            self.add_to_recent(file_path)
-            self.update_display()
-            self.update_menu_state()
-            self.clear_unsaved_changes()
-
-            QMessageBox.information(self, "Success", f"Project loaded from {file_path}")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Could not load project: {str(e)}")
-
-    # ──────────────────────────────────────────────
-    #  Old-format overlap upgrade helpers
-    # ──────────────────────────────────────────────
-
-    def _detect_old_overlap_blocks(self):
-        """Scan srt_blocks for inline overlap placeholders without overlap_info metadata.
-        
-        Returns a list of (block_index, block) tuples for blocks that have
-        ␣ placeholders suggesting old-format overlap but no overlap_info.
-        """
-        old_blocks = []
-        for idx, block in enumerate(self.srt_blocks):
-            raw = block.get('raw_text', '')
-            if not raw:
-                continue
-            if self.INDENT_PLACEHOLDER in raw and not block.get('overlap_info'):
-                # Check if there's a GAT2 bracket [ ... ] or TiQ └ marker after placeholders
-                has_gat2_overlap = re.search(
-                    re.escape(self.INDENT_PLACEHOLDER) + r'+\[', raw
-                )
-                has_tiq_overlap = re.search(
-                    re.escape(self.INDENT_PLACEHOLDER) + r'+└', raw
-                )
-                if has_gat2_overlap or has_tiq_overlap:
-                    old_blocks.append((idx, block))
-        return old_blocks
-
-    def _check_and_upgrade_old_overlap_format(self):
-        """Check if loaded project has old-format overlap blocks and offer to upgrade."""
-        old_blocks = self._detect_old_overlap_blocks()
-        if not old_blocks:
-            return
-
-        reply = QMessageBox.question(
-            self,
-            "Overlap Format Update Available",
-            "This project file was created with an older version of CapsQual.\n\n"
-            "The way overlapping speech is handled has been improved:\n"
-            "• Overlap indentation now correctly accounts for concatenated turns and line wrapping.\n"
-            "• Older projects show the indentation correctly in the editor, but the export may not\n"
-            "  display overlap indentation properly.\n\n"
-            f"Found {len(old_blocks)} block(s) with old-format overlap markers.\n\n"
-            "Do you want CapsQual to automatically update this file to the new format?\n"
-            "The file will be updated in memory — you will need to save it afterwards.\n\n"
-            "If you choose 'No', the file will be loaded as-is, but overlap may not export correctly.",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.Yes
-        )
-        if reply != QMessageBox.Yes:
-            return
-
-        upgraded_count = self._upgrade_old_overlap_format(old_blocks)
-        if upgraded_count > 0:
-            self.mark_unsaved_changes()
-            QMessageBox.information(
-                self,
-                "Overlap Format Updated",
-                f"Successfully updated {upgraded_count} block(s) to the new overlap format.\n\n"
-                "Please review the overlap positions and save the project to make the changes permanent."
-            )
-
-    def _upgrade_old_overlap_format(self, old_blocks):
-        """Reconstruct overlap_info metadata from inline placeholders in old-format blocks.
-        
-        For each block, detects GAT2 ([...]) or TiQ (└) overlap markers,
-        counts the number of ␣ placeholders as indent, finds the previous block,
-        and reconstructs text_before/text_after.
-        
-        Returns the number of blocks upgraded.
-        """
-        import re as _re
-        count = 0
-        for idx, block in old_blocks:
-            raw = block.get('raw_text', '')
-            if not raw:
-                continue
-
-            # Determine convention: TiQ uses └, GAT2 uses [ ... ]
-            # Look for pattern: ␣␣␣[ or ␣␣␣└
-            ph_esc = _re.escape(self.INDENT_PLACEHOLDER)
-            tiq_match = _re.search(ph_esc + r'+(└)', raw)
-            gat2_match = _re.search(ph_esc + r'+(\[)', raw)
-
-            if tiq_match:
-                # TiQ format: "text_before␣␣␣└selected_texttext_after"
-                ph_start = tiq_match.start()
-                indent_str = raw[ph_start:tiq_match.start(1)]
-                indent = indent_str.count(self.INDENT_PLACEHOLDER)
-                text_before = raw[:ph_start].strip()
-                # Everything after └ is the overlap text (old format has no text_after separation)
-                overlap_text = raw[tiq_match.start(1):]
-                text_after = ''
-
-                prev_block_idx = idx - 1
-                if prev_block_idx < 0:
-                    continue
-
-                block['overlap_info'] = {
-                    'indent': indent,
-                    'overlap_text': overlap_text,
-                    'prev_block_idx': prev_block_idx,
-                    'convention': 'tiq',
-                    'text_before': text_before,
-                    'text_after': text_after
-                }
-                count += 1
-
-            elif gat2_match:
-                # GAT2 format: "text_before␣␣␣[selected]text_after"
-                ph_start = gat2_match.start()
-                bracket_start = gat2_match.start(1)  # position of [
-                indent_str = raw[ph_start:bracket_start]
-                indent = indent_str.count(self.INDENT_PLACEHOLDER)
-                text_before = raw[:ph_start].strip()
-
-                # Find closing bracket
-                close_bracket = raw.find(']', bracket_start)
-                if close_bracket == -1:
-                    continue  # malformed
-
-                overlap_text = raw[bracket_start:close_bracket + 1]
-                text_after = raw[close_bracket + 1:].strip()
-
-                prev_block_idx = idx - 1
-                if prev_block_idx < 0:
-                    continue
-
-                block['overlap_info'] = {
-                    'indent': indent,
-                    'overlap_text': overlap_text,
-                    'prev_block_idx': prev_block_idx,
-                    'convention': 'gat2',
-                    'text_before': text_before,
-                    'text_after': text_after
-                }
-                count += 1
-
-        return count
-
-    def create_speaker_widgets(self):
-        for i in reversed(range(self.speaker_layout.count())): 
-            self.speaker_layout.itemAt(i).widget().setParent(None)
-        
-        self.speaker_layout.setSpacing(3)
-        self.speaker_layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.speaker_widgets = []
-        for i, speaker in enumerate(self.speakers):
-            speaker_widget = QWidget()
-            speaker_layout = QHBoxLayout(speaker_widget)
-            speaker_layout.setSpacing(3)
-            speaker_layout.setContentsMargins(5, 2, 5, 2)
-            
-            color_label = QLabel("■")
-            color_label.setStyleSheet(f"color: {self.speaker_colors[i].name()}; font-size: 20px;")
-            
-            speaker_name_edit = QLineEdit(speaker)
-            speaker_name_edit.editingFinished.connect(lambda checked=False, idx=i: self.rename_speaker(idx))
-            speaker_name_edit.setFixedWidth(120)
-            speaker_name_edit.setMinimumHeight(18)
-            
-            
-            speaker_btn = QPushButton(f"Assign ({i+1})")
-            speaker_btn.clicked.connect(lambda checked, idx=i: self.assign_speaker(idx))
-            speaker_btn.setMinimumHeight(18)
-            
-            if self.current_theme == "dark":
-                speaker_btn.setStyleSheet(f"""
-                    QPushButton {{ 
-                        background-color: {self.speaker_colors[i].name()}; 
-                        color: white;
-                        border: 2px solid #676767;
-                        padding: 1px 1px;
-                        font-weight: bold;
-                        min-width: 100px;
-                    }}
-                    QPushButton:hover {{
-                        background-color: {self.speaker_colors[i].lighter(120).name()};
-                        color: white;
-                    }}
-                """)
-            else:
-                speaker_btn.setStyleSheet(f"""
-                    QPushButton {{ 
-                        background-color: {self.speaker_colors[i].name()}; 
-                        border: 2px solid darkgray;
-                        padding: 1px 1px;
-                        font-weight: bold;
-                        min-width: 100px;
-                    }}
-                    QPushButton:hover {{
-                        background-color: {self.speaker_colors[i].lighter(120).name()};
-                    }}
-                """)
-            
-            speaker_layout.addWidget(color_label)
-            speaker_layout.addWidget(QLabel("Name:"))
-            speaker_layout.addWidget(speaker_name_edit)
-            speaker_layout.addStretch(1)
-            speaker_layout.addWidget(speaker_btn)
-            
-            centered_widget = QWidget()
-            centered_widget.setMinimumHeight(20)
-            centered_layout = QHBoxLayout(centered_widget)
-            centered_layout.setSpacing(0)
-            centered_layout.setContentsMargins(0, 0, 0, 0)
-            centered_layout.addStretch(1)
-            centered_layout.addWidget(speaker_widget)
-            centered_layout.addStretch(1)
-            
-            self.speaker_layout.addWidget(centered_widget)
-            self.speaker_widgets.append({
-                'name_edit': speaker_name_edit,
-                'button': speaker_btn
-            })
-        
-
-    def rename_speaker(self, speaker_idx):
-        new_name = self.speaker_widgets[speaker_idx]['name_edit'].text()
-        if speaker_idx < len(self.speakers) and self.speakers[speaker_idx] != new_name:
-            self.push_undo()
-            self.speakers[speaker_idx] = new_name
-            self.update_display()
-            self.mark_unsaved_changes()
-        
-    def count_blocks_for_speaker(self, speaker_idx):
-        """Count how many blocks are assigned to a specific speaker"""
-        count = 0
-        for block in self.srt_blocks:
-            if block.get('speaker') == speaker_idx:
-                count += 1
-        return count
-            
-    def update_speaker_count(self, count):
-        while len(self.speakers) > count:
-            self.speakers.pop()
-            # Don't pop colors - we'll rebuild from palette
-        
-        while len(self.speakers) < count:
-            new_idx = len(self.speakers)
-            self.speakers.append(chr(65 + new_idx))
-            # Colors will be handled by rebuild
-        
-        # Rebuild colors from palette based on current speaker count
-        self.speaker_colors = []
-        for i in range(len(self.speakers)):
-            if i < len(self.speaker_color_palette):
-                # Use color from fixed palette
-                self.speaker_colors.append(self.speaker_color_palette[i])
-            else:
-                # Fallback for more than 8 speakers (though we limit to 8 in UI)
-                self.speaker_colors.append(QColor(200, 200, 200))
-        
-        self.create_speaker_widgets()
-        self.setup_shortcuts()  # Recreate shortcuts for new count
-        self.update_display()
-        self.mark_unsaved_changes()
-        
-        # Update the count display and button states
-        self.speaker_count_label.setText(str(count))
-        self.update_speaker_buttons()
-    
-    def load_file(self):
-        if not self.check_unsaved_changes():
-            return
-            
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "Open File", "", 
-            "All Supported Files (*.srt *.txt *.json *.tsv);;SRT Files (*.srt);;Text Files (*.txt);;JSON Files (*.json);;TSV Files (*.tsv)"
-        )
-        if file_path:
-            self.load_file_from_path(file_path)
-    
-    def parse_srt(self, content):
-        blocks = []
-        srt_blocks = content.strip().split('\n\n')
-        
-        for block in srt_blocks:
-            lines = block.strip().split('\n')
-            if len(lines) >= 3:
-                try:
-                    index = int(lines[0].strip())
-                    time_line = lines[1].strip()
-                    # Fixed regex to properly capture milliseconds
-                    time_match = re.match(r'(\d{2}):(\d{2}):(\d{2}),(\d{3}) --> (\d{2}):(\d{2}):(\d{2}),(\d{3})', time_line)
-                    
-                    if time_match:
-                        text = '\n'.join(lines[2:]).strip()
-                        # Include milliseconds in the time string
-                        block_data = {
-                            'index': index,
-                            'start_time': f"{time_match.group(1)}:{time_match.group(2)}:{time_match.group(3)},{time_match.group(4)}",
-                            'start_ms': int(time_match.group(4)),
-                            'end_time': f"{time_match.group(5)}:{time_match.group(6)}:{time_match.group(7)},{time_match.group(8)}",
-                            'end_ms': int(time_match.group(8)),
-                            'text': text,
-                            'raw_text': text,   # NEW: store raw text separately
-                            'speaker': None,
-                            'is_turn_start': True,
-                        }
-                        blocks.append(block_data)
-                except ValueError:
-                    continue
-        
-        return blocks
-    
-    def parse_text(self, content):
-        blocks = []
-        lines = content.strip().split('\n')
-        
-        for i, line in enumerate(lines):
-            if line.strip():
-                block_data = {
-                    'index': i + 1,
-                    'start_time': '',
-                    'end_time': '',
-                    'text': line.strip(),
-                    'raw_text': line.strip(),
-                    'speaker': None,
-                    'is_turn_start': True,
-                }
-                blocks.append(block_data)
-        
-        return blocks
-    
-    def parse_tsv(self, content):
-        """Parse TSV file with start, end, and text columns"""
-        blocks = []
-        lines = content.strip().split('\n')
-        
-        for i, line in enumerate(lines):
-            if i == 0:  # Skip header
-                continue
-                
-            parts = line.split('\t')
-            if len(parts) >= 3:
-                start_ms = int(parts[0])
-                end_ms = int(parts[1])
-                text = parts[2]
-                
-                start_time = self.ms_to_srt_time(start_ms)
-                end_time = self.ms_to_srt_time(end_ms)
-                
-                block_data = {
-                    'index': i,
-                    'start_time': start_time,
-                    'end_time': end_time,
-                    'text': text,
-                    'raw_text': text,
-                    'speaker': None,
-                    'is_turn_start': True,
-                }
-                blocks.append(block_data)
-        
-        return blocks
-    
-    def ms_to_srt_time(self, ms):
-        """Convert milliseconds to SRT time format (HH:MM:SS,mmm)"""
-        hours = ms // 3600000
-        ms %= 3600000
-        minutes = ms // 60000
-        ms %= 60000
-        seconds = ms // 1000
-        milliseconds = ms % 1000
-        
-        return f"{hours:02d}:{minutes:02d}:{seconds:02d},{milliseconds:03d}"
-    
-    def auto_segment_tokens(self, tokens, timestamps):
-        """Auto-segment tokens based on pause detection"""
-        if len(tokens) != len(timestamps) or len(tokens) < 2:
-            return [{'text': ''.join(tokens), 'start_time': '', 'end_time': ''}]
-        
-        gaps = []
-        for i in range(1, len(timestamps)):
-            gap = timestamps[i] - timestamps[i-1]
-            gaps.append(gap)
-        
-        avg_gap = sum(gaps) / len(gaps)
-        threshold = avg_gap * 2.5
-        
-        segments = []
-        current_segment = []
-        current_start = timestamps[0]
-        
-        for i, (token, timestamp) in enumerate(zip(tokens, timestamps)):
-            current_segment.append(token)
-            
-            if i < len(timestamps) - 1:
-                gap = timestamps[i+1] - timestamp
-                if gap > threshold:
-                    segment_text = ''.join(current_segment)
-                    segments.append({
-                        'text': segment_text,
-                        'start_time': self.seconds_to_srt_time(current_start),
-                        'end_time': self.seconds_to_srt_time(timestamp + gap/2)
-                    })
-                    current_segment = []
-                    if i < len(timestamps) - 1:
-                        current_start = timestamps[i+1]
-        
-        if current_segment:
-            segment_text = ''.join(current_segment)
-            segments.append({
-                'text': segment_text,
-                'start_time': self.seconds_to_srt_time(current_start),
-                'end_time': self.seconds_to_srt_time(timestamps[-1] + avg_gap)
-            })
-        
-        return segments
-    
-    def seconds_to_srt_time(self, seconds):
-        """Convert seconds to SRT time format"""
-        hours = int(seconds // 3600)
-        minutes = int((seconds % 3600) // 60)
-        secs = seconds % 60
-        milliseconds = int((secs - int(secs)) * 1000)
-        
-        return f"{hours:02d}:{minutes:02d}:{int(secs):02d},{milliseconds:03d}"
-    
-    def parse_json(self, content, import_option=None):
-        blocks = []
-        
-        try:
-            if isinstance(content, dict) and 'tokens' in content and 'timestamps' in content:
-                tokens = content['tokens']
-                timestamps = content['timestamps']
-
-                option = import_option
-                if option is None:
-                    dialog = JsonImportDialog(has_tokens=True, parent=self)
-                    if dialog.exec_() != QDialog.Accepted:
-                        return []
-                    option = dialog.get_import_option()
-
-                if option == "one_block":
-                    text = ''.join(tokens) if tokens else ""
-                    block_data = {
-                        'index': 1,
-                        'start_time': '',
-                        'end_time': '',
-                        'text': text,
-                        'raw_text': text,
-                        'speaker': None,
-                        'is_turn_start': True,
-                    }
-                    blocks.append(block_data)
-
-                elif option == "tokens":
-                    for i, (token, timestamp) in enumerate(zip(tokens, timestamps)):
-                        block_data = {
-                            'index': i + 1,
-                            'start_time': self.seconds_to_srt_time(timestamp),
-                            'end_time': '',
-                            'text': token,
-                            'raw_text': token,
-                            'speaker': None,
-                            'is_turn_start': True,
-                        }
-                        blocks.append(block_data)
-
-                elif option == "auto_segment":
-                    segments = self.auto_segment_tokens(tokens, timestamps)
-                    for i, segment in enumerate(segments):
-                        block_data = {
-                            'index': i + 1,
-                            'start_time': segment['start_time'],
-                            'end_time': segment['end_time'],
-                            'text': segment['text'],
-                            'raw_text': segment['text'],
-                            'speaker': None,
-                            'is_turn_start': True,
-                        }
-                        blocks.append(block_data)
-                else:
-                    return []
-                
-            elif isinstance(content, dict) and 'segments' in content:
-                segments = content['segments']
-                for i, segment in enumerate(segments):
-                    block_data = {
-                        'index': i + 1,
-                        'start_time': self.seconds_to_srt_time(segment.get('start', 0)),
-                        'end_time': self.seconds_to_srt_time(segment.get('end', 0)),
-                        'text': segment.get('text', '').strip(),
-                        'raw_text': segment.get('text', '').strip(),
-                        'speaker': None,
-                        'is_turn_start': True,
-                    }
-                    blocks.append(block_data)
-                    
-            elif isinstance(content, dict) and 'text' in content:
-                block_data = {
-                    'index': 1,
-                    'start_time': '',
-                    'end_time': '',
-                    'text': content['text'].strip(),
-                    'raw_text': content['text'].strip(),
-                    'speaker': None,
-                    'is_turn_start': True,
-                }
-                blocks.append(block_data)
-                
-            elif isinstance(content, list):
-                for i, item in enumerate(content):
-                    if isinstance(item, dict):
-                        block_data = {
-                            'index': i + 1,
-                            'start_time': item.get('start_time', ''),
-                            'end_time': item.get('end_time', ''),
-                            'text': item.get('text', ''),
-                            'raw_text': item.get('text', ''),
-                            'speaker': None,
-                            'is_turn_start': True,
-                        }
-                        blocks.append(block_data)
-            elif isinstance(content, dict):
-                transcript_data = content.get('transcript', content.get('blocks', []))
-                if isinstance(transcript_data, list):
-                    for i, item in enumerate(transcript_data):
-                        if isinstance(item, dict):
-                            block_data = {
-                                'index': i + 1,
-                                'start_time': item.get('start_time', ''),
-                                'end_time': item.get('end_time', ''),
-                                'text': item.get('text', ''),
-                                'raw_text': item.get('text', ''),
-                                'speaker': None,
-                                'is_turn_start': True,
-                            }
-                            blocks.append(block_data)
-            
-            if not blocks and import_option is None:
-                QMessageBox.warning(self, "JSON Format", 
-                                   "The JSON file doesn't contain recognizable transcript data.")
-                
-        except Exception as e:
-            if import_option is None:
-                QMessageBox.critical(self, "JSON Error", 
-                                   f"Could not parse JSON file: {str(e)}")
-        
-        return blocks
-    
-
-    def save_project(self, force_save_as=False):
-        if not self.srt_blocks:
-            return
-
-        file_path = None
-        default_name = ""
-
-        # --- Determine if we should show a Save As dialog ---
-        if not force_save_as and self.current_file_path:
-            # If current file is a .capsgat file, handle upgrade
-            if self.current_file_path.endswith('.capsgat'):
-                reply = QMessageBox.question(
-                    self,
-                    "Project Format Update",
-                    "This project was created with the older CapsGAT format (.capsgat).\n\n"
-                    "To save it, you must use the new CapsQual format (.capsqual).\n"
-                    "Would you like to save it as .capsqual now? (You will be prompted for a new filename.)",
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.Yes
-                )
-                if reply == QMessageBox.No:
-                    return  # user cancelled save
-
-                # Build default save path in the same directory as the old file
-                old_dir = os.path.dirname(self.current_file_path)
-                base = os.path.basename(self.current_file_path)[:-8]  # remove '.capsgat'
-                default_name = os.path.join(old_dir, base + '.capsqual')
-                force_save_as = True   # force dialog
-            elif self.current_file_path.endswith('.capsqual'):
-                # It's a valid CapsQual project file – use it
-                file_path = self.current_file_path
-            else:
-                # Current file is a subtitle or other format – treat as unsaved
-                force_save_as = True
-
-        # --- If we need a Save As dialog, show it ---
-        if force_save_as or not file_path:
-            # Compute a default name if not already set
-            if not default_name:
-                if self.project_name:
-                    default_name = self.project_name.replace(" ", "_") + ".capsqual"
-                elif self.current_file_path:
-                    # For existing non-capsqual file, use its directory with new extension
-                    default_name = str(Path(self.current_file_path).with_suffix('.capsqual'))
-                else:
-                    default_name = "transcript_project.capsqual"
-
-            file_path, _ = QFileDialog.getSaveFileName(
-                self,
-                "Save Project As",
-                default_name,
-                "CapsQual Project (*.capsqual);;All Files (*)"
-            )
-            if not file_path:
-                return  # user cancelled
-
-            # Ensure the file has .capsqual extension
-            if not file_path.endswith('.capsqual'):
-                file_path += '.capsqual'
-
-        # --- Save the project ---
-        try:
-            project_data = {
-                'srt_blocks': self.srt_blocks,
-                'current_block_index': self.current_block_index,
-                'speakers': self.speakers,
-                # Save the original source path if we have it, otherwise the current file path
-                'source_file': getattr(self, 'source_file', self.current_file_path),
-                'file_has_timestamps': self.file_has_timestamps,
-                'audio_file_path': self.audio_file_path,
-                'project_name': self.project_name,
-                'project_memo': self.project_memo,
-                'text_display_font': {
-                    'family': self.text_display_font.family(),
-                    'size': self.text_display_font.pointSize()
-                },
-                'viewer_theme': self.current_theme,
-                'playback_speed': self.playback_speed,
-                'cjk_mode': self.cjk_mode,
-                'timestamp_style': self.timestamp_style,
-                'custom_timestamp_pattern': self.custom_timestamp_pattern
-            }
-            with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(project_data, f, indent=2, ensure_ascii=False)
-
-            self.current_file_path = file_path
-            self.add_to_recent(file_path)
-            self.clear_unsaved_changes()
-            QMessageBox.information(self, "Success", f"Project saved to {file_path}")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Could not save project: {str(e)}")
-
+            logger.error(f"Failed to load file {file_path}: {e}")
 
     def load_project(self):
         if not self.check_unsaved_changes():
@@ -4016,12 +3350,12 @@ Engineered with DeepSeek V3.2
                     unassigned_handling = "skip"
 
             if settings['format'] == 'srt':
-                transcript_text = generate_srt_text(self, 
+                transcript_text = generate_srt_text(self.transcript,
                     include_diarization=settings['include_diarization'],
                     unassigned_handling=unassigned_handling
                 )
             else:
-                transcript_text = generate_transcript_text(self, 
+                transcript_text = generate_transcript_text(self.transcript,
                     include_timestamps=settings['include_timestamps'],
                     timestamp_style=settings.get('timestamp_style', 'hash'),
                     custom_pattern=settings.get('custom_timestamp_pattern', None),
