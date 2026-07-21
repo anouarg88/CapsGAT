@@ -1662,21 +1662,6 @@ def _wrap_with_indent(line, max_width, indent):
             result.append(cont_prefix + chunk)
     
     return result if result else [line]
-    if first_chunk:
-        result.append(line[:indent] + first_chunk)
-    
-    # Continuation lines
-    pos = indent + len(first_chunk)
-    rest = line[pos:]
-    for i in range(0, len(rest), cont_step):
-        chunk = rest[i:i + cont_step]
-        if chunk:
-            result.append(cont_indent_str + chunk)
-    
-    return result if result else [line]
-
-    
-    return result
 
 
 def generate_transcript_text(
