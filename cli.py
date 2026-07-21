@@ -89,7 +89,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Examples:\n"
             "  capsqual transcript.srt                         Convert to GAT2 text\n"
             "  capsqual transcript.srt -f tiq --speaker=\"$:\"  TiQ with auto-diarization\n"
-            "  capsqual transcript.srt -f srt -o out.srt       Re-export as SRT\n"
+            "  capsqual transcript.srt -o transcript.html     Export as HTML\n"
             "  capsqual -g                                     Launch the GUI\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -107,7 +107,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-o", "--output",
                         help="Output file path (default: input name + .txt)")
     parser.add_argument("-f", "--format", default="gat2",
-                        choices=["gat2", "tiq", "dresing_pehl", "srt"],
+                        choices=["gat2", "tiq", "dresing_pehl"],
                         help="Transcript convention (default: gat2)")
 
     # Timestamps
@@ -151,11 +151,6 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Delimiter between segments (default: space)")
     parser.add_argument("--custom-delimiter",
                         help="Custom delimiter text")
-
-    # SRT-specific
-    parser.add_argument("--unassigned", default="skip",
-                        choices=["skip", "no_label", "unknown"],
-                        help="How to handle unassigned segments in SRT output")
 
     return parser
 
@@ -221,43 +216,32 @@ def run_convert(args: argparse.Namespace) -> int:
         out_path = input_path.with_suffix(".txt")
 
     # ── 5. Generate transcript ──────────────────────────────────
-    from generators import (
-        generate_srt_text,
-        generate_transcript_text,
-    )
+    from generators import generate_transcript_text
 
     wrap = args.wrap if args.wrap and args.wrap > 0 else False
     wrap_length = args.wrap if args.wrap and args.wrap > 0 else 80
 
-    if args.format == "srt":
-        text = generate_srt_text(
-            transcript,
-            include_diarization=args.diarization,
-            unassigned_handling=args.unassigned,
-        )
-    else:
-        text = generate_transcript_text(
-            transcript,
-            include_timestamps=args.timestamps,
-            timestamp_style=args.timestamp_style,
-            custom_pattern=args.custom_pattern,
-            convention=args.format,
-            include_diarization=args.diarization,
-            wrap_enabled=bool(wrap),
-            wrap_length=wrap_length,
-            character_wrap=args.character_wrap,
-            add_blank_line=args.blank_lines,
-            concatenate_turns=args.concatenate_turns,
-            delimiter_choice=args.delimiter,
-            custom_delimiter=args.custom_delimiter or "",
-        )
+    text = generate_transcript_text(
+        transcript,
+        include_timestamps=args.timestamps,
+        timestamp_style=args.timestamp_style,
+        custom_pattern=args.custom_pattern,
+        convention=args.format,
+        include_diarization=args.diarization,
+        wrap_enabled=bool(wrap),
+        wrap_length=wrap_length,
+        character_wrap=args.character_wrap,
+        add_blank_line=args.blank_lines,
+        concatenate_turns=args.concatenate_turns,
+        delimiter_choice=args.delimiter,
+        custom_delimiter=args.custom_delimiter or "",
+    )
 
     # ── 6. Write output ─────────────────────────────────────────
     from export import (
         build_html_content,
         write_html_file,
         write_txt_file,
-        write_srt_file,
         write_docx_file,
     )
 
@@ -286,8 +270,6 @@ def run_convert(args: argparse.Namespace) -> int:
                       file=sys.stderr)
                 out_path = out_path.with_suffix(".txt")
                 write_txt_file(text, str(out_path))
-        elif out_ext == ".srt":
-            write_srt_file(text, str(out_path))
         else:
             write_txt_file(text, str(out_path))
     except Exception as e:
