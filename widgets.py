@@ -39,11 +39,11 @@ class WaveformViewer(QWidget):
     HANDLE_SNAP_DIST = 10     # pixels — how close to grab a handle
     MIN_HEIGHT = 60
     PREFERRED_HEIGHT = 120
-    # Zoom buttons
-    ZOOM_BTN_W = 14           # width of +/- buttons
-    ZOOM_BTN_H = 10           # height of each button
-    ZOOM_BTN_GAP = 2
-    ZOOM_MARGIN = 10          # right-edge margin (moved further from edge)
+    # Zoom controls (sizing)
+    ZOOM_BTN_H = 12           # height of each +/- button
+    ZOOM_BTN_GAP = 4          # gap between elements in the stack
+    ZOOM_PANEL_W = 36         # width of the whole zoom panel (buttons + label)
+    ZOOM_MARGIN = 8           # right-edge margin
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -122,11 +122,11 @@ class WaveformViewer(QWidget):
         self.update()
 
     def set_segment(self, start_seconds, end_seconds):
-        """Set segment boundaries.
+        """Set segment boundaries and always centre the view on the segment.
 
-        If the view is currently showing the full file, zooms to
-        ``_default_zoom`` seconds centered on the segment. Otherwise
-        keeps the current zoom level unchanged.
+        If the view is currently showing the full file, zooms to the
+        default zoom level (``_default_zoom`` s).  Otherwise the current
+        zoom span is preserved and the viewport re-centres on the segment.
         """
         self.start_time = start_seconds
         self.end_time = end_seconds
@@ -134,14 +134,18 @@ class WaveformViewer(QWidget):
         if start_seconds is not None and end_seconds is not None and self.duration > 0:
             is_full = (abs(self.view_start) < 0.001
                        and abs(self.view_end - self.duration) < 0.001)
-            if is_full:
-                center = (start_seconds + end_seconds) / 2.0
-                half = self._default_zoom / 2.0
-                self.view_start = max(0.0, center - half)
-                self.view_end = min(self.duration, center + half)
-                if self.view_end - self.view_start < self._default_zoom * 0.9:
-                    self.view_start = max(0.0, self.view_end - self._default_zoom)
-                self._cached_width = 0
+            vdur = self._default_zoom if is_full else self._view_duration
+            center = (start_seconds + end_seconds) / 2.0
+            half = vdur / 2.0
+            self.view_start = max(0.0, center - half)
+            self.view_end = min(self.duration, center + half)
+            # If we hit the edge, keep the same zoom width from the opposite side
+            if self.view_end - self.view_start < vdur * 0.99:
+                if abs(self.view_start) < 0.001:
+                    self.view_end = vdur
+                else:
+                    self.view_start = self.view_end - vdur
+            self._cached_width = 0
         else:
             self.view_start = 0.0
             self.view_end = self.duration
@@ -357,7 +361,7 @@ class WaveformViewer(QWidget):
         vdur = self._view_duration
         zoom_text = f"{vdur:.1f}s"
         tr = p.fontMetrics().boundingRect(zoom_text)
-        btn_w = self.ZOOM_BTN_W
+        panel_w = self.ZOOM_PANEL_W
         btn_h = self.ZOOM_BTN_H
         gap = self.ZOOM_BTN_GAP
         margin = self.ZOOM_MARGIN
@@ -366,22 +370,20 @@ class WaveformViewer(QWidget):
         stack_h = tr.height() + gap + btn_h * 2 + gap
         stack_top = (h - stack_h) // 2
         btn_right = w - margin
-        btn_left = btn_right - btn_w
+        btn_left = btn_right - panel_w
 
         def _draw_btn(y, label):
             p.setPen(QPen(self.HANDLE_COLOR, 1))
             p.setBrush(QColor(60, 60, 65))
-            p.drawRect(btn_left, y, btn_w, btn_h)
+            p.drawRect(btn_left, y, panel_w, btn_h)
             p.setPen(self.TIME_TEXT_COLOR)
-            p.drawText(QRect(btn_left, y, btn_w, btn_h), Qt.AlignCenter, label)
+            p.drawText(QRect(btn_left, y, panel_w, btn_h), Qt.AlignCenter, label)
 
         # + button
         _draw_btn(stack_top, '+')
         # Label with opaque background
         label_y = stack_top + btn_h + gap + tr.height()
-        label_x = btn_left
-        # Draw dark background behind text for readability
-        label_bg = QRect(label_x, label_y - tr.height(), btn_w, tr.height())
+        label_bg = QRect(btn_left, label_y - tr.height(), panel_w, tr.height())
         p.setPen(Qt.NoPen)
         p.setBrush(QColor(35, 35, 38))
         p.drawRect(label_bg)
@@ -399,7 +401,7 @@ class WaveformViewer(QWidget):
         x, y = event.x(), event.y()
 
         # Check zoom button clicks — stack layout: [+], label, [−]
-        btn_w = self.ZOOM_BTN_W
+        panel_w = self.ZOOM_PANEL_W
         btn_h = self.ZOOM_BTN_H
         gap = self.ZOOM_BTN_GAP
         margin = self.ZOOM_MARGIN
@@ -407,10 +409,10 @@ class WaveformViewer(QWidget):
         stack_h = text_h + gap + btn_h * 2 + gap
         stack_top = (self.height() - stack_h) // 2
         btn_right = self.width() - margin
-        btn_left = btn_right - btn_w
+        btn_left = btn_right - panel_w
 
-        plus_rect = QRect(btn_left, stack_top, btn_w, btn_h)
-        minus_rect = QRect(btn_left, stack_top + btn_h + gap + text_h + gap, btn_w, btn_h)
+        plus_rect = QRect(btn_left, stack_top, panel_w, btn_h)
+        minus_rect = QRect(btn_left, stack_top + btn_h + gap + text_h + gap, panel_w, btn_h)
 
         if plus_rect.contains(x, y):
             self.zoom_in()
