@@ -2,7 +2,7 @@
 import math
 from PyQt5.QtWidgets import QWidget, QSizePolicy
 from PyQt5.QtCore import Qt, pyqtSignal, QPoint, QRect, QSize
-from PyQt5.QtGui import QPainter, QPen, QColor
+from PyQt5.QtGui import QPainter, QPen, QColor, QFontMetrics
 
 
 # ── Waveform Viewer ───────────────────────────────────────────────
@@ -43,6 +43,7 @@ class WaveformViewer(QWidget):
     ZOOM_BTN_W = 14           # width of +/- buttons
     ZOOM_BTN_H = 10           # height of each button
     ZOOM_BTN_GAP = 2
+    ZOOM_MARGIN = 10          # right-edge margin (moved further from edge)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -255,15 +256,6 @@ class WaveformViewer(QWidget):
         f = (clamped - margin) / w
         return self.view_start + f * self._view_duration
 
-    def _zoom_btn_rect(self) -> QRect:
-        """Bounding rect for the zoom +/- buttons in the top-right."""
-        bw = self.ZOOM_BTN_W
-        bh = self.ZOOM_BTN_H * 2 + self.ZOOM_BTN_GAP
-        margin = 4
-        x = self.width() - bw - margin
-        y = margin
-        return QRect(x, y, bw, bh)
-
     # ── painting ───────────────────────────────────────────────
 
     def paintEvent(self, event):
@@ -357,27 +349,46 @@ class WaveformViewer(QWidget):
             lx = max(2, min(lx - tr.width() // 2, w - tr.width() - 2))
             p.drawText(lx, 12, lbl)
 
-        # ── Zoom indicator + buttons (top-right) ────────────────
+        # ── Zoom controls (vertically centred on right edge) ────
+        # Layout:
+        #   [+]
+        #  15.0s
+        #   [−]
         vdur = self._view_duration
         zoom_text = f"{vdur:.1f}s"
         tr = p.fontMetrics().boundingRect(zoom_text)
-        zx = w - tr.width() - self.ZOOM_BTN_W - 10
-        zy = tr.height() + 2
-        p.drawText(zx, zy, zoom_text)
-
-        # Draw zoom +/- buttons to the right of the text
-        btn_x = zx + tr.width() + 4
         btn_w = self.ZOOM_BTN_W
         btn_h = self.ZOOM_BTN_H
         gap = self.ZOOM_BTN_GAP
+        margin = self.ZOOM_MARGIN
 
-        for i, label in enumerate(['+', '−']):
-            by = zy - btn_h + 1 + i * (btn_h + gap)
+        # Total height of the stack
+        stack_h = tr.height() + gap + btn_h * 2 + gap
+        stack_top = (h - stack_h) // 2
+        btn_right = w - margin
+        btn_left = btn_right - btn_w
+
+        def _draw_btn(y, label):
             p.setPen(QPen(self.HANDLE_COLOR, 1))
             p.setBrush(QColor(60, 60, 65))
-            p.drawRect(btn_x, by, btn_w, btn_h)
+            p.drawRect(btn_left, y, btn_w, btn_h)
             p.setPen(self.TIME_TEXT_COLOR)
-            p.drawText(QRect(btn_x, by, btn_w, btn_h), Qt.AlignCenter, label)
+            p.drawText(QRect(btn_left, y, btn_w, btn_h), Qt.AlignCenter, label)
+
+        # + button
+        _draw_btn(stack_top, '+')
+        # Label with opaque background
+        label_y = stack_top + btn_h + gap + tr.height()
+        label_x = btn_left
+        # Draw dark background behind text for readability
+        label_bg = QRect(label_x, label_y - tr.height(), btn_w, tr.height())
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(35, 35, 38))
+        p.drawRect(label_bg)
+        p.setPen(self.TIME_TEXT_COLOR)
+        p.drawText(label_bg, Qt.AlignCenter, zoom_text)
+        # − button
+        _draw_btn(stack_top + btn_h + gap + tr.height() + gap, '−')
 
     # ── mouse interaction ─────────────────────────────────────
 
@@ -387,15 +398,26 @@ class WaveformViewer(QWidget):
 
         x, y = event.x(), event.y()
 
-        # Check zoom button clicks
-        btn_rect = self._zoom_btn_rect()
-        if btn_rect.contains(x, y):
-            # Determine which button: top is +, bottom is −
-            mid_y = btn_rect.y() + self.ZOOM_BTN_H + self.ZOOM_BTN_GAP // 2
-            if y < mid_y:
-                self.zoom_in()
-            else:
-                self.zoom_out()
+        # Check zoom button clicks — stack layout: [+], label, [−]
+        btn_w = self.ZOOM_BTN_W
+        btn_h = self.ZOOM_BTN_H
+        gap = self.ZOOM_BTN_GAP
+        margin = self.ZOOM_MARGIN
+        text_h = QFontMetrics(self.font()).boundingRect("00.0s").height()
+        stack_h = text_h + gap + btn_h * 2 + gap
+        stack_top = (self.height() - stack_h) // 2
+        btn_right = self.width() - margin
+        btn_left = btn_right - btn_w
+
+        plus_rect = QRect(btn_left, stack_top, btn_w, btn_h)
+        minus_rect = QRect(btn_left, stack_top + btn_h + gap + text_h + gap, btn_w, btn_h)
+
+        if plus_rect.contains(x, y):
+            self.zoom_in()
+            event.accept()
+            return
+        if minus_rect.contains(x, y):
+            self.zoom_out()
             event.accept()
             return
 
