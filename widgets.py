@@ -11,94 +11,121 @@ class WaveformViewer(QWidget):
     """A waveform viewer with draggable segment-boundary markers.
 
     Displays an audio waveform and lets the user visually adjust
-    segment start/end times by dragging handle bars.
+    segment start/end times by dragging handle bars.  Supports
+    dark and light colour themes.
 
     Signals
     -------
     segment_start_changed(start_seconds: float)
-        Emitted when the left (start) handle is dragged.
     segment_end_changed(end_seconds: float)
-        Emitted when the right (end) handle is dragged.
     seek_requested(seconds: float)
-        Emitted when the user clicks inside the waveform (seek).
     """
     segment_start_changed = pyqtSignal(float)
     segment_end_changed = pyqtSignal(float)
     seek_requested = pyqtSignal(float)
 
-    # ── colours ──────────────────────────────────────────────────
-    BG_COLOR = QColor(45, 45, 48)
-    WAVEFORM_BG = QColor(80, 80, 85)
-    WAVEFORM_FG = QColor(140, 140, 150)
-    WAVEFORM_SELECTED = QColor(70, 150, 240)
-    HANDLE_COLOR = QColor(255, 180, 50)
-    HANDLE_FILL = QColor(255, 200, 80)
-    PLAYHEAD_COLOR = QColor(255, 80, 80)
-    TIME_TEXT_COLOR = QColor(200, 200, 200)
-    HANDLE_WIDTH = 8          # pixels
-    HANDLE_SNAP_DIST = 10     # pixels — how close to grab a handle
+    # ── colour definitions ────────────────────────────────────────
+
+    @staticmethod
+    def _dark_theme():
+        return {
+            'bg': QColor(45, 45, 48),
+            'wf_bg': QColor(80, 80, 85),
+            'wf_sel': QColor(70, 150, 240),
+            'handle': QColor(255, 180, 50),
+            'handle_text_bg': QColor(50, 50, 55),
+            'playhead': QColor(255, 80, 80),
+            'text': QColor(200, 200, 200),
+            'zoom_btn': QColor(60, 60, 65),
+            'zoom_bg': QColor(35, 35, 38),
+            'zoom_text': QColor(200, 200, 200),
+        }
+
+    @staticmethod
+    def _light_theme():
+        return {
+            'bg': QColor(255, 255, 255),
+            'wf_bg': QColor(200, 200, 205),
+            'wf_sel': QColor(0, 0, 0),
+            'handle': QColor(255, 180, 50),
+            'handle_text_bg': QColor(245, 245, 245),
+            'playhead': QColor(255, 80, 80),
+            'text': QColor(80, 80, 80),
+            'zoom_btn': QColor(220, 220, 220),
+            'zoom_bg': QColor(240, 240, 240),
+            'zoom_text': QColor(80, 80, 80),
+        }
+
+    # ── constants ─────────────────────────────────────────────────
+    HANDLE_SNAP_DIST = 10
+    HANDLE_TICK = 3          # length of tick marks at handle ends
+    HANDLE_PAD = 4           # padding around time label inside handle
+    LABEL_H = 14             # height of the timestamp label box
     MIN_HEIGHT = 60
     PREFERRED_HEIGHT = 120
-    # Zoom controls (sizing)
-    ZOOM_BTN_H = 12           # height of each +/- button
-    ZOOM_BTN_GAP = 4          # gap between elements in the stack
-    ZOOM_PANEL_W = 36         # width of the whole zoom panel (buttons + label)
-    ZOOM_MARGIN = 8           # right-edge margin
+    ZOOM_BTN_H = 12
+    ZOOM_BTN_GAP = 4
+    ZOOM_PANEL_W = 36
+    ZOOM_MARGIN = 8
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumHeight(self.MIN_HEIGHT)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._theme = 'dark'
+        self.C = dict(self._dark_theme())
 
-        # Audio data (set via load_audio or set_audio_data)
-        self.audio_data = None       # numpy array (float, mono, -1..1)
+        # Audio data
+        self.audio_data = None
         self.sample_rate = 44100
         self.duration = 0.0
-
-        # Pre-computed waveform peaks
         self.peaks = None
         self._cached_width = 0
 
-        # Visible viewport (seconds)
+        # Viewport
         self.view_start = 0.0
         self.view_end = 0.0
-
-        # Default zoom: 15 seconds visible when a segment is first selected
         self._default_zoom = 15.0
 
-        # Segment boundaries (seconds, or None)
+        # Segment
         self.start_time = None
         self.end_time = None
-
-        # Playback position (seconds, or None)
         self.playback_position = None
 
         # Drag state
-        self._dragging = None        # 'start' | 'end' | None
+        self._dragging = None
         self._drag_offset = 0.0
 
-    # ── public API ──────────────────────────────────────────────
+    # ── theme ─────────────────────────────────────────────────────
+
+    def set_theme(self, theme_name):
+        """Switch between ``'dark'`` and ``'light'`` colour scheme."""
+        self._theme = theme_name
+        if theme_name == 'light':
+            self.C = dict(self._light_theme())
+        else:
+            self.C = dict(self._dark_theme())
+        self.update()
+
+    # ── public API ────────────────────────────────────────────────
 
     def load_audio(self, audio_path: str):
-        """Load an audio file and compute waveform peaks."""
         try:
             import numpy as np
             import soundfile as sf
             data, sr = sf.read(audio_path)
             if len(data.shape) > 1:
                 data = data.mean(axis=1)
-            if data.dtype != np.float32 and data.dtype != np.float64:
+            if data.dtype not in (np.float32, np.float64):
                 data = data.astype(np.float32) / 32768.0
             self.set_audio_data(data, sr)
         except Exception as e:
             import logging
             logging.getLogger(__name__).warning(
-                f"WaveformViewer could not load {audio_path}: {e}"
-            )
+                f"WaveformViewer could not load {audio_path}: {e}")
             self.clear_audio()
 
     def set_audio_data(self, data, sample_rate: int):
-        """Set audio data directly from a numpy array (mono, -1..1)."""
         import numpy as np
         self.audio_data = np.asarray(data, dtype=np.float32)
         self.sample_rate = int(sample_rate)
@@ -110,23 +137,22 @@ class WaveformViewer(QWidget):
         self.update()
 
     def clear_audio(self):
-        """Remove audio data and reset the display."""
         self.audio_data = None
         self.peaks = None
         self.duration = 0.0
-        self.view_start = 0.0
-        self.view_end = 0.0
         self.start_time = None
         self.end_time = None
         self.playback_position = None
+        self.view_start = 0.0
+        self.view_end = 0.0
         self.update()
 
     def set_segment(self, start_seconds, end_seconds):
-        """Set segment boundaries and always centre the view on the segment.
+        """Store segment boundaries and centre view on the segment.
 
-        If the view is currently showing the full file, zooms to the
-        default zoom level (``_default_zoom`` s).  Otherwise the current
-        zoom span is preserved and the viewport re-centres on the segment.
+        On first call (full-file view) the zoom level is set to the
+        default (15 s).  Subsequent calls keep the current zoom span
+        but re-centre on the new segment.
         """
         self.start_time = start_seconds
         self.end_time = end_seconds
@@ -135,11 +161,10 @@ class WaveformViewer(QWidget):
             is_full = (abs(self.view_start) < 0.001
                        and abs(self.view_end - self.duration) < 0.001)
             vdur = self._default_zoom if is_full else self._view_duration
-            center = (start_seconds + end_seconds) / 2.0
+            centre = (start_seconds + end_seconds) / 2.0
             half = vdur / 2.0
-            self.view_start = max(0.0, center - half)
-            self.view_end = min(self.duration, center + half)
-            # If we hit the edge, keep the same zoom width from the opposite side
+            self.view_start = max(0.0, centre - half)
+            self.view_end = min(self.duration, centre + half)
             if self.view_end - self.view_start < vdur * 0.99:
                 if abs(self.view_start) < 0.001:
                     self.view_end = vdur
@@ -150,11 +175,9 @@ class WaveformViewer(QWidget):
             self.view_start = 0.0
             self.view_end = self.duration
             self._cached_width = 0
-
         self.update()
 
     def clear_segment(self):
-        """Remove segment markers and reset view to full duration."""
         self.start_time = None
         self.end_time = None
         if self.duration > 0:
@@ -164,27 +187,23 @@ class WaveformViewer(QWidget):
             self.update()
 
     def set_playback_position(self, seconds):
-        """Update the playback position line."""
         self.playback_position = seconds
         self.update()
 
     def zoom_in(self):
-        """Zoom in one step, centered on the middle of the view."""
         self._zoom_at(0.5)
 
     def zoom_out(self):
-        """Zoom out one step, centered on the middle of the view."""
         self._zoom_at(-0.5)
 
     def _zoom_at(self, direction):
-        """Zoom in (direction > 0) or out (direction < 0)."""
         if self.duration <= 0:
             return
         vdur = self._view_duration
         factor = 1.3 if direction > 0 else 1.0 / 1.3
         new_vdur = max(0.05, min(self.duration, vdur * factor))
-        center = (self.view_start + self.view_end) / 2.0
-        new_start = max(0.0, center - new_vdur / 2.0)
+        centre = (self.view_start + self.view_end) / 2.0
+        new_start = max(0.0, centre - new_vdur / 2.0)
         new_end = min(self.duration, new_start + new_vdur)
         if abs(new_end - new_start - new_vdur) > 0.01:
             new_start = max(0.0, new_end - new_vdur)
@@ -193,7 +212,7 @@ class WaveformViewer(QWidget):
         self._cached_width = 0
         self.update()
 
-    # ── viewport helpers ────────────────────────────────────────
+    # ── viewport helper ───────────────────────────────────────────
 
     @property
     def _view_duration(self) -> float:
@@ -201,33 +220,30 @@ class WaveformViewer(QWidget):
             return 0.0
         return max(0.001, self.view_end - self.view_start)
 
-    # ── peak computation ───────────────────────────────────────
+    # ── peak computation ──────────────────────────────────────────
 
     def _compute_peaks(self, width: int):
         if self.audio_data is None or width <= 0:
             self.peaks = None
             self._cached_width = width
             return
-
         import numpy as np
         data = self.audio_data
         sr = float(self.sample_rate)
         n = len(data)
-
         vstart = max(0.0, self.view_start)
         vend = min(self.duration, self.view_end)
-        start_sample = int(vstart * sr)
-        end_sample = int(vend * sr)
-        if end_sample > n:
-            end_sample = n
-        span = max(1, end_sample - start_sample)
-
+        s0 = int(vstart * sr)
+        s1 = int(vend * sr)
+        if s1 > n:
+            s1 = n
+        span = max(1, s1 - s0)
         self.peaks = np.zeros((width, 2), dtype=np.float32)
         for col in range(width):
-            s = start_sample + int(col * span / width)
-            e = start_sample + int((col + 1) * span / width)
-            if e > s and e <= n:
-                chunk = data[s:e]
+            a = s0 + int(col * span / width)
+            b = s0 + int((col + 1) * span / width)
+            if b > a and b <= n:
+                chunk = data[a:b]
                 self.peaks[col, 0] = float(chunk.min())
                 self.peaks[col, 1] = float(chunk.max())
             else:
@@ -235,32 +251,31 @@ class WaveformViewer(QWidget):
                 self.peaks[col, 1] = 0.0
         self._cached_width = width
 
-    # ── coordinate helpers ─────────────────────────────────────
+    # ── coordinate helpers ────────────────────────────────────────
 
-    def _time_to_x(self, seconds: float) -> int:
+    def _time_to_x(self, seconds):
         if self.duration <= 0:
             return 0
-        margin = self.HANDLE_WIDTH // 2
-        w = self.width() - 2 * margin
-        if w <= 0:
-            return margin
-        vdur = self._view_duration
-        t = seconds - self.view_start
-        t = max(0.0, min(vdur, t))
-        return int(margin + t / vdur * w)
+        m = self.HANDLE_TICK + 1
+        w = max(1, self.width() - 2 * m)
+        t = max(0.0, min(self._view_duration, seconds - self.view_start))
+        return int(m + t / self._view_duration * w)
 
-    def _x_to_time(self, x: int) -> float:
+    def _x_to_time(self, x):
         if self.duration <= 0:
             return 0
-        margin = self.HANDLE_WIDTH // 2
-        w = self.width() - 2 * margin
-        if w <= 0:
-            return self.view_start
-        clamped = max(margin, min(self.width() - margin, x))
-        f = (clamped - margin) / w
-        return self.view_start + f * self._view_duration
+        m = self.HANDLE_TICK + 1
+        w = max(1, self.width() - 2 * m)
+        clamped = max(m, min(self.width() - m, x))
+        return self.view_start + ((clamped - m) / w) * self._view_duration
 
-    # ── painting ───────────────────────────────────────────────
+    @staticmethod
+    def _handle_half_w(p) -> int:
+        """Half-width of a handle based on a wide timestamp sample."""
+        tw = p.fontMetrics().boundingRect("0:00.00").width()
+        return (tw + 8) // 2 + 1
+
+    # ── painting ──────────────────────────────────────────────────
 
     def paintEvent(self, event):
         p = QPainter(self)
@@ -268,10 +283,11 @@ class WaveformViewer(QWidget):
 
         w = self.width()
         h = self.height()
-        p.fillRect(0, 0, w, h, self.BG_COLOR)
+        C = self.C
+        p.fillRect(0, 0, w, h, C['bg'])
 
         if self.audio_data is None:
-            p.setPen(self.TIME_TEXT_COLOR)
+            p.setPen(C['text'])
             p.drawText(self.rect(), Qt.AlignCenter, "No audio loaded")
             return
 
@@ -280,150 +296,133 @@ class WaveformViewer(QWidget):
         if self.peaks is None:
             return
 
-        margin = self.HANDLE_WIDTH // 2
+        margin = self.HANDLE_TICK + 1
         draw_w = w - 2 * margin
         if draw_w <= 0:
             return
 
-        # Selected-region pixel range
         sx_start = self._time_to_x(self.start_time) if self.start_time is not None else None
         sx_end = self._time_to_x(self.end_time) if self.end_time is not None else None
 
         centre_y = h // 2
         half_h = max(4, (h - 4) // 2)
 
-        # Waveform
+        # ── Waveform ──────────────────────────────────────────────
         for col in range(draw_w):
             x = margin + col
             pmin, pmax = self.peaks[col]
             pmin = max(-1.0, min(1.0, pmin))
             pmax = max(-1.0, min(1.0, pmax))
-            y_top = int(centre_y - pmax * half_h)
-            y_bot = int(centre_y - pmin * half_h)
+            yt = int(centre_y - pmax * half_h)
+            yb = int(centre_y - pmin * half_h)
+            p.setPen(C['wf_sel'] if (sx_start is not None and sx_end is not None
+                                     and sx_start <= x <= sx_end) else C['wf_bg'])
+            if yb > yt:
+                p.drawLine(x, yt, x, yb)
 
-            if sx_start is not None and sx_end is not None and sx_start <= x <= sx_end:
-                p.setPen(self.WAVEFORM_SELECTED)
-            else:
-                p.setPen(self.WAVEFORM_BG)
-
-            if y_bot > y_top:
-                p.drawLine(x, y_top, x, y_bot)
-
-        # Playback position
+        # ── Playback position ─────────────────────────────────────
         if self.playback_position is not None and self.duration > 0:
             px = self._time_to_x(self.playback_position)
-            p.setPen(QPen(self.PLAYHEAD_COLOR, 1))
+            p.setPen(QPen(C['playhead'], 1))
             p.drawLine(px, 2, px, h - 2)
 
-        # Segment handles
-        hw = self.HANDLE_WIDTH
-        for which, tval in [('start', self.start_time), ('end', self.end_time)]:
-            if tval is None:
-                continue
-            hx = self._time_to_x(tval)
-            p.setPen(QPen(self.HANDLE_COLOR, 2))
-            p.setBrush(self.HANDLE_FILL)
-            poly = [
-                QPoint(hx, 0),
-                QPoint(hx + (hw if which == 'start' else -hw), 0),
-                QPoint(hx + (hw if which == 'start' else -hw), h),
-                QPoint(hx, h)
-            ]
-            p.drawPolygon(poly)
-            p.setPen(QPen(self.HANDLE_COLOR, 1))
-            p.drawLine(hx, 0, hx, h)
-
-        # Time labels
-        p.setPen(self.TIME_TEXT_COLOR)
+        # ── Segment handles (each is a label box + line + ticks) ──
         font = p.font()
         font.setPointSize(8)
         p.setFont(font)
 
-        if self.start_time is not None:
-            lbl = self._format_time(self.start_time)
-            lx = self._time_to_x(self.start_time)
-            tr = p.fontMetrics().boundingRect(lbl)
-            lx = max(2, min(lx - tr.width() // 2, w - tr.width() - 2))
-            p.drawText(lx, h - 3, lbl)
+        hw = self._handle_half_w(p)
+        lh = self.LABEL_H
+        tick = self.HANDLE_TICK
 
-        if self.end_time is not None:
-            lbl = self._format_time(self.end_time)
-            lx = self._time_to_x(self.end_time)
-            tr = p.fontMetrics().boundingRect(lbl)
-            lx = max(2, min(lx - tr.width() // 2, w - tr.width() - 2))
-            p.drawText(lx, 12, lbl)
+        for which, tval in [('start', self.start_time), ('end', self.end_time)]:
+            if tval is None:
+                continue
+            hx = self._time_to_x(tval)
+            lbl = self._format_time(tval)
+            lw = hw * 2
 
-        # ── Zoom controls (vertically centred on right edge) ────
-        # Layout:
-        #   [+]
-        #  15.0s
-        #   [−]
+            if which == 'start':
+                # Label box flush with top, vertical line down to bottom
+                r = QRect(hx - hw, 0, lw, lh)
+                p.setPen(QPen(C['handle'], 1))
+                p.setBrush(C['handle_text_bg'])
+                p.drawRect(r)
+                p.setPen(C['text'])
+                p.drawText(r, Qt.AlignCenter, lbl)
+                p.setPen(QPen(C['handle'], 2))
+                p.drawLine(hx, lh, hx, h)
+                p.setPen(QPen(C['handle'], 1))
+                p.drawLine(hx - tick, h, hx + tick, h)
+            else:
+                # Label box flush with bottom, vertical line up to top
+                r = QRect(hx - hw, h - lh, lw, lh)
+                p.setPen(QPen(C['handle'], 1))
+                p.setBrush(C['handle_text_bg'])
+                p.drawRect(r)
+                p.setPen(C['text'])
+                p.drawText(r, Qt.AlignCenter, lbl)
+                p.setPen(QPen(C['handle'], 2))
+                p.drawLine(hx, 0, hx, h - lh)
+                p.setPen(QPen(C['handle'], 1))
+                p.drawLine(hx - tick, 0, hx + tick, 0)
+
+        p.setFont(font)
+
+        # ── Zoom controls (right edge, vertically centred) ────────
         vdur = self._view_duration
         zoom_text = f"{vdur:.1f}s"
         tr = p.fontMetrics().boundingRect(zoom_text)
         panel_w = self.ZOOM_PANEL_W
         btn_h = self.ZOOM_BTN_H
         gap = self.ZOOM_BTN_GAP
-        margin = self.ZOOM_MARGIN
 
-        # Total height of the stack
         stack_h = tr.height() + gap + btn_h * 2 + gap
         stack_top = (h - stack_h) // 2
-        btn_right = w - margin
-        btn_left = btn_right - panel_w
+        btn_left = w - self.ZOOM_MARGIN - panel_w
 
         def _draw_btn(y, label):
-            p.setPen(QPen(self.HANDLE_COLOR, 1))
-            p.setBrush(QColor(60, 60, 65))
+            p.setPen(QPen(C['handle'], 1))
+            p.setBrush(C['zoom_btn'])
             p.drawRect(btn_left, y, panel_w, btn_h)
-            p.setPen(self.TIME_TEXT_COLOR)
+            p.setPen(C['zoom_text'])
             p.drawText(QRect(btn_left, y, panel_w, btn_h), Qt.AlignCenter, label)
 
-        # + button
         _draw_btn(stack_top, '+')
-        # Label with opaque background
         label_y = stack_top + btn_h + gap + tr.height()
         label_bg = QRect(btn_left, label_y - tr.height(), panel_w, tr.height())
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor(35, 35, 38))
+        p.setBrush(C['zoom_bg'])
         p.drawRect(label_bg)
-        p.setPen(self.TIME_TEXT_COLOR)
+        p.setPen(C['zoom_text'])
         p.drawText(label_bg, Qt.AlignCenter, zoom_text)
-        # − button
         _draw_btn(stack_top + btn_h + gap + tr.height() + gap, '−')
 
-    # ── mouse interaction ─────────────────────────────────────
+    # ── mouse interaction ────────────────────────────────────────
 
     def mousePressEvent(self, event):
         if event.button() != Qt.LeftButton or self.duration <= 0:
             return
 
         x, y = event.x(), event.y()
-
-        # Check zoom button clicks — stack layout: [+], label, [−]
         panel_w = self.ZOOM_PANEL_W
         btn_h = self.ZOOM_BTN_H
         gap = self.ZOOM_BTN_GAP
-        margin = self.ZOOM_MARGIN
         text_h = QFontMetrics(self.font()).boundingRect("00.0s").height()
         stack_h = text_h + gap + btn_h * 2 + gap
         stack_top = (self.height() - stack_h) // 2
-        btn_right = self.width() - margin
-        btn_left = btn_right - panel_w
+        btn_left = self.width() - self.ZOOM_MARGIN - panel_w
 
-        plus_rect = QRect(btn_left, stack_top, panel_w, btn_h)
-        minus_rect = QRect(btn_left, stack_top + btn_h + gap + text_h + gap, panel_w, btn_h)
-
-        if plus_rect.contains(x, y):
+        if QRect(btn_left, stack_top, panel_w, btn_h).contains(x, y):
             self.zoom_in()
             event.accept()
             return
-        if minus_rect.contains(x, y):
+        if QRect(btn_left, stack_top + btn_h + gap + text_h + gap, panel_w, btn_h).contains(x, y):
             self.zoom_out()
             event.accept()
             return
 
-        # Check handle proximity
+        # Handle proximity
         near_start = near_end = False
         if self.start_time is not None:
             sx = self._time_to_x(self.start_time)
@@ -433,9 +432,7 @@ class WaveformViewer(QWidget):
             near_end = abs(x - ex) < self.HANDLE_SNAP_DIST
 
         if near_start and near_end:
-            sx = self._time_to_x(self.start_time)
-            ex = self._time_to_x(self.end_time)
-            if abs(x - sx) >= abs(x - ex):
+            if abs(x - self._time_to_x(self.start_time)) >= abs(x - self._time_to_x(self.end_time)):
                 near_start = False
             else:
                 near_end = False
@@ -448,16 +445,13 @@ class WaveformViewer(QWidget):
             self._drag_offset = self._x_to_time(x) - self.end_time
         else:
             self.seek_requested.emit(self._x_to_time(x))
-
         event.accept()
 
     def mouseMoveEvent(self, event):
         if self._dragging is None or self.duration <= 0:
             return
-
         t = self._x_to_time(event.x()) - self._drag_offset
         t = max(self.view_start, min(self.view_end, t))
-
         if self._dragging == 'start':
             if self.end_time is not None:
                 t = min(t, self.end_time - 0.001)
@@ -468,7 +462,6 @@ class WaveformViewer(QWidget):
                 t = max(t, self.start_time + 0.001)
             self.end_time = t
             self.segment_end_changed.emit(t)
-
         self.update()
         event.accept()
 
@@ -478,26 +471,19 @@ class WaveformViewer(QWidget):
             event.accept()
 
     def wheelEvent(self, event):
-        """Scroll wheel: near handles → adjust boundary; elsewhere → zoom."""
         if self.duration <= 0:
             return
-
         delta = event.angleDelta().y()
         x = event.x()
 
-        # Handle proximity
         near_start = near_end = False
         if self.start_time is not None:
-            sx = self._time_to_x(self.start_time)
-            near_start = abs(x - sx) < self.HANDLE_SNAP_DIST
+            near_start = abs(x - self._time_to_x(self.start_time)) < self.HANDLE_SNAP_DIST
         if self.end_time is not None:
-            ex = self._time_to_x(self.end_time)
-            near_end = abs(x - ex) < self.HANDLE_SNAP_DIST
+            near_end = abs(x - self._time_to_x(self.end_time)) < self.HANDLE_SNAP_DIST
 
         if near_start and near_end:
-            sx = self._time_to_x(self.start_time)
-            ex = self._time_to_x(self.end_time)
-            if abs(x - sx) >= abs(x - ex):
+            if abs(x - self._time_to_x(self.start_time)) >= abs(x - self._time_to_x(self.end_time)):
                 near_start = False
             else:
                 near_end = False
@@ -506,16 +492,14 @@ class WaveformViewer(QWidget):
         direction = 1 if delta > 0 else -1
 
         if near_start and self.start_time is not None:
-            t = self.start_time + direction * step
-            t = max(self.view_start, min(self.view_end, t))
+            t = max(self.view_start, min(self.view_end, self.start_time + direction * step))
             if self.end_time is not None:
                 t = min(t, self.end_time - 0.001)
             self.start_time = t
             self.segment_start_changed.emit(t)
             self.update()
         elif near_end and self.end_time is not None:
-            t = self.end_time + direction * step
-            t = max(self.view_start, min(self.view_end, t))
+            t = max(self.view_start, min(self.view_end, self.end_time + direction * step))
             if self.start_time is not None:
                 t = max(t, self.start_time + 0.001)
             self.end_time = t
@@ -523,10 +507,9 @@ class WaveformViewer(QWidget):
             self.update()
         else:
             self._zoom_at(direction)
-            # Only accept if zoom_btns wasn't just handled
         event.accept()
 
-    # ── helpers ───────────────────────────────────────────────
+    # ── helpers ──────────────────────────────────────────────────
 
     @staticmethod
     def _format_time(seconds: float) -> str:
@@ -536,8 +519,9 @@ class WaveformViewer(QWidget):
 
     def sizeHint(self):
         return QSize(400, self.PREFERRED_HEIGHT)
-        return QSize(400, self.PREFERRED_HEIGHT)
 
+
+# ── Speed Knob ────────────────────────────────────────────────────
 
 class SpeedKnob(QWidget):
     valueChanged = pyqtSignal(float)
@@ -565,57 +549,43 @@ class SpeedKnob(QWidget):
         if radius < 5:
             return
 
-        # Outer circle
         painter.setBrush(QColor(240, 240, 240))
         painter.setPen(QPen(QColor(180, 180, 180), 2))
         painter.drawEllipse(center, radius, radius)
 
-        # Value indicator
         angle = 142 + (self.value - self.min_value) / (self.max_value - self.min_value) * 270
         angle_rad = math.radians(angle)
-        indicator_length = radius - 2
-        end_x = center.x() + indicator_length * math.cos(angle_rad)
-        end_y = center.y() + indicator_length * math.sin(angle_rad)
+        ilen = radius - 2
+        end_x = center.x() + ilen * math.cos(angle_rad)
+        end_y = center.y() + ilen * math.sin(angle_rad)
 
         painter.setPen(QPen(QColor(0, 120, 215), 2))
         painter.drawLine(center, QPoint(int(end_x), int(end_y)))
 
-        # Center dot
         painter.setBrush(QColor(0, 120, 215))
         painter.setPen(Qt.NoPen)
-        dot_radius = max(2, radius // 10)
-        painter.drawEllipse(center, dot_radius, dot_radius)
+        painter.drawEllipse(center, max(2, radius // 10), max(2, radius // 10))
 
-        # Value text
         text_color = self.palette().text().color()
         painter.setPen(text_color)
         font = painter.font()
-        font_size = max(7, radius // 4)
-        font.setPointSize(font_size)
+        font.setPointSize(max(7, radius // 4))
         painter.setFont(font)
         value_text = f"{self.value:.1f}x"
 
-        value_label_x = center.x()
-        value_label_y = center.y() + radius / 2
-        text_rect = painter.fontMetrics().boundingRect(value_text)
-        text_rect.moveCenter(QPoint(int(value_label_x), int(value_label_y)))
-        painter.drawText(text_rect, Qt.AlignCenter, value_text)
+        vx = center.x()
+        vy = center.y() + radius / 2
+        tr = painter.fontMetrics().boundingRect(value_text)
+        tr.moveCenter(QPoint(int(vx), int(vy)))
+        painter.drawText(tr, Qt.AlignCenter, value_text)
 
-        # Min/max labels (0.5 and 2.0)
         font.setPointSize(max(6, radius // 5))
         painter.setFont(font)
-        label_min = "0.5x"
-        label_max = "2.0x"
-        min_rect = painter.fontMetrics().boundingRect(label_min)
-        max_rect = painter.fontMetrics().boundingRect(label_max)
-
-        min_x = center.x() - radius - min_rect.width() - 5
-        min_y = center.y() + radius // 1
-        painter.drawText(min_x, min_y, label_min)
-
-        max_x = center.x() + radius + 5
-        max_y = center.y() + radius // 1
-        painter.drawText(max_x, max_y, label_max)
+        for label, side in [("0.5x", -1), ("2.0x", 1)]:
+            r = painter.fontMetrics().boundingRect(label)
+            x = center.x() + side * (radius + r.width() + 5)
+            y = center.y() + radius // 1
+            painter.drawText(int(x), y, label)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -624,7 +594,6 @@ class SpeedKnob(QWidget):
             event.accept()
 
     def set_value_direct(self, value):
-        """Set value directly"""
         new_value = max(self.min_value, min(self.max_value, value))
         if abs(new_value - self.value) > 0.01:
             self.value = new_value
@@ -633,19 +602,15 @@ class SpeedKnob(QWidget):
 
     def mouseMoveEvent(self, event):
         if self.is_dragging and self.last_mouse_pos:
-            delta_y = self.last_mouse_pos.y() - event.y()
-            delta_x = event.x() - self.last_mouse_pos.x()
-            delta = delta_y + delta_x
-
-            new_value = self.value + (delta * self.step / 30)
-            new_value = max(self.min_value, min(self.max_value, new_value))
-
+            dy = self.last_mouse_pos.y() - event.y()
+            dx = event.x() - self.last_mouse_pos.x()
+            delta = dy + dx
+            new_value = max(self.min_value, min(self.max_value, self.value + (delta * self.step / 30)))
             if new_value != self.value:
                 self.value = round(new_value / self.step) * self.step
                 self.value = max(self.min_value, min(self.max_value, self.value))
                 self.update()
                 self.valueChanged.emit(self.value)
-
             self.last_mouse_pos = event.pos()
             event.accept()
 
@@ -662,4 +627,3 @@ class SpeedKnob(QWidget):
         else:
             self.set_value_direct(self.value - self.step)
         event.accept()
-

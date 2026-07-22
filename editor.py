@@ -2450,7 +2450,11 @@ Engineered with DeepSeek V3.2
                 self.speaker_colors.append(self.speaker_color_palette[i])
             else:
                 self.speaker_colors.append(QColor(200, 200, 200))
-        
+
+        # Sync waveform viewer theme
+        if hasattr(self, 'waveform_viewer'):
+            self.waveform_viewer.set_theme(theme)
+
         self.create_speaker_widgets()
         self.update_display()
     
