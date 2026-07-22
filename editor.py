@@ -394,6 +394,7 @@ class SRTEditor(QMainWindow):
         left_panel.addWidget(waveform_label)
 
         self.waveform_viewer = WaveformViewer()
+        self.waveform_viewer.set_theme(self.current_theme)
         self.waveform_viewer.segment_start_changed.connect(self._on_waveform_start_changed)
         self.waveform_viewer.segment_end_changed.connect(self._on_waveform_end_changed)
         self.waveform_viewer.seek_requested.connect(self._on_waveform_seek)

@@ -31,7 +31,7 @@ class WaveformViewer(QWidget):
         return {
             'bg': QColor(45, 45, 48),
             'wf_bg': QColor(80, 80, 85),
-            'wf_sel': QColor(70, 150, 240),
+            'wf_sel': QColor(255, 255, 255),
             'handle': QColor(255, 180, 50),
             'handle_text_bg': QColor(50, 50, 55),
             'playhead': QColor(255, 80, 80),
