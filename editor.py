@@ -2355,6 +2355,8 @@ Engineered with DeepSeek V3.2
             # Get duration from the loaded player
             self.original_audio_duration = self.audio_player.duration
             self.audio_file_path = audio_path
+            # Load waveform for visual display
+            self._load_waveform_audio(audio_path)
             self.playback_speed = 1.0
             self.speed_knob.value = 1.0
             self.speed_knob.update()
