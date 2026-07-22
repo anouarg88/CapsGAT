@@ -321,7 +321,7 @@ class SRTEditor(QMainWindow):
         self.mark_unsaved_changes()
         
     def init_ui(self):
-        self.setWindowTitle("CapsQual 1.5.4 - Subtitle-to-Transcript Workstation")
+        self.setWindowTitle("CapsQual 1.6.0 - Subtitle-to-Transcript Workstation")
         # Get the screen geometry (available space, excluding taskbars/docks)
         screen = QApplication.primaryScreen()
         screen_geom = screen.availableGeometry()
@@ -1959,7 +1959,7 @@ Help:
     def show_about(self):
         """Show about dialog"""
         about_text = """
-<b style="font-size: 16px;">CapsQual 1.5.4</b><br><br>
+<b style="font-size: 16px;">CapsQual 1.6.0</b><br><br>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -1984,7 +1984,7 @@ Engineered with DeepSeek V3.2
     def mark_unsaved_changes(self):
         """Mark that there are unsaved changes"""
         self.has_unsaved_changes = True
-        base_title = "CapsQual 1.5.4 - Subtitle-to-Transcript Workstation"
+        base_title = "CapsQual 1.6.0 - Subtitle-to-Transcript Workstation"
         if self.project_name:
             self.setWindowTitle(f"{base_title} - {self.project_name} *")
         else:
@@ -1993,7 +1993,7 @@ Engineered with DeepSeek V3.2
     def clear_unsaved_changes(self):
         """Clear unsaved changes marker"""
         self.has_unsaved_changes = False
-        base_title = "CapsQual 1.5.4 - Subtitle-to-Transcript Workstation"
+        base_title = "CapsQual 1.6.0 - Subtitle-to-Transcript Workstation"
         if self.project_name:
             self.setWindowTitle(f"{base_title} - {self.project_name}")
         else:
