@@ -1698,42 +1698,37 @@ class SRTEditor(QMainWindow):
         if hasattr(self, 'waveform_viewer'):
             self.waveform_viewer.load_audio(audio_path)
 
-    def _on_waveform_end_changed(self, seconds: float):
-        """Update current block's end time from waveform drag."""
-        if not self.srt_blocks or not (0 <= self.current_block_index < len(self.srt_blocks)):
-            return
-        self.push_undo()
-        block = self.srt_blocks[self.current_block_index]
-        block['end_time'] = self._seconds_to_srt(seconds)
-        self.waveform_viewer.set_segment(self.waveform_viewer.start_time, seconds)
-        self.update_display()
-        self.mark_unsaved_changes()
-
     def auto_sync_with_audio(self, current_time):
+        """Auto-sync transcript with audio position"""
+        if not self.srt_blocks or not self.file_has_timestamps:
+            return
+
+        # Find block containing current time
+        current_time_ms = current_time * 1000  # Convert to milliseconds
         buffer_ms = 100  # Small buffer for better sync
-        
+
         # First check current block
         if 0 <= self.current_block_index < len(self.srt_blocks):
             block = self.srt_blocks[self.current_block_index]
             if block.get('start_time') and block.get('end_time'):
                 start_ms = time_to_ms(block['start_time'])
                 end_ms = time_to_ms(block['end_time'])
-                
+
                 if start_ms - buffer_ms <= current_time_ms <= end_ms + buffer_ms:
                     return  # Still in current block
-        
+
         # Search for matching block
         for i, block in enumerate(self.srt_blocks):
             if block.get('start_time') and block.get('end_time'):
                 start_ms = time_to_ms(block['start_time'])
                 end_ms = time_to_ms(block['end_time'])
-                
+
                 if start_ms - buffer_ms <= current_time_ms <= end_ms + buffer_ms:
                     if i != self.current_block_index:
                         self.current_block_index = i
                         self.update_display()
                     break
-    
+
     def time_to_ms(self, time_str):
         """Convert time string to milliseconds"""
         if not time_str:
