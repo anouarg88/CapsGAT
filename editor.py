@@ -54,7 +54,7 @@ from dialogs import (
     UnassignedSegmentsDialog, ExportPreviewDialog, SearchDialog, JumpToTimeDialog,
     EnhancedPlacementDialog, PlacementDialog, InsertPausesDialog
 )
-from widgets import SpeedKnob
+from widgets import SpeedKnob, WaveformViewer
 
 class CollapsibleSplitterHandle(QSplitterHandle):
     def __init__(self, orientation, parent, right_widget):
@@ -388,6 +388,17 @@ class SRTEditor(QMainWindow):
         left_panel.addWidget(self.text_display)
         self.highlighter = FormattingMarkerHighlighter(self.text_display.document())
         
+        # ── Waveform viewer ──────────────────────────────────────
+        waveform_label = QLabel("Waveform:")
+        waveform_label.setFont(QFont("Arial", 10, QFont.Bold))
+        left_panel.addWidget(waveform_label)
+
+        self.waveform_viewer = WaveformViewer()
+        self.waveform_viewer.segment_start_changed.connect(self._on_waveform_start_changed)
+        self.waveform_viewer.segment_end_changed.connect(self._on_waveform_end_changed)
+        self.waveform_viewer.seek_requested.connect(self._on_waveform_seek)
+        left_panel.addWidget(self.waveform_viewer)
+
         # Navigation buttons
         nav_layout = QHBoxLayout()
         
@@ -1462,7 +1473,12 @@ class SRTEditor(QMainWindow):
         # Load the file
         if self.audio_player.load_file(file_path):
             self.audio_file_path = file_path
+            # Load waveform data for the viewer
+            self._load_waveform_audio(file_path)
             audio_name = Path(file_path).name
+
+            # Update status label
+            # Update status label            audio_name = Path(file_path).name
             
             # Update status label
             if vlc_ok:
@@ -1613,17 +1629,87 @@ class SRTEditor(QMainWindow):
         logger.info("Playback ended")
     
     def on_position_changed(self, position):
-        """Handle position change"""
-        # This is handled in update_ui
-        pass
-    
-    def auto_sync_with_audio(self, current_time):
-        """Auto-sync transcript with audio position"""
-        if not self.srt_blocks or not self.file_has_timestamps:
+        """Handle position change — updates waveform playback line."""
+        if hasattr(self, 'waveform_viewer'):
+            self.waveform_viewer.set_playback_position(position)
+
+    # ── Waveform viewer callbacks ──────────────────────────────
+
+    def _on_waveform_start_changed(self, seconds: float):
+        """Update current block's start time from waveform drag."""
+        if not self.srt_blocks or not (0 <= self.current_block_index < len(self.srt_blocks)):
             return
-        
-        # Find block containing current time
-        current_time_ms = current_time * 1000  # Convert to milliseconds
+        self.push_undo()
+        block = self.srt_blocks[self.current_block_index]
+        block['start_time'] = self._seconds_to_srt(seconds)
+        self.waveform_viewer.set_segment(seconds, self.waveform_viewer.end_time)
+        self.update_display()
+        self.mark_unsaved_changes()
+
+    def _on_waveform_end_changed(self, seconds: float):
+        """Update current block's end time from waveform drag."""
+        if not self.srt_blocks or not (0 <= self.current_block_index < len(self.srt_blocks)):
+            return
+        self.push_undo()
+        block = self.srt_blocks[self.current_block_index]
+        block['end_time'] = self._seconds_to_srt(seconds)
+        self.waveform_viewer.set_segment(self.waveform_viewer.start_time, seconds)
+        self.update_display()
+        self.mark_unsaved_changes()
+
+    def _on_waveform_seek(self, seconds: float):
+        """Seek audio to the clicked position in the waveform."""
+        if self.audio_player:
+            self.audio_player.seek(seconds)
+
+    def _sync_waveform_with_current_block(self):
+        """Sync waveform segment markers with the currently selected block."""
+        if not hasattr(self, 'waveform_viewer'):
+            return
+        if not self.srt_blocks or not (0 <= self.current_block_index < len(self.srt_blocks)):
+            self.waveform_viewer.clear_segment()
+            return
+
+        block = self.srt_blocks[self.current_block_index]
+        start = block.get('start_time')
+        end = block.get('end_time')
+
+        from generators import time_to_seconds
+        start_sec = time_to_seconds(start) if start else None
+        end_sec = time_to_seconds(end) if end else None
+
+        if start_sec is not None or end_sec is not None:
+            self.waveform_viewer.set_segment(start_sec, end_sec)
+        else:
+            self.waveform_viewer.clear_segment()
+
+    @staticmethod
+    def _seconds_to_srt(seconds: float) -> str:
+        """Convert seconds (float) to SRT time format HH:MM:SS,mmm."""
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        secs = seconds % 60
+        whole_secs = int(secs)
+        ms = int((secs - whole_secs) * 1000)
+        return f"{hours:02d}:{minutes:02d}:{whole_secs:02d},{ms:03d}"
+
+    def _load_waveform_audio(self, audio_path: str):
+        """Load audio data into the waveform viewer."""
+        if hasattr(self, 'waveform_viewer'):
+            self.waveform_viewer.load_audio(audio_path)
+
+    def _on_waveform_end_changed(self, seconds: float):
+        """Update current block's end time from waveform drag."""
+        if not self.srt_blocks or not (0 <= self.current_block_index < len(self.srt_blocks)):
+            return
+        self.push_undo()
+        block = self.srt_blocks[self.current_block_index]
+        block['end_time'] = self._seconds_to_srt(seconds)
+        self.waveform_viewer.set_segment(self.waveform_viewer.start_time, seconds)
+        self.update_display()
+        self.mark_unsaved_changes()
+
+    def auto_sync_with_audio(self, current_time):
         buffer_ms = 100  # Small buffer for better sync
         
         # First check current block
@@ -2421,6 +2507,9 @@ Engineered with DeepSeek V3.2
         
         # Update label with counter
         self.unassigned_blocks_label.setText(f"Unassigned Segments ({unassigned_count}/{total_blocks}):")
+
+        # Sync waveform viewer with the current block
+        self._sync_waveform_with_current_block()
 
     def _display_block_paragraph(self, block_idx, start_idx):
         """Return the QTextDocument paragraph index for a segment in transcript display."""
