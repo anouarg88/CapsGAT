@@ -39,6 +39,10 @@ class WaveformViewer(QWidget):
     HANDLE_SNAP_DIST = 10     # pixels — how close to grab a handle
     MIN_HEIGHT = 60
     PREFERRED_HEIGHT = 120
+    # Zoom buttons
+    ZOOM_BTN_W = 14           # width of +/- buttons
+    ZOOM_BTN_H = 10           # height of each button
+    ZOOM_BTN_GAP = 2
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -50,9 +54,16 @@ class WaveformViewer(QWidget):
         self.sample_rate = 44100
         self.duration = 0.0
 
-        # Pre-computed waveform peaks — list of (min, max) per pixel column
+        # Pre-computed waveform peaks
         self.peaks = None
         self._cached_width = 0
+
+        # Visible viewport (seconds)
+        self.view_start = 0.0
+        self.view_end = 0.0
+
+        # Default zoom: 15 seconds visible when a segment is first selected
+        self._default_zoom = 15.0
 
         # Segment boundaries (seconds, or None)
         self.start_time = None
@@ -63,7 +74,7 @@ class WaveformViewer(QWidget):
 
         # Drag state
         self._dragging = None        # 'start' | 'end' | None
-        self._drag_offset = 0.0      # time offset from mouse pos to handle
+        self._drag_offset = 0.0
 
     # ── public API ──────────────────────────────────────────────
 
@@ -91,7 +102,9 @@ class WaveformViewer(QWidget):
         self.audio_data = np.asarray(data, dtype=np.float32)
         self.sample_rate = int(sample_rate)
         self.duration = len(self.audio_data) / self.sample_rate
-        self._cached_width = 0   # force re-compute on next paint
+        self.view_start = 0.0
+        self.view_end = self.duration
+        self._cached_width = 0
         self.peaks = None
         self.update()
 
@@ -100,33 +113,92 @@ class WaveformViewer(QWidget):
         self.audio_data = None
         self.peaks = None
         self.duration = 0.0
+        self.view_start = 0.0
+        self.view_end = 0.0
         self.start_time = None
         self.end_time = None
         self.playback_position = None
         self.update()
 
-    def set_segment(self, start_seconds: float | None,
-                    end_seconds: float | None):
-        """Set the visible segment boundaries."""
+    def set_segment(self, start_seconds, end_seconds):
+        """Set segment boundaries.
+
+        If the view is currently showing the full file, zooms to
+        ``_default_zoom`` seconds centered on the segment. Otherwise
+        keeps the current zoom level unchanged.
+        """
         self.start_time = start_seconds
         self.end_time = end_seconds
+
+        if start_seconds is not None and end_seconds is not None and self.duration > 0:
+            is_full = (abs(self.view_start) < 0.001
+                       and abs(self.view_end - self.duration) < 0.001)
+            if is_full:
+                center = (start_seconds + end_seconds) / 2.0
+                half = self._default_zoom / 2.0
+                self.view_start = max(0.0, center - half)
+                self.view_end = min(self.duration, center + half)
+                if self.view_end - self.view_start < self._default_zoom * 0.9:
+                    self.view_start = max(0.0, self.view_end - self._default_zoom)
+                self._cached_width = 0
+        else:
+            self.view_start = 0.0
+            self.view_end = self.duration
+            self._cached_width = 0
+
         self.update()
 
     def clear_segment(self):
-        """Remove segment markers."""
+        """Remove segment markers and reset view to full duration."""
         self.start_time = None
         self.end_time = None
-        self.update()
+        if self.duration > 0:
+            self.view_start = 0.0
+            self.view_end = self.duration
+            self._cached_width = 0
+            self.update()
 
-    def set_playback_position(self, seconds: float | None):
+    def set_playback_position(self, seconds):
         """Update the playback position line."""
         self.playback_position = seconds
         self.update()
 
+    def zoom_in(self):
+        """Zoom in one step, centered on the middle of the view."""
+        self._zoom_at(0.5)
+
+    def zoom_out(self):
+        """Zoom out one step, centered on the middle of the view."""
+        self._zoom_at(-0.5)
+
+    def _zoom_at(self, direction):
+        """Zoom in (direction > 0) or out (direction < 0)."""
+        if self.duration <= 0:
+            return
+        vdur = self._view_duration
+        factor = 1.3 if direction > 0 else 1.0 / 1.3
+        new_vdur = max(0.05, min(self.duration, vdur * factor))
+        center = (self.view_start + self.view_end) / 2.0
+        new_start = max(0.0, center - new_vdur / 2.0)
+        new_end = min(self.duration, new_start + new_vdur)
+        if abs(new_end - new_start - new_vdur) > 0.01:
+            new_start = max(0.0, new_end - new_vdur)
+        self.view_start = new_start
+        self.view_end = new_end
+        self._cached_width = 0
+        self.update()
+
+    # ── viewport helpers ────────────────────────────────────────
+
+    @property
+    def _view_duration(self) -> float:
+        if self.duration <= 0:
+            return 0.0
+        return max(0.001, self.view_end - self.view_start)
+
     # ── peak computation ───────────────────────────────────────
 
     def _compute_peaks(self, width: int):
-        """Pre-compute (min, max) peak pairs for each pixel column."""
         if self.audio_data is None or width <= 0:
             self.peaks = None
             self._cached_width = width
@@ -134,65 +206,81 @@ class WaveformViewer(QWidget):
 
         import numpy as np
         data = self.audio_data
+        sr = float(self.sample_rate)
         n = len(data)
+
+        vstart = max(0.0, self.view_start)
+        vend = min(self.duration, self.view_end)
+        start_sample = int(vstart * sr)
+        end_sample = int(vend * sr)
+        if end_sample > n:
+            end_sample = n
+        span = max(1, end_sample - start_sample)
+
         self.peaks = np.zeros((width, 2), dtype=np.float32)
-
         for col in range(width):
-            start_idx = int(col * n / width)
-            end_idx = int((col + 1) * n / width)
-            if end_idx > start_idx:
-                chunk = data[start_idx:end_idx]
-                self.peaks[col, 0] = chunk.min()
-                self.peaks[col, 1] = chunk.max()
+            s = start_sample + int(col * span / width)
+            e = start_sample + int((col + 1) * span / width)
+            if e > s and e <= n:
+                chunk = data[s:e]
+                self.peaks[col, 0] = float(chunk.min())
+                self.peaks[col, 1] = float(chunk.max())
             else:
-                self.peaks[col, 0] = 0
-                self.peaks[col, 1] = 0
-
+                self.peaks[col, 0] = 0.0
+                self.peaks[col, 1] = 0.0
         self._cached_width = width
 
     # ── coordinate helpers ─────────────────────────────────────
 
     def _time_to_x(self, seconds: float) -> int:
-        """Convert a time in seconds to a pixel x-coordinate."""
         if self.duration <= 0:
             return 0
         margin = self.HANDLE_WIDTH // 2
         w = self.width() - 2 * margin
         if w <= 0:
             return margin
-        return int(margin + seconds / self.duration * w)
+        vdur = self._view_duration
+        t = seconds - self.view_start
+        t = max(0.0, min(vdur, t))
+        return int(margin + t / vdur * w)
 
     def _x_to_time(self, x: int) -> float:
-        """Convert a pixel x-coordinate to a time in seconds."""
         if self.duration <= 0:
             return 0
         margin = self.HANDLE_WIDTH // 2
         w = self.width() - 2 * margin
         if w <= 0:
-            return 0
+            return self.view_start
         clamped = max(margin, min(self.width() - margin, x))
-        return (clamped - margin) / w * self.duration
+        f = (clamped - margin) / w
+        return self.view_start + f * self._view_duration
+
+    def _zoom_btn_rect(self) -> QRect:
+        """Bounding rect for the zoom +/- buttons in the top-right."""
+        bw = self.ZOOM_BTN_W
+        bh = self.ZOOM_BTN_H * 2 + self.ZOOM_BTN_GAP
+        margin = 4
+        x = self.width() - bw - margin
+        y = margin
+        return QRect(x, y, bw, bh)
 
     # ── painting ───────────────────────────────────────────────
 
     def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing, False)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, False)
 
         w = self.width()
         h = self.height()
-
-        # Background
-        painter.fillRect(0, 0, w, h, self.BG_COLOR)
+        p.fillRect(0, 0, w, h, self.BG_COLOR)
 
         if self.audio_data is None:
-            painter.setPen(self.TIME_TEXT_COLOR)
-            painter.drawText(self.rect(), Qt.AlignCenter, "No audio loaded")
+            p.setPen(self.TIME_TEXT_COLOR)
+            p.drawText(self.rect(), Qt.AlignCenter, "No audio loaded")
             return
 
-        if self._cached_width != w:
+        if self._cached_width != w or self.peaks is None:
             self._compute_peaks(w)
-
         if self.peaks is None:
             return
 
@@ -201,105 +289,95 @@ class WaveformViewer(QWidget):
         if draw_w <= 0:
             return
 
-        # ── Determine selected-region pixel range ────────────
-        sel_start_x = None
-        sel_end_x = None
-        if self.start_time is not None and self.duration > 0:
-            sel_start_x = self._time_to_x(self.start_time)
-        if self.end_time is not None and self.duration > 0:
-            sel_end_x = self._time_to_x(self.end_time)
+        # Selected-region pixel range
+        sx_start = self._time_to_x(self.start_time) if self.start_time is not None else None
+        sx_end = self._time_to_x(self.end_time) if self.end_time is not None else None
 
         centre_y = h // 2
         half_h = max(4, (h - 4) // 2)
 
-        # ── Draw waveform ────────────────────────────────────
-        # We draw in two passes: first the background (non-selected)
-        # part, then the selected part on top with brighter colours.
-
+        # Waveform
         for col in range(draw_w):
             x = margin + col
             pmin, pmax = self.peaks[col]
-            # Clamp to -1..1
             pmin = max(-1.0, min(1.0, pmin))
             pmax = max(-1.0, min(1.0, pmax))
-
             y_top = int(centre_y - pmax * half_h)
             y_bot = int(centre_y - pmin * half_h)
 
-            if sel_start_x is not None and sel_end_x is not None:
-                if sel_start_x <= x <= sel_end_x:
-                    painter.setPen(self.WAVEFORM_SELECTED)
-                else:
-                    painter.setPen(self.WAVEFORM_BG)
+            if sx_start is not None and sx_end is not None and sx_start <= x <= sx_end:
+                p.setPen(self.WAVEFORM_SELECTED)
             else:
-                painter.setPen(self.WAVEFORM_BG)
+                p.setPen(self.WAVEFORM_BG)
 
             if y_bot > y_top:
-                painter.drawLine(x, y_top, x, y_bot)
+                p.drawLine(x, y_top, x, y_bot)
 
-        # ── Draw playback position ────────────────────────────
+        # Playback position
         if self.playback_position is not None and self.duration > 0:
             px = self._time_to_x(self.playback_position)
-            painter.setPen(QPen(self.PLAYHEAD_COLOR, 1))
-            painter.drawLine(px, 2, px, h - 2)
+            p.setPen(QPen(self.PLAYHEAD_COLOR, 1))
+            p.drawLine(px, 2, px, h - 2)
 
-        # ── Draw segment handles ──────────────────────────────
+        # Segment handles
         hw = self.HANDLE_WIDTH
-        for which, time_val in [('start', self.start_time),
-                                 ('end', self.end_time)]:
-            if time_val is None or self.duration <= 0:
+        for which, tval in [('start', self.start_time), ('end', self.end_time)]:
+            if tval is None:
                 continue
-            hx = self._time_to_x(time_val)
-            # Handle triangle
-            painter.setPen(QPen(self.HANDLE_COLOR, 2))
-            painter.setBrush(self.HANDLE_FILL)
-            if which == 'start':
-                points = [QPoint(hx, 0), QPoint(hx + hw, 0),
-                          QPoint(hx, h + 1), QPoint(hx + hw, h + 1)]
-            else:
-                points = [QPoint(hx - hw, 0), QPoint(hx, 0),
-                          QPoint(hx - hw, h + 1), QPoint(hx, h + 1)]
-            # Draw as two triangles forming a trapezoid
+            hx = self._time_to_x(tval)
+            p.setPen(QPen(self.HANDLE_COLOR, 2))
+            p.setBrush(self.HANDLE_FILL)
             poly = [
                 QPoint(hx, 0),
                 QPoint(hx + (hw if which == 'start' else -hw), 0),
                 QPoint(hx + (hw if which == 'start' else -hw), h),
                 QPoint(hx, h)
-            ] if which == 'start' else [
-                QPoint(hx, 0),
-                QPoint(hx - hw, 0),
-                QPoint(hx - hw, h),
-                QPoint(hx, h)
             ]
-            painter.drawPolygon(poly)
+            p.drawPolygon(poly)
+            p.setPen(QPen(self.HANDLE_COLOR, 1))
+            p.drawLine(hx, 0, hx, h)
 
-            # Vertical line at handle
-            painter.setPen(QPen(self.HANDLE_COLOR, 1))
-            painter.drawLine(hx, 0, hx, h)
-
-        # ── Time labels ───────────────────────────────────────
-        painter.setPen(self.TIME_TEXT_COLOR)
-        font = painter.font()
+        # Time labels
+        p.setPen(self.TIME_TEXT_COLOR)
+        font = p.font()
         font.setPointSize(8)
-        painter.setFont(font)
+        p.setFont(font)
 
-        if self.duration > 0:
-            # Current segment times if available
-            if self.start_time is not None:
-                label = self._format_time(self.start_time)
-                lx = self._time_to_x(self.start_time)
-                tr = painter.fontMetrics().boundingRect(label)
-                lx = max(2, min(lx - tr.width() // 2,
-                                self.width() - tr.width() - 2))
-                painter.drawText(lx, h - 3, label)
+        if self.start_time is not None:
+            lbl = self._format_time(self.start_time)
+            lx = self._time_to_x(self.start_time)
+            tr = p.fontMetrics().boundingRect(lbl)
+            lx = max(2, min(lx - tr.width() // 2, w - tr.width() - 2))
+            p.drawText(lx, h - 3, lbl)
 
-            if self.end_time is not None:
-                label = self._format_time(self.end_time)
-                lx = self._time_to_x(self.end_time)
-                tr = painter.fontMetrics().boundingRect(label)
-                lx = max(2, min(lx - tr.width() // 2,
-                                self.width() - tr.width() - 2))
-                painter.drawText(lx, 12, label)
+        if self.end_time is not None:
+            lbl = self._format_time(self.end_time)
+            lx = self._time_to_x(self.end_time)
+            tr = p.fontMetrics().boundingRect(lbl)
+            lx = max(2, min(lx - tr.width() // 2, w - tr.width() - 2))
+            p.drawText(lx, 12, lbl)
+
+        # ── Zoom indicator + buttons (top-right) ────────────────
+        vdur = self._view_duration
+        zoom_text = f"{vdur:.1f}s"
+        tr = p.fontMetrics().boundingRect(zoom_text)
+        zx = w - tr.width() - self.ZOOM_BTN_W - 10
+        zy = tr.height() + 2
+        p.drawText(zx, zy, zoom_text)
+
+        # Draw zoom +/- buttons to the right of the text
+        btn_x = zx + tr.width() + 4
+        btn_w = self.ZOOM_BTN_W
+        btn_h = self.ZOOM_BTN_H
+        gap = self.ZOOM_BTN_GAP
+
+        for i, label in enumerate(['+', '−']):
+            by = zy - btn_h + 1 + i * (btn_h + gap)
+            p.setPen(QPen(self.HANDLE_COLOR, 1))
+            p.setBrush(QColor(60, 60, 65))
+            p.drawRect(btn_x, by, btn_w, btn_h)
+            p.setPen(self.TIME_TEXT_COLOR)
+            p.drawText(QRect(btn_x, by, btn_w, btn_h), Qt.AlignCenter, label)
 
     # ── mouse interaction ─────────────────────────────────────
 
@@ -307,11 +385,22 @@ class WaveformViewer(QWidget):
         if event.button() != Qt.LeftButton or self.duration <= 0:
             return
 
-        x = event.x()
+        x, y = event.x(), event.y()
 
-        # Check if we're near a handle
-        near_start = False
-        near_end = False
+        # Check zoom button clicks
+        btn_rect = self._zoom_btn_rect()
+        if btn_rect.contains(x, y):
+            # Determine which button: top is +, bottom is −
+            mid_y = btn_rect.y() + self.ZOOM_BTN_H + self.ZOOM_BTN_GAP // 2
+            if y < mid_y:
+                self.zoom_in()
+            else:
+                self.zoom_out()
+            event.accept()
+            return
+
+        # Check handle proximity
+        near_start = near_end = False
         if self.start_time is not None:
             sx = self._time_to_x(self.start_time)
             near_start = abs(x - sx) < self.HANDLE_SNAP_DIST
@@ -320,13 +409,12 @@ class WaveformViewer(QWidget):
             near_end = abs(x - ex) < self.HANDLE_SNAP_DIST
 
         if near_start and near_end:
-            # Pick the closer one
             sx = self._time_to_x(self.start_time)
             ex = self._time_to_x(self.end_time)
-            if abs(x - sx) < abs(x - ex):
-                near_end = False
-            else:
+            if abs(x - sx) >= abs(x - ex):
                 near_start = False
+            else:
+                near_end = False
 
         if near_start:
             self._dragging = 'start'
@@ -335,9 +423,7 @@ class WaveformViewer(QWidget):
             self._dragging = 'end'
             self._drag_offset = self._x_to_time(x) - self.end_time
         else:
-            # Click-to-seek
-            sec = self._x_to_time(x)
-            self.seek_requested.emit(sec)
+            self.seek_requested.emit(self._x_to_time(x))
 
         event.accept()
 
@@ -346,16 +432,14 @@ class WaveformViewer(QWidget):
             return
 
         t = self._x_to_time(event.x()) - self._drag_offset
-        t = max(0.0, min(self.duration, t))
+        t = max(self.view_start, min(self.view_end, t))
 
         if self._dragging == 'start':
-            # Don't let start go past end
             if self.end_time is not None:
                 t = min(t, self.end_time - 0.001)
             self.start_time = t
             self.segment_start_changed.emit(t)
         elif self._dragging == 'end':
-            # Don't let end go before start
             if self.start_time is not None:
                 t = max(t, self.start_time + 0.001)
             self.end_time = t
@@ -370,38 +454,36 @@ class WaveformViewer(QWidget):
             event.accept()
 
     def wheelEvent(self, event):
-        """Scroll wheel adjusts segment boundaries (with Shift for fine)."""
+        """Scroll wheel: near handles → adjust boundary; elsewhere → zoom."""
         if self.duration <= 0:
             return
-        delta = event.angleDelta().y()
-        step = 0.5 if not (event.modifiers() & Qt.ShiftModifier) else 0.1
 
-        # Determine which boundary to adjust based on cursor proximity
+        delta = event.angleDelta().y()
+        x = event.x()
+
+        # Handle proximity
+        near_start = near_end = False
         if self.start_time is not None:
             sx = self._time_to_x(self.start_time)
-        else:
-            sx = -999
+            near_start = abs(x - sx) < self.HANDLE_SNAP_DIST
         if self.end_time is not None:
             ex = self._time_to_x(self.end_time)
-        else:
-            ex = 999
-
-        x = event.x()
-        near_start = abs(x - sx) < self.HANDLE_SNAP_DIST
-        near_end = abs(x - ex) < self.HANDLE_SNAP_DIST
-
-        direction = 1 if delta > 0 else -1
+            near_end = abs(x - ex) < self.HANDLE_SNAP_DIST
 
         if near_start and near_end:
-            # Pick closer one
-            if abs(x - sx) < abs(x - ex):
-                near_end = False
-            else:
+            sx = self._time_to_x(self.start_time)
+            ex = self._time_to_x(self.end_time)
+            if abs(x - sx) >= abs(x - ex):
                 near_start = False
+            else:
+                near_end = False
+
+        step = 0.5 if not (event.modifiers() & Qt.ShiftModifier) else 0.1
+        direction = 1 if delta > 0 else -1
 
         if near_start and self.start_time is not None:
             t = self.start_time + direction * step
-            t = max(0.0, min(self.duration, t))
+            t = max(self.view_start, min(self.view_end, t))
             if self.end_time is not None:
                 t = min(t, self.end_time - 0.001)
             self.start_time = t
@@ -409,25 +491,27 @@ class WaveformViewer(QWidget):
             self.update()
         elif near_end and self.end_time is not None:
             t = self.end_time + direction * step
-            t = max(0.0, min(self.duration, t))
+            t = max(self.view_start, min(self.view_end, t))
             if self.start_time is not None:
                 t = max(t, self.start_time + 0.001)
             self.end_time = t
             self.segment_end_changed.emit(t)
             self.update()
-
+        else:
+            self._zoom_at(direction)
+            # Only accept if zoom_btns wasn't just handled
         event.accept()
 
     # ── helpers ───────────────────────────────────────────────
 
     @staticmethod
     def _format_time(seconds: float) -> str:
-        """Format seconds as MM:SS.mmm."""
         m = int(seconds // 60)
         s = seconds % 60
         return f"{m}:{s:05.2f}"
 
     def sizeHint(self):
+        return QSize(400, self.PREFERRED_HEIGHT)
         return QSize(400, self.PREFERRED_HEIGHT)
 
 
@@ -444,10 +528,10 @@ class SpeedKnob(QWidget):
         self.last_mouse_pos = None
         self.setMinimumSize(30, 30)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        
+
     def sizeHint(self):
         return QSize(60, 60)
-    
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
@@ -455,7 +539,7 @@ class SpeedKnob(QWidget):
         center = QPoint(self.width() // 2, self.height() // 2)
         radius = min(self.width(), self.height()) // 2 - 5
         if radius < 5:
-            return  # too small to draw anything
+            return
 
         # Outer circle
         painter.setBrush(QColor(240, 240, 240))
@@ -465,7 +549,7 @@ class SpeedKnob(QWidget):
         # Value indicator
         angle = 142 + (self.value - self.min_value) / (self.max_value - self.min_value) * 270
         angle_rad = math.radians(angle)
-        indicator_length = radius - 2  # stay inside circle
+        indicator_length = radius - 2
         end_x = center.x() + indicator_length * math.cos(angle_rad)
         end_y = center.y() + indicator_length * math.sin(angle_rad)
 
@@ -489,28 +573,22 @@ class SpeedKnob(QWidget):
 
         value_label_x = center.x()
         value_label_y = center.y() + radius / 2
-
-        # Compute bounding rectangle of the text and centre it on the target point
         text_rect = painter.fontMetrics().boundingRect(value_text)
         text_rect.moveCenter(QPoint(int(value_label_x), int(value_label_y)))
         painter.drawText(text_rect, Qt.AlignCenter, value_text)
 
-      # Min/max labels (0.5 and 2.0)
+        # Min/max labels (0.5 and 2.0)
         font.setPointSize(max(6, radius // 5))
         painter.setFont(font)
         label_min = "0.5x"
         label_max = "2.0x"
-
-        # Get text bounding rectangles
         min_rect = painter.fontMetrics().boundingRect(label_min)
         max_rect = painter.fontMetrics().boundingRect(label_max)
 
-        # Position min label to the left of the circle
         min_x = center.x() - radius - min_rect.width() - 5
-        min_y = center.y() + radius // 1   # adjust vertical position as needed
+        min_y = center.y() + radius // 1
         painter.drawText(min_x, min_y, label_min)
 
-        # Position max label to the right of the circle
         max_x = center.x() + radius + 5
         max_y = center.y() + radius // 1
         painter.drawText(max_x, max_y, label_max)
