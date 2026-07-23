@@ -3,79 +3,10 @@
 [![Run CI tests](https://github.com/anouarg88/CapsQual/actions/workflows/tests.yml/badge.svg)](https://github.com/anouarg88/CapsQual/actions/workflows/tests.yml)
 
 
-CapsQual (formerly CapsGAT) is an open source cross-platform UI-tool for editing and reformatting subtitle files (.SRT, .JSON, .TSV, .TXT) into qualitative interview transcripts based on different conventions such as the minimal version of GAT2 ([Gesprächsanalytisches Transkriptionssystem 2](https://gat-to.uni-jena.de/)), TiQ (Talk in Qualitative Research) and those suggested by Kuckartz and Dresing & Pehl. It enables users to assign speakers to segments quickly using keyboard shortcuts. Audio files can be imported and synced to the transcript. This is meant to reduce window-switching and simplify the formatting process. Playback speed can be adjusted (requires VLC Player to be installed). CapsQual features essential transcript-editing functionality such as segment splitting and merging, customizable symbols, overlapping speech, pauses, comments and more.  
+CapsQual (formerly CapsGAT) is an open source cross-platform workstation for editing and reformatting subtitle files (.SRT, .JSON, .TSV, .TXT) into qualitative interview transcripts based on different conventions such as the minimal version of GAT2 ([Gesprächsanalytisches Transkriptionssystem 2](https://gat-to.uni-jena.de/)), TiQ (Talk in Qualitative Research) and those suggested by Kuckartz and Dresing & Pehl. The GUI enables users to assign speakers to segments quickly using keyboard shortcuts. Audio files can be imported and synced to the transcript. This is meant to reduce window-switching and simplify the formatting process. Playback speed can be adjusted (requires VLC Player to be installed). CapsQual features essential transcript-editing functionality such as segment splitting and merging, customizable symbols, overlapping speech, pauses, comments and more.  
 
 
 However, it is not meant as a replacement for dedicated manual transcription software (for full-fledged, professional transcription software, check out [EXMARaLDA](https://www.exmaralda.org)), nor as an all-in-one automated transcription worksuite (for AI-powered transcription with automatic diarization check out [noScribe](https://ai4culture.eu/resources/tools/172)), but as a complementary formatting tool to be used with transcription AI models such as Whisper AI or CapsWriter, aimed at those who wish to efficiently tidy up their automatically transcribed interview-data in a user-friendly, intuitive environment. Projects can be loaded or saved. Transcripts can be exported as .HTML, .DOCX, .TXT or .SRT files.
-
-# Quickstart
-
-This guide walks you through the basic workflow of CapsQual.  
-Click any image to view it in full size.
-
----
-
-## 1. Install CapsQual
-
-Download the latest version from the [Releases page](https://github.com/anouarg88/CapsQual/releases)
-
-For detailed setup instructions, see [Installation](#installation).
-
-Prepare your subtitle files.  
-If needed, check this tutorial on [how to install Whisper](https://www.qualitative-forschung.de/fqs-supplement/fotos/zoom/24-1-8-e_app1.pdf).
-
----
-
-## 2. Import Audio & Subtitles
-
-Import your files using the **Load Audio** button. If subtitle files are in the same folder, CapsQual will offer to import them automatically. Otherwise, they can be imported from the menu bar.
-
-<img src="https://github.com/user-attachments/assets/63114a9b-4a62-466c-a5dc-81ab742f9138" alt="import" />
-
----
-
-## 3. Assign Speakers
-
-- Use the number keys (1, 2, 3, …) or buttons in the top-right corner to assign speakers to the selected segments.
-- Add/remove speakers with the `+` / `−` buttons.
-- Rename speakers using the text fields  
-
-<img src="https://github.com/user-attachments/assets/550bac64-003a-44c5-994b-f36c1cdedb58" alt="assign" />
-
----
-
-## 4. Auto-Process Transcript
-
-Use **Modify transcript** to strip punctuation or convert everything to lowercase. CapsQual can also convert silent segments into pause symbols, if the subtitle files were created with ASR-software which supports _Voice Activity Detection_ (VAD), such as [CapsWriter-Offline](https://github.com/HaujetZhao/CapsWriter-Offline) or [WhisperX](https://github.com/m-bain/WhisperX).
-
-<img src="https://github.com/user-attachments/assets/8373c360-0428-4404-ad39-771d196a15c9" alt="modify" />
-
----
-
-## 5. Review & Annotate
-
-Review the transcript sequentially and split (`Space`), merge (`Del`) and edit (`E/F2`) segments where necessary. Edit timestamps (T) to adjust the start and end time of each segment if necessary. Use the **Symbols** button (`*`) to insert pauses, overlaps, comments and other transcription symbols. 
-
-<img src="https://github.com/user-attachments/assets/04d96b86-706b-4a58-acf0-4c1496b554da" alt="symbols" />
-
----
-
-## 6. Export
-
-Press the Export button or **Ctrl + Enter** to open the export dialog.
-
-You can:
-- Choose transcript conventions  
-- Adjust formatting  
-- Export as HTML, DOCX, TXT, or SRT  
-
-<img src="https://github.com/user-attachments/assets/0ada3395-1d61-4bdd-8586-9bd36234eb24" alt="export" />
-
----
-
-For more details, see the [CapsQual User Manual](https://github.com/anouarg88/CapsQual/wiki).
-
-CapsQual was developed using AI.
 
 # Installation
 
@@ -235,3 +166,105 @@ For Ubuntu versions < 22.04, run from source (see below).
 
 
 If you encounter difficulties installing CapsQual, feel free to [open an issue](https://github.com/anouarg88/CapsQual/issues).
+
+# Quickstart
+
+This guide walks you through the basic workflow of CapsQual.  
+Click any image to view it in full size.
+
+---
+
+## 1. Install CapsQual
+
+Download the latest version from the [Releases page](https://github.com/anouarg88/CapsQual/releases)
+
+For detailed setup instructions, see [Installation](#installation).
+
+Prepare your subtitle files.  
+If needed, check this tutorial on [how to install Whisper](https://www.qualitative-forschung.de/fqs-supplement/fotos/zoom/24-1-8-e_app1.pdf).
+
+---
+
+## 2. Import Audio & Subtitles
+
+Import your files using the **Load Audio** button. If subtitle files are in the same folder, CapsQual will offer to import them automatically. Otherwise, they can be imported from the menu bar.
+
+![Import Audio & Subtitles in CapsQual](https://github.com/user-attachments/assets/2a3030f0-ec5b-4a20-a1bd-3b65da2d92a4#gh-light-mode-only)
+![Import Audio & Subtitles in CapsQual](https://github.com/user-attachments/assets/9be8710f-a231-48d4-b328-07c57c889b92#gh-dark-mode-only)
+
+---
+
+## 3. Assign Speakers
+
+- Use the number keys (1, 2, 3, …) or buttons in the top-right corner to assign speakers to the selected segments.
+- Add/remove speakers with the `+` / `−` buttons.
+- Rename speakers using the text fields  
+
+![Assign Speakers in CapsQual](https://github.com/user-attachments/assets/4f83680b-0d01-42d3-8456-bfd304fd7b2f#gh-light-mode-only)
+![Assign Speakers in CapsQual](https://github.com/user-attachments/assets/98fb6702-4e72-4f11-b0e1-a217b81ac412#gh-dark-mode-only)
+
+---
+
+## 4. Auto-Process Transcript
+
+Use **Modify transcript** to strip punctuation or convert everything to lowercase. CapsQual can also convert silent segments into pause symbols, if the subtitle files were created with ASR-software which supports _Voice Activity Detection_ (VAD), such as [CapsWriter-Offline](https://github.com/HaujetZhao/CapsWriter-Offline) or [WhisperX](https://github.com/m-bain/WhisperX).
+
+![Auto-Process Transcript in CapsQual](https://github.com/user-attachments/assets/b41a29fc-90a6-42e1-bfa6-f0be2e182989#gh-light-mode-only)
+![Auto-Process Transcript in CapsQual](https://github.com/user-attachments/assets/fb9d77be-8afb-45b5-b741-7049d012c047#gh-dark-mode-only)
+
+---
+
+## 5. Review & Annotate
+
+Review the transcript sequentially and split (`Space`), merge (`Del`) and edit (`E/F2`) segments where necessary. Edit timestamps (T) to adjust the start and end time of each segment if necessary. Use the **Symbols** button (`*`) to insert pauses, overlaps, comments and other transcription symbols. 
+
+
+![Review & Annotate in CapsQual](https://github.com/user-attachments/assets/71ed0c77-61ac-49ab-9b66-cb01b96296d9#gh-light-mode-only)
+![Review & Annotate in CapsQual](https://github.com/user-attachments/assets/468d326a-cb9a-47f0-9815-159cb9c15608#gh-dark-mode-only)
+
+---
+
+## 6. Export
+
+Press the Export button or **Ctrl + Enter** to open the export dialog.
+
+You can:
+- Choose transcript conventions  
+- Adjust formatting  
+- Export as HTML, DOCX, TXT, or SRT  
+
+![Export in CapsQual](https://github.com/user-attachments/assets/be82ffac-7271-4417-b021-03a6f52ccc35#gh-light-mode-only)
+![Export in CapsQual](https://github.com/user-attachments/assets/655d2dcf-609c-4e1e-9cc0-584ec482e44f#gh-dark-mode-only)
+
+---
+
+For more details, see the [CapsQual User Manual](https://github.com/anouarg88/CapsQual/wiki).
+
+CapsQual was developed using AI.
+
+# CLI Usage
+
+CapsQual can also be used from the command line for headless conversion:
+
+```bash
+# Convert an SRT file to GAT2 transcript
+capsqual transcript.srt
+
+# Launch the GUI
+capsqual -g
+
+# TiQ format with auto-diarization (speaker names before colons)
+capsqual input.srt -f tiq --speaker="$:"
+
+# Export as HTML
+capsqual input.srt -o transcript.html
+
+# Customise layout
+capsqual input.srt -f dresing_pehl --blank-lines --concatenate-turns -w 80
+```
+
+**Supported input formats:** `.srt`, `.vtt`, `.txt`, `.tsv`, `.json`  
+**Output formats:** GAT2 (default), TiQ, Dresing & Pehl  
+**Export types:** `.txt` (default), `.html`, `.docx`
+
+For a full list of options, run `capsqual --help`.
