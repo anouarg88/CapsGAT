@@ -476,6 +476,39 @@ class AddCustomSymbolDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Add Custom Symbol")
         self.setGeometry(300, 300, 500, 250)
+
+        # Detect dark theme through parent chain
+        dark = False
+        try:
+            if parent and hasattr(parent, '_is_dark') and parent._is_dark():
+                dark = True
+            elif parent and hasattr(parent, 'parent'):
+                gp = parent.parent()
+                if gp and hasattr(gp, 'current_theme') and gp.current_theme == "dark":
+                    dark = True
+        except AttributeError:
+            pass
+
+        if dark:
+            self.setStyleSheet("""
+                QDialog {
+                    background-color: #2d2d2d;
+                }
+                QLabel {
+                    color: #cccccc;
+                }
+                QLineEdit {
+                    background-color: #3a3a3a;
+                    color: #cccccc;
+                    border: 1px solid #555;
+                }
+                QComboBox {
+                    background-color: #3a3a3a;
+                    color: #cccccc;
+                    border: 1px solid #555;
+                }
+            """)
+
         layout = QVBoxLayout(self)
 
         # Symbol type selector
@@ -648,6 +681,13 @@ class EnhancedSymbolDialog(QDialog):
         self.init_categories()
         self.init_ui()
 
+    def _is_dark(self):
+        """Detect if the parent editor is in dark theme."""
+        try:
+            return self.parent.current_theme == "dark"
+        except AttributeError:
+            return False
+
     def init_categories(self):
         # GAT2
         self.categories.append(SymbolCategory(
@@ -706,6 +746,16 @@ class EnhancedSymbolDialog(QDialog):
         self.setWindowTitle("Insert Symbol")
         self.setGeometry(300, 300, 650, 500)
 
+        if self._is_dark():
+            self.setStyleSheet("""
+                QDialog {
+                    background-color: #2d2d2d;
+                }
+                QLabel {
+                    color: #cccccc;
+                }
+            """)
+
         layout = QVBoxLayout(self)
 
         # Category tabs
@@ -716,33 +766,53 @@ class EnhancedSymbolDialog(QDialog):
             btn.setCheckable(True)
             btn.setChecked(i == 0)
             btn.setFocusPolicy(Qt.TabFocus)
-            btn.setStyleSheet("""
-                QPushButton {
-                    padding: 8px 15px;
-                    font-weight: bold;
-                    border: 2px solid #ccc;
-                    border-radius: 5px 5px 0 0;
-                    background-color: #f0f0f0;
-                }
-                QPushButton:checked {
-                    background-color: #4a90e2;
-                    color: white;
-                    border-bottom-color: #4a90e2;
-                }
-                QPushButton:hover:!checked {
-                    background-color: #e0e0e0;
-                }
-                QPushButton:focus {
-                    outline: 2px solid #ff6600;
-                }
-            """)
+            if self._is_dark():
+                btn.setStyleSheet("""
+                    QPushButton {
+                        padding: 8px 15px;
+                        font-weight: bold;
+                        border: 2px solid #555;
+                        border-radius: 5px 5px 0 0;
+                        background-color: #3a3a3a;
+                        color: #cccccc;
+                    }
+                    QPushButton:checked {
+                        background-color: #4a90e2;
+                        color: white;
+                        border-bottom-color: #4a90e2;
+                    }
+                    QPushButton:hover:!checked {
+                        background-color: #4a4a4a;
+                    }
+                """)
+            else:
+                btn.setStyleSheet("""
+                    QPushButton {
+                        padding: 8px 15px;
+                        font-weight: bold;
+                        border: 2px solid #ccc;
+                        border-radius: 5px 5px 0 0;
+                        background-color: #f0f0f0;
+                    }
+                    QPushButton:checked {
+                        background-color: #4a90e2;
+                        color: white;
+                        border-bottom-color: #4a90e2;
+                    }
+                    QPushButton:hover:!checked {
+                        background-color: #e0e0e0;
+                    }
+                """)
             btn.clicked.connect(lambda checked, idx=i: self.switch_category(idx))
             tab_layout.addWidget(btn)
             self.category_buttons.append(btn)
 
         tab_instruction = QLabel("<i>(Tab to switch)</i>")
         tab_instruction.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        tab_instruction.setStyleSheet("color: #555; font-size: 11px;")
+        if self._is_dark():
+            tab_instruction.setStyleSheet("color: #888; font-size: 11px;")
+        else:
+            tab_instruction.setStyleSheet("color: #555; font-size: 11px;")
         tab_layout.addWidget(tab_instruction)
         tab_layout.addSpacing(23)
         layout.addLayout(tab_layout)
@@ -801,18 +871,32 @@ class EnhancedSymbolDialog(QDialog):
         # Selected description label
         self.selected_label = QLabel("")
         self.selected_label.setAlignment(Qt.AlignCenter)
-        self.selected_label.setStyleSheet("""
-            QLabel {
-                background-color: #f0f0f0;
-                border: 1px solid #ccc;
-                border-radius: 4px;
-                padding: 6px;
-                font-size: 12px;
-                color: #333;
-                margin-top: 5px;
-                margin-bottom: 5px;
-            }
-        """)
+        if self._is_dark():
+            self.selected_label.setStyleSheet("""
+                QLabel {
+                    background-color: #3a3a3a;
+                    border: 1px solid #555;
+                    border-radius: 4px;
+                    padding: 6px;
+                    font-size: 12px;
+                    color: #cccccc;
+                    margin-top: 5px;
+                    margin-bottom: 5px;
+                }
+            """)
+        else:
+            self.selected_label.setStyleSheet("""
+                QLabel {
+                    background-color: #f0f0f0;
+                    border: 1px solid #ccc;
+                    border-radius: 4px;
+                    padding: 6px;
+                    font-size: 12px;
+                    color: #333;
+                    margin-top: 5px;
+                    margin-bottom: 5px;
+                }
+            """)
         layout.addWidget(self.selected_label)
 
         # OK / Cancel buttons
@@ -889,29 +973,57 @@ class EnhancedSymbolDialog(QDialog):
             label.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
 
             if i == self.selected_option:
-                label.setStyleSheet("""
-                    QLabel {
-                        border: 3px solid #ff6600;
-                        border-radius: 8px;
-                        padding: 15px;
-                        background-color: #fff0cc;
-                        font-size: 14px;
-                    }
-                """)
+                if self._is_dark():
+                    label.setStyleSheet("""
+                        QLabel {
+                            border: 3px solid #ff6600;
+                            border-radius: 8px;
+                            padding: 15px;
+                            background-color: #554433;
+                            font-size: 14px;
+                            color: #ffffff;
+                        }
+                    """)
+                else:
+                    label.setStyleSheet("""
+                        QLabel {
+                            border: 3px solid #ff6600;
+                            border-radius: 8px;
+                            padding: 15px;
+                            background-color: #fff0cc;
+                            font-size: 14px;
+                        }
+                    """)
             else:
-                label.setStyleSheet("""
-                    QLabel {
-                        border: 2px solid #ccc;
-                        border-radius: 8px;
-                        padding: 15px;
-                        background-color: #f9f9f9;
-                        font-size: 14px;
-                    }
-                    QLabel:hover {
-                        background-color: #e0e0e0;
-                        border-color: #999;
-                    }
-                """)
+                if self._is_dark():
+                    label.setStyleSheet("""
+                        QLabel {
+                            border: 2px solid #555;
+                            border-radius: 8px;
+                            padding: 15px;
+                            background-color: #3a3a3a;
+                            font-size: 14px;
+                            color: #cccccc;
+                        }
+                        QLabel:hover {
+                            background-color: #4a4a4a;
+                            border-color: #888;
+                        }
+                    """)
+                else:
+                    label.setStyleSheet("""
+                        QLabel {
+                            border: 2px solid #ccc;
+                            border-radius: 8px;
+                            padding: 15px;
+                            background-color: #f9f9f9;
+                            font-size: 14px;
+                        }
+                        QLabel:hover {
+                            background-color: #e0e0e0;
+                            border-color: #999;
+                        }
+                    """)
 
             label.mousePressEvent = lambda event, idx=i: self.symbol_clicked(idx)
 
