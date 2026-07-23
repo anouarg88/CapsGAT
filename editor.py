@@ -633,7 +633,7 @@ class SRTEditor(QMainWindow):
 
         self.speed_normal_btn = QPushButton("Reset")
         self.speed_normal_btn.clicked.connect(lambda: self.speed_knob.set_value_direct(1.0))
-        self.speed_normal_btn.setFixedWidth(50)
+        self.speed_normal_btn.setFixedWidth(60)
 
         self.speed_faster_btn = QPushButton("+")
         self.speed_faster_btn.clicked.connect(lambda: self.speed_knob.set_value_direct(min(2.0, self.playback_speed + 0.1)))
