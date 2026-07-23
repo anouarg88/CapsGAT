@@ -1504,6 +1504,7 @@ class SRTEditor(QMainWindow):
         else:
             QMessageBox.critical(self, "Error", f"Failed to load audio file (Install VLC)")
             self.audio_player = None
+            self._clear_waveform_audio()
             self.audio_info_label.setText("No audio loaded")
     
     def toggle_playback(self):
@@ -1699,6 +1700,11 @@ class SRTEditor(QMainWindow):
         if hasattr(self, 'waveform_viewer'):
             self.waveform_viewer.load_audio(audio_path)
 
+    def _clear_waveform_audio(self):
+        """Clear audio data from the waveform viewer (shows 'No audio loaded')."""
+        if hasattr(self, 'waveform_viewer'):
+            self.waveform_viewer.clear_audio()
+
     def auto_sync_with_audio(self, current_time):
         """Auto-sync transcript with audio position"""
         if not self.srt_blocks or not self.file_has_timestamps:
@@ -1795,6 +1801,7 @@ class SRTEditor(QMainWindow):
                 self.audio_player = None
             
             self.audio_file_path = None
+            self._clear_waveform_audio()
             self.audio_info_label.setText("No audio loaded")
             self.btn_play.setEnabled(False)
             self.btn_rewind.setEnabled(False)
@@ -2378,7 +2385,7 @@ Engineered with DeepSeek V3.2
             logger.error(f"Failed to load audio for project: {e}")
             QMessageBox.critical(self, "Error", f"Failed to load audio: {str(e)}")
             self.audio_player = None
-            
+            self._clear_waveform_audio()
     def apply_viewer_theme(self, theme):
         self.current_theme = theme
         if theme == "dark":
