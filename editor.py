@@ -2231,6 +2231,26 @@ Engineered with DeepSeek V3.2
             speaker_name_edit.editingFinished.connect(lambda checked=False, idx=i: self.rename_speaker(idx))
             speaker_name_edit.setFixedWidth(120)
             speaker_name_edit.setMinimumHeight(18)
+            if self.current_theme == "dark":
+                speaker_name_edit.setStyleSheet("""
+                    QLineEdit {
+                        background-color: #3a3a3a;
+                        color: #ffffff;
+                        border: 2px solid #555;
+                        border-radius: 3px;
+                        padding: 2px;
+                    }
+                """)
+            else:
+                speaker_name_edit.setStyleSheet("""
+                    QLineEdit {
+                        background-color: #ffffff;
+                        color: #000000;
+                        border: 2px solid #ccc;
+                        border-radius: 3px;
+                        padding: 2px;
+                    }
+                """)
             
             speaker_btn = QPushButton(f"Assign ({i+1})")
             speaker_btn.clicked.connect(lambda checked, idx=i: self.assign_speaker(idx))
@@ -2408,6 +2428,16 @@ Engineered with DeepSeek V3.2
                     font-weight: bold;
                 }
             """)
+            # Unassigned list (dark)
+            self.unassigned_list.setStyleSheet("""
+                QListWidget {
+                    background-color: #3a3a3a;
+                    color: #ffffff;
+                    border: 2px solid #555;
+                    border-radius: 5px;
+                    padding: 4px;
+                }
+            """)
             # Dark theme palette
             self.speaker_color_palette = [
                 QColor(60, 80, 100),   # Dark blue
@@ -2437,6 +2467,16 @@ Engineered with DeepSeek V3.2
                     border: 2px solid #ccc;
                     border-radius: 5px;
                     font-weight: bold;
+                }
+            """)
+            # Unassigned list (light)
+            self.unassigned_list.setStyleSheet("""
+                QListWidget {
+                    background-color: #fafafa;
+                    color: #000000;
+                    border: 2px solid #ddd;
+                    border-radius: 5px;
+                    padding: 4px;
                 }
             """)
             # Light theme palette
