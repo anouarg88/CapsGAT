@@ -230,6 +230,31 @@ def test_create_speaker_widgets_needs_layout(editor):
     assert hasattr(editor, 'create_speaker_widgets')
     assert callable(editor.create_speaker_widgets)
 
+
+
+# ── waveform audio lifecycle tests ───────────────────────────────
+
+def test_clear_waveform_audio_no_viewer(editor):
+    """_clear_waveform_audio should not crash when waveform_viewer doesn't exist."""
+    if hasattr(editor, 'waveform_viewer'):
+        del editor.waveform_viewer
+    # Should not raise
+    editor._clear_waveform_audio()
+
+def test_clear_waveform_audio_with_viewer(editor):
+    """_clear_waveform_audio should call clear_audio on the waveform viewer."""
+    mock_viewer = MagicMock()
+    editor.waveform_viewer = mock_viewer
+    editor._clear_waveform_audio()
+    mock_viewer.clear_audio.assert_called_once()
+
+def test_load_waveform_audio_delegates(editor):
+    """_load_waveform_audio should delegate to waveform viewer."""
+    mock_viewer = MagicMock()
+    editor.waveform_viewer = mock_viewer
+    editor._load_waveform_audio("/fake/path.wav")
+    mock_viewer.load_audio.assert_called_once_with("/fake/path.wav")
+
 # ── format & time conversion tests ───────────────────────────────
 
 def test_format_timestamp(editor):
