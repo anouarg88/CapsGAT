@@ -293,7 +293,8 @@ class TestConversion:
     def test_convert_output_default(self, srt_file):
         """Without --output, should write to input path with .txt extension."""
         from cli import main
-        expected = srt_file.replace(".srt", ".txt")
+        # Default format is GAT2 → auto-name gets "_gat" suffix
+        expected = srt_file.replace(".srt", "_gat.txt")
         try:
             rc = main([srt_file, "--speaker", "$:"])
             assert rc == 0
