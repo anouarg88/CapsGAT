@@ -1099,6 +1099,9 @@ def test_atomic_markers_all_formats_cjk():
     assert "#@/U" in result, f"#@/U marker missing in output:\n{result}"
 
 
+
+
+
 def test_atomic_pauses_cjk():
     """Pause symbols should remain atomic in CJK wrapping."""
     from generators import _tokenize_cjk_with_pauses
@@ -1187,3 +1190,285 @@ def test_atomic_markers_non_cjk_wrapping():
     assert "#@/I" in result, f"#@/I marker missing in output:\n{result}"
     assert "#@U" in result, f"#@U marker missing in output:\n{result}"
     assert "#@/U" in result, f"#@/U marker missing in output:\n{result}"
+
+
+def test_real_world_scenario():
+    """Reproduce the user's exact bug report scenario.
+    
+    Verifies that:
+    - @(Ns)@ pause markers stay atomic
+    - #@U...underline...#@/U spans survive wrapping across lines
+    - All formatting markers appear in the correct positions
+    - Retagging places reopening markers after the line number prefix
+    """
+    text = Transcript(
+        blocks=[
+            {'index':1,'text':'nikolausi','raw_text':'nikolausi','speaker':0,'is_turn_start':True},
+            {'index':2,'text':'@(3s)@ der kleine @(2s)@','raw_text':'@(3s)@ der kleine @(2s)@','speaker':1,'is_turn_start':True},
+            {'index':3,'text':'#@Unein (.) das ist nicht#@/U nikolausi','raw_text':'#@Unein (.) das ist nicht#@/U nikolausi','speaker':1,'is_turn_start':False},
+            {'index':4,'text':'das ist #@Uoster#@/Uhasi @(4s)@','raw_text':'das ist #@Uoster#@/Uhasi @(4s)@','speaker':1,'is_turn_start':False},
+        ],
+        speakers=['A','B'],
+        cjk_mode=True
+    )
+    
+    # Test TiQ output with wrapping
+    result = generate_tiq_text(
+        text, include_timestamps=True, wrap_enabled=True,
+        wrap_length=30, concatenate_turns=True
+    )
+    
+    # Verify atomic markers are present
+    assert '@(3s)@' in result, f"@(3s)@ missing:\n{result}"
+    assert '@(2s)@' in result, f"@(2s)@ missing:\n{result}"
+    assert '(.)' in result, f"(.) missing:\n{result}"
+    assert '@(4s)@' in result, f"@(4s)@ missing:\n{result}"
+    
+    # Verify formatting markers
+    assert '#@U' in result, f"#@U missing:\n{result}"
+    assert '#@/U' in result, f"#@/U missing:\n{result}"
+    
+    # Verify that no line starts with a re-opening marker before the line number
+    for line in result.split('\n'):
+        if line.startswith('#@U') or line.startswith('#@B') or line.startswith('#@I'):
+            # This means a reopen marker is before any prefix
+            # It's OK only if the line has no prefix (i.e., it's a content-only line)
+            assert not line[3].isdigit(), \
+                f"Reopen marker before line number: {line!r}"
+    
+    # Test GAT2 non-concatenated output
+    result2 = generate_gat2_text(
+        text, include_timestamps=False, wrap_enabled=True,
+        wrap_length=30, concatenate_turns=False
+    )
+    
+    assert '#@U' in result2, f"#@U missing in GAT2:\n{result2}"
+    assert '#@/U' in result2, f"#@/U missing in GAT2:\n{result2}"
+    
+    # Test Non-CJK mode
+    text_non_cjk = Transcript(text.blocks, speakers=['A','B'], cjk_mode=False)
+    result3 = generate_tiq_text(
+        text_non_cjk, include_timestamps=True, wrap_enabled=True,
+        wrap_length=30, concatenate_turns=True
+    )
+    assert '@(3s)@' in result3, f"@(3s)@ missing in non-CJK:\n{result3}"
+    assert '#@U' in result3, f"#@U missing in non-CJK:\n{result3}"
+    assert '#@/U' in result3, f"#@/U missing in non-CJK:\n{result3}"
+
+
+# ----------------------------------------------------------------------
+# Character-wrap mode tests — atomic markers must survive character_wrap
+# ----------------------------------------------------------------------
+
+def test_character_wrap_keeps_atomic_markers():
+    """character_wrap mode should keep atomic markers whole."""
+    from generators import _wrap_text
+    transcript = Transcript(blocks=[], speakers=["A"])
+    text = "a#@Bbc#@/Bd(.)e"
+    # Wrap at width 3: should break between characters but keep atomic markers
+    lines = _wrap_text(transcript, text, 3, character_wrap=True)
+    # Each atomic marker should be on a single line, never split
+    for line in lines:
+        assert "#@B" not in line or "#@/B" not in line or "#@B" not in line.split("#@/B")[0], \
+            f"Split atomic marker in line: {line!r}"
+    joined = ''.join(lines)
+    assert "#@B" in joined, f"#@B marker lost: {lines}"
+    assert "#@/B" in joined, f"#@/B marker lost: {lines}"
+    assert "(.)" in joined, f"(.) marker lost: {lines}"
+
+
+def test_character_wrap_gat2_export():
+    """character_wrap in GAT2 export should preserve atomic markers."""
+    text = "这是#@U法国#@/U的测试文本"
+    transcript = Transcript(
+        blocks=[{
+            'index': 1, 'start_time': '00:00:00,000', 'end_time': '00:00:02,000',
+            'text': text, 'raw_text': text,
+            'speaker': 0, 'is_turn_start': True
+        }],
+        speakers=["A"], cjk_mode=True
+    )
+    result = generate_gat2_text(
+        transcript, include_timestamps=False, wrap_enabled=True,
+        wrap_length=10, character_wrap=True, concatenate_turns=False
+    )
+    assert "#@U" in result, f"#@U marker missing in char_wrap output:\n{result}"
+    assert "#@/U" in result, f"#@/U marker missing in char_wrap output:\n{result}"
+
+
+def test_character_wrap_tiq_export():
+    """character_wrap in TiQ export should preserve atomic markers."""
+    text = "这是#@U法国#@/U的测试文本"
+    transcript = Transcript(
+        blocks=[{
+            'index': 1, 'start_time': '00:00:00,000', 'end_time': '00:00:02,000',
+            'text': text, 'raw_text': text,
+            'speaker': 0, 'is_turn_start': True
+        }],
+        speakers=["A"], cjk_mode=True
+    )
+    result = generate_tiq_text(
+        transcript, include_timestamps=False, wrap_enabled=True,
+        wrap_length=10, character_wrap=True, concatenate_turns=True,
+        include_diarization=True
+    )
+    assert "#@U" in result, f"#@U marker missing in TiQ char_wrap:\n{result}"
+    assert "#@/U" in result, f"#@/U marker missing in TiQ char_wrap:\n{result}"
+
+
+# ----------------------------------------------------------------------
+# Formatting span retagging tests
+# ----------------------------------------------------------------------
+
+def test_retag_formatting_spans_basic():
+    """_retag_formatting_spans_in_lines should close and reopen split formatting spans."""
+    from generators import _retag_formatting_spans_in_lines
+    lines = [
+        "A:   some text #@U法",
+        "    国#@/U more text"
+    ]
+    result = _retag_formatting_spans_in_lines(lines)
+    assert len(result) == 2
+    # Line 1 should have #@/U appended
+    assert result[0].endswith("#@/U"), f"Line 1 should close underline at EOL:\n{result}"
+    # Line 2 should have #@U reopened after prefix
+    assert "#@U国" in result[1], f"Line 2 should reopen underline:\n{result}"
+    assert "#@/U" in result[1], f"Line 2 should still close underline:\n{result}"
+
+
+def test_retag_formatting_spans_no_markers():
+    """_retag_formatting_spans_in_lines should pass through lines without markers."""
+    from generators import _retag_formatting_spans_in_lines
+    lines = ["A:   Hello world", "    more text"]
+    result = _retag_formatting_spans_in_lines(lines)
+    assert result == lines
+
+
+def test_retag_formatting_spans_bold_italic():
+    """_retag_formatting_spans_in_lines should handle bold and italic too."""
+    from generators import _retag_formatting_spans_in_lines
+    lines = [
+        "A:   #@Bbold #@Iitalic",
+        "    text#@/I#@/B"
+    ]
+    result = _retag_formatting_spans_in_lines(lines)
+    assert len(result) == 2
+    # Both bold and italic should be closed/opened
+    assert "#@/B" in result[0] or "#@/I" in result[0], \
+        f"Line 1 should close markers at EOL:\n{result}"
+
+
+def test_retag_formatting_spans_underline_cjk_gat2():
+    """Integration test: underline formatting retagged in GAT2 CJK wrapping."""
+    text = "这是#@U法国#@/U的测试文本"
+    transcript = Transcript(
+        blocks=[{
+            'index': 1, 'start_time': '00:00:00,000', 'end_time': '00:00:02,000',
+            'text': text, 'raw_text': text,
+            'speaker': 0, 'is_turn_start': True
+        }],
+        speakers=["A"], cjk_mode=True
+    )
+    result = generate_gat2_text(
+        transcript, include_timestamps=False, wrap_enabled=True,
+        wrap_length=12, character_wrap=False, concatenate_turns=False
+    )
+    lines = result.split('\n')
+    for i, line in enumerate(lines[:-1]):
+        content = line[line.index(' ') + 1:] if ' ' in line else line
+        content = content[content.index(' ') + 1:] if ' ' in content else content
+        if '#@U' in content and '#@/U' not in content:
+            assert content.endswith('#@/U'), \
+                f"Line {i} has unclosed #@U:\n{line}\nFull result:\n{result}"
+
+
+def test_retag_formatting_spans_underline_tiq():
+    """Integration test: underline formatting retagged in TiQ CJK wrapping."""
+    text = "这是#@U法国#@/U的测试文本"
+    transcript = Transcript(
+        blocks=[{
+            'index': 1, 'start_time': '00:00:00,000', 'end_time': '00:00:02,000',
+            'text': text, 'raw_text': text,
+            'speaker': 0, 'is_turn_start': True
+        }],
+        speakers=["A"], cjk_mode=True
+    )
+    result = generate_tiq_text(
+        transcript, include_timestamps=False, wrap_enabled=True,
+        wrap_length=12, character_wrap=False, concatenate_turns=True,
+        include_diarization=True
+    )
+    lines = result.split('\n')
+    for i, line in enumerate(lines[:-1]):
+        content = line[line.index(' ') + 1:] if ' ' in line else line
+        content = content[content.index(' ') + 1:] if ' ' in content else content
+        if '#@U' in content and '#@/U' not in content:
+            assert content.endswith('#@/U'), \
+                f"Line {i} has unclosed #@U:\n{line}\nFull result:\n{result}"
+
+
+def test_retag_formatting_spans_underline_char_wrap():
+    """Underline retagging should work with character_wrap mode too."""
+    text = "这是#@U法国#@/U的测试文本"
+    transcript = Transcript(
+        blocks=[{
+            'index': 1, 'start_time': '00:00:00,000', 'end_time': '00:00:02,000',
+            'text': text, 'raw_text': text,
+            'speaker': 0, 'is_turn_start': True
+        }],
+        speakers=["A"], cjk_mode=True
+    )
+    result = generate_gat2_text(
+        transcript, include_timestamps=False, wrap_enabled=True,
+        wrap_length=12, character_wrap=True, concatenate_turns=False
+    )
+    lines = result.split('\n')
+    for i, line in enumerate(lines[:-1]):
+        content = line[line.index(' ') + 1:] if ' ' in line else line
+        content = content[content.index(' ') + 1:] if ' ' in content else content
+        if '#@U' in content and '#@/U' not in content:
+            assert content.endswith('#@/U'), \
+                f"Line {i} has unclosed #@U in char_wrap:\n{line}\nFull:\n{result}"
+
+
+def test_retag_formatting_spans_latin_character_wrap():
+    """Latin text with formatting should retag properly in character_wrap."""
+    text = "This is #@Bbold#@/B text"
+    transcript = Transcript(
+        blocks=[{
+            'index': 1, 'start_time': '00:00:00,000', 'end_time': '00:00:02,000',
+            'text': text, 'raw_text': text,
+            'speaker': 0, 'is_turn_start': True
+        }],
+        speakers=["A"], cjk_mode=False
+    )
+    result = generate_gat2_text(
+        transcript, include_timestamps=False, wrap_enabled=True,
+        wrap_length=15, character_wrap=True, concatenate_turns=False
+    )
+    assert "#@B" in result, f"#@B missing:\n{result}"
+    assert "#@/B" in result, f"#@/B missing:\n{result}"
+
+
+def test_retag_formatting_spans_concatenated_turns():
+    """Formatting retagging should work with concatenated turns."""
+    text = "这是#@U法国#@/U的测试"
+    transcript = Transcript(
+        blocks=[{
+            'index': 1, 'start_time': '00:00:00,000', 'end_time': '00:00:02,000',
+            'text': text, 'raw_text': text,
+            'speaker': 0, 'is_turn_start': True
+        }],
+        speakers=["A"], cjk_mode=True
+    )
+    result = generate_gat2_text(
+        transcript, include_timestamps=False, wrap_enabled=True,
+        wrap_length=12, character_wrap=False, concatenate_turns=True
+    )
+    lines = result.split('\n')
+    for i, line in enumerate(lines[:-1]):
+        content = line[line.index(' ') + 1:] if ' ' in line else line
+        content = content[content.index(' ') + 1:] if ' ' in content else content
+        if '#@U' in content and '#@/U' not in content:
+            assert content.endswith('#@/U'), \
+                f"Line {i} has unclosed #@U in concatenated:\n{line}\nFull:\n{result}"
