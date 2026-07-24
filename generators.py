@@ -431,7 +431,7 @@ def generate_gat2_text(
             if add_blank_line:
                 output_lines.append("")
 
-        return '\n'.join(output_lines)
+        return '\n'.join(_retag_formatting_spans_in_lines(output_lines))
 
     else:
         included_blocks = [b for b in transcript.blocks if is_valid_block(b)]
@@ -500,7 +500,7 @@ def generate_gat2_text(
                 if add_blank_line:
                     output_lines.append("")
 
-        return '\n'.join(output_lines)
+        return '\n'.join(_retag_formatting_spans_in_lines(output_lines))
 
 
 def generate_dresing_pehl_text(
@@ -567,7 +567,7 @@ def generate_dresing_pehl_text(
                 if add_blank_line:
                     output_lines.append("")
 
-    return '\n'.join(output_lines)
+    return '\n'.join(_retag_formatting_spans_in_lines(output_lines))
 
 
 def _build_ordered_segments(transcript: Transcript, include_timestamps=False):
@@ -745,7 +745,7 @@ def generate_tiq_text(
         if ts and include_timestamps:
             ts_str = " " + format_timestamp(ts, timestamp_style, custom_pattern)
         if wrap_enabled and cw > 10:
-            if character_wrap: tokens = list(text)
+            if character_wrap: tokens = _tokenize_cjk_with_pauses(text)
             elif cjk_mode: tokens = _tokenize_cjk_with_pauses(text)
             else: tokens = _tokenize_with_pauses(text)
             if ts_str: tokens.append(ts_str)
@@ -756,12 +756,16 @@ def generate_tiq_text(
                     if cl: lines.append(cl); cl = ""
                     if token.isspace(): continue
                     if len(token) > cw:
-                        for j in range(0, len(token), cw):
-                            ch = token[j:j+cw]
-                            if ch:
-                                if j == 0: cl = ch
-                                else: lines.append(ch)
-                        cl = ""
+                        # Atomic markers must never be split
+                        if ATOMIC_PATTERN.fullmatch(token):
+                            cl = token
+                        else:
+                            for j in range(0, len(token), cw):
+                                ch = token[j:j+cw]
+                                if ch:
+                                    if j == 0: cl = ch
+                                    else: lines.append(ch)
+                            cl = ""
                     else: cl = token
                 else: cl += token
             if cl: lines.append(cl)
@@ -874,7 +878,7 @@ def generate_tiq_text(
         overlap_targets.sort(key=lambda x: x[0])
 
         if cw_actual and turn_text:
-            if character_wrap: tokens = list(turn_text)
+            if character_wrap: tokens = _tokenize_cjk_with_pauses(turn_text)
             elif cjk_mode: tokens = _tokenize_cjk_with_pauses(turn_text)
             else: tokens = _tokenize_with_pauses(turn_text)
             if ts_str: tokens.append(ts_str)
@@ -917,14 +921,18 @@ def generate_tiq_text(
                     if token.isspace():
                         continue
                     if len(token) > cw_actual:
-                        for j in range(0, len(token), cw_actual):
-                            ch = token[j:j+cw_actual]
-                            if ch:
-                                if j == 0: cl = ch
-                                else:
-                                    _flush_line(cl, cum)
-                                    cl = ch
-                        cl = ""
+                        # Atomic markers must never be split
+                        if ATOMIC_PATTERN.fullmatch(token):
+                            cl = token
+                        else:
+                            for j in range(0, len(token), cw_actual):
+                                ch = token[j:j+cw_actual]
+                                if ch:
+                                    if j == 0: cl = ch
+                                    else:
+                                        _flush_line(cl, cum)
+                                        cl = ch
+                            cl = ""
                     else:
                         cl = token
                     continue
@@ -936,15 +944,19 @@ def generate_tiq_text(
                         cl = ""
                     if token.isspace(): continue
                     if len(token) > cw_actual:
-                        for j in range(0, len(token), cw_actual):
-                            ch = token[j:j+cw_actual]
-                            if ch:
-                                if j == 0: cl = ch
-                                else:
-                                    is_first = len(wrapped_lines) == 0
-                                    wrapped_lines.append((prefix + ch if is_first else " " * len(prefix) + ch, cum))
-                                    cum += len(ch)
-                        cl = ""
+                        # Atomic markers must never be split
+                        if ATOMIC_PATTERN.fullmatch(token):
+                            cl = token
+                        else:
+                            for j in range(0, len(token), cw_actual):
+                                ch = token[j:j+cw_actual]
+                                if ch:
+                                    if j == 0: cl = ch
+                                    else:
+                                        is_first = len(wrapped_lines) == 0
+                                        wrapped_lines.append((prefix + ch if is_first else " " * len(prefix) + ch, cum))
+                                        cum += len(ch)
+                            cl = ""
                     else: cl = token
                 else: cl += token
             if cl:
@@ -1164,7 +1176,7 @@ def generate_tiq_text(
                 if wrap_enabled and wrap_length > 0:
                     cw2 = wrap_length - line_num_padding - len(sp)
                     if cw2 > 10:
-                        if character_wrap: tokens = list(text)
+                        if character_wrap: tokens = _tokenize_cjk_with_pauses(text)
                         elif cjk_mode: tokens = _tokenize_cjk_with_pauses(text)
                         else: tokens = _tokenize_with_pauses(text)
                         lines = []; cl = ""
@@ -1174,12 +1186,16 @@ def generate_tiq_text(
                                 if cl: lines.append(cl); cl = ""
                                 if token.isspace(): continue
                                 if len(token) > cw2:
-                                    for j in range(0, len(token), cw2):
-                                        ch = token[j:j+cw2]
-                                        if ch:
-                                            if j == 0: cl = ch
-                                            else: lines.append(ch)
-                                    cl = ""
+                                    # Atomic markers must never be split
+                                    if ATOMIC_PATTERN.fullmatch(token):
+                                        cl = token
+                                    else:
+                                        for j in range(0, len(token), cw2):
+                                            ch = token[j:j+cw2]
+                                            if ch:
+                                                if j == 0: cl = ch
+                                                else: lines.append(ch)
+                                        cl = ""
                                 else: cl = token
                             else: cl += token
                         if cl: lines.append(cl)
@@ -1198,7 +1214,7 @@ def generate_tiq_text(
         line_num = idx + 1
         output_lines.append(f"{line_num:0{line_digits}d} {line}")
     
-    return '\n'.join(output_lines)
+    return '\n'.join(_retag_formatting_spans_in_lines(output_lines))
 
 def _group_into_turns(transcript: Transcript, include_timestamps=False):
     """Group consecutive blocks with the same speaker into turns."""
@@ -1252,10 +1268,15 @@ def _tokenize_with_pauses(text):
 
 
 def _tokenize_cjk_with_pauses(text):
-    """Split CJK text into tokens: either a single character, or a whole atomic marker.
-    
+    """Split CJK text into tokens: individual CJK chars, whole atomic markers,
+    and kept-together ASCII/Latin word tokens.
+
     Atomic markers include: formatting markers (#@B, #@/B, #@I, #@/I, #@U, #@/U),
     pause symbols, overlap markers, and TiQ short laughter (@(.)@).
+
+    In CJK mode, CJK characters are split individually for wrapping, but
+    ASCII letters/digits are kept together as word tokens since they
+    are space-delimited in text.
     """
     tokens = []
     i = 0
@@ -1265,25 +1286,41 @@ def _tokenize_cjk_with_pauses(text):
             tokens.append(m.group())
             i = m.end()
         else:
-            tokens.append(text[i])
-            i += 1
+            ch = text[i]
+            # Keep runs of ASCII letters/digits together as word tokens
+            if ch.isascii() and (ch.isalpha() or ch.isdigit()):
+                word_start = i
+                i += 1
+                while i < len(text):
+                    ch2 = text[i]
+                    if ch2.isascii() and (ch2.isalpha() or ch2.isdigit()):
+                        i += 1
+                    else:
+                        break
+                tokens.append(text[word_start:i])
+            else:
+                tokens.append(ch)
+                i += 1
     return tokens
 
 
 def _wrap_text(transcript: Transcript, text, max_width, character_wrap=False, first_line_only_indent=True):
     """Wrap text to max_width characters.
 
-    - If character_wrap: break at exact character positions.
-    - Otherwise, tokenize using _tokenize_with_pauses (keeps pause symbols atomic)
-      and then fill lines greedily, dropping leading spaces on new lines.
+    - Tokenize using the appropriate tokenizer (keeps atomic markers whole),
+      then fill lines greedily, dropping leading spaces on new lines.
+    - If character_wrap: use character-level tokenization (every char separate,
+      but atomic markers stay whole).
+    - Otherwise: use word-level tokenization (pause symbols atomic).
     """
     if not text or max_width <= 0:
         return [text]
 
     if character_wrap:
-        return [text[i:i+max_width] for i in range(0, len(text), max_width)]
-
-    tokens = _tokenize_with_pauses(text)
+        # Character-level: each character is separate, but atomic markers stay whole
+        tokens = _tokenize_cjk_with_pauses(text)
+    else:
+        tokens = _tokenize_with_pauses(text)
 
     lines = []
     current_line = ''
@@ -1301,14 +1338,18 @@ def _wrap_text(transcript: Transcript, text, max_width, character_wrap=False, fi
                 continue
 
             if len(token) > max_width:
-                for i in range(0, len(token), max_width):
-                    chunk = token[i:i+max_width]
-                    if chunk:
-                        if i == 0:
-                            current_line = chunk
-                        else:
-                            lines.append(chunk)
-                current_line = ''
+                # Atomic markers (formatting, pauses) must never be split
+                if ATOMIC_PATTERN.fullmatch(token):
+                    current_line = token
+                else:
+                    for i in range(0, len(token), max_width):
+                        chunk = token[i:i+max_width]
+                        if chunk:
+                            if i == 0:
+                                current_line = chunk
+                            else:
+                                lines.append(chunk)
+                    current_line = ''
             else:
                 current_line = token
         else:
@@ -1670,6 +1711,143 @@ def _wrap_with_indent(line, max_width, indent):
             result.append(cont_prefix + chunk)
     
     return result if result else [line]
+
+
+def _find_prefix_end(line):
+    """Find the end of the non-content prefix in an output line.
+    
+    Skips known prefix structures used across all generator formats:
+    - GAT2:   {HH:MM:SS}   NNN   Speaker:   (content)
+    - TiQ:    NNN Speaker:  (content)
+    - Continuation:  NNN    (content)  or spaces + (content)
+    - D&P:    Speaker: (content) (no wrapping, so rarely used here)
+    
+    Returns the character index where actual text content begins.
+    """
+    i = 0
+    n = len(line)
+    if n == 0:
+        return 0
+    # 1. Skip optional timestamp like {00:00:00} or #HH:MM:SS-T#
+    if i < n and line[i] == '{':
+        end_b = line.find('}', i)
+        if end_b > i:
+            i = end_b + 1
+            while i < n and line[i] == ' ':
+                i += 1
+    elif i < n and line[i] == '#':
+        # Hash-style timestamp like #00:00:03-5#
+        end_h = line.find('#', i + 1)
+        if end_h > i:
+            i = end_h + 1
+            while i < n and line[i] == ' ':
+                i += 1
+    # 2. Skip optional line number (digits followed by spaces)
+    num_start = i
+    while i < n and line[i].isdigit():
+        i += 1
+    if i > num_start:
+        while i < n and line[i] == ' ':
+            i += 1
+    # 3. Skip optional speaker label like "A: " or "B:   "
+    word_start = i
+    while i < n and line[i].isalnum():
+        i += 1
+    if i > word_start and i < n and line[i] == ':':
+        i += 1  # colon
+        while i < n and line[i] == ' ':
+            i += 1
+    else:
+        # Not a speaker label — reset to word start position
+        i = word_start
+    # 4. Skip any remaining padding spaces (continuation lines)
+    while i < n and line[i] == ' ':
+        i += 1
+    return i
+
+
+def _retag_formatting_spans_in_lines(lines):
+    """Repair formatting markers split across line breaks in wrapped output.
+
+    When a formatted span like #@U法国#@/U wraps across lines:
+        #@U法  (line 1)
+        国#@/U (line 2)
+    the second character '国' loses its formatting because the closing #@/U
+    has no matching #@U on the same line.
+
+    This function scans each line for unclosed formatting markers (bold,
+    italic, underline), closes them at the end of line, and re-opens them
+    on the next line.
+
+    Works on a list of output lines that already have prefixes (speaker
+    labels, line numbers, indentation spaces).
+    """
+    if not lines:
+        return lines
+
+    open_to_close = {'#@B': '#@/B', '#@I': '#@/I', '#@U': '#@/U'}
+    close_to_open = {'#@/B': '#@B', '#@/I': '#@I', '#@/U': '#@U'}
+    open_markers = frozenset(('#@B', '#@I', '#@U'))
+    close_markers = frozenset(('#@/B', '#@/I', '#@/U'))
+
+    # Quick check: if no formatting markers, skip processing
+    marker_seen = False
+    for line in lines:
+        for m in ('#@B', '#@I', '#@U', '#@/B', '#@/I', '#@/U'):
+            if m in line:
+                marker_seen = True
+                break
+        if marker_seen:
+            break
+
+    if not marker_seen:
+        return lines
+
+    result = []
+    pending_opens = []  # formatting markers to reopen at start of next line
+
+    for line in lines:
+        # If there are pending reopening markers, insert them after the
+        # prefix (between line number/speaker label and actual content)
+        if pending_opens:
+            # Find where actual text content starts by skipping known prefixes:
+            # optional timestamp {HH:MM:SS}, line number, speaker label, padding
+            content_start = _find_prefix_end(line)
+            reopen_str = ''.join(pending_opens)
+            line = line[:content_start] + reopen_str + line[content_start:]
+            pending_opens = []
+
+        # Scan line for formatting markers using a stack
+        stack = []
+        i = 0
+        while i < len(line):
+            m = ATOMIC_PATTERN.match(line, i)
+            if m:
+                marker = m.group()
+                if marker in open_markers:
+                    stack.append(marker)
+                elif marker in close_markers:
+                    expected_open = close_to_open[marker]
+                    if stack and stack[-1] == expected_open:
+                        stack.pop()
+                    elif expected_open in stack:
+                        # Clean up nested mismatch
+                        stack.remove(expected_open)
+                i = m.end()
+            else:
+                i += 1
+
+        # If any markers are unclosed at line end, close them at EOL
+        # and prepare to reopen on the next content-carrying line
+        if stack:
+            close_str = ''.join(open_to_close[m] for m in reversed(stack))
+            line = line + close_str
+            pending_opens = stack.copy()  # reopen same markers on next line
+
+        result.append(line)
+
+    # Any remaining pending_opens are at end of text — no next line to reopen
+    return result
 
 
 def generate_transcript_text(
