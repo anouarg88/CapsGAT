@@ -1252,7 +1252,7 @@ def generate_tiq_text(
                 positions.append((ci, cl.index('\u2514')))
         # Insert bars before the first `count` positions (if fewer, all of them)
         for ci, bar_col in reversed(positions[:count]):
-            content_lines.insert(ci, ' ' * bar_col + '|')
+            content_lines.insert(ci, ' ' * bar_col + '\u2502')
     
     # Build line-numbered output
     total_lines = len(content_lines)

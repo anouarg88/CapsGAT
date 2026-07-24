@@ -583,7 +583,7 @@ def test_tiq_no_blank_line_default(transcript):
 
 @pytest.mark.timeout(60)
 def test_tiq_vertical_bar_on_overlap(transcript):
-    """When add_blank_line and next turn starts with └, insert | above it.
+    """When add_blank_line and next turn starts with └, insert │ above it.
 
     The overlap line is emitted inline within the previous turn's output
     (cross-speaker overlap), and the bar should appear BEFORE the overlap line.
@@ -633,14 +633,14 @@ def test_tiq_vertical_bar_on_overlap(transcript):
     # Overlap line has └ in it
     colon_pos = ov_content.index('└') if '└' in ov_content else -1
     assert colon_pos >= 0, f"No └ in overlap line: {ov_content}"
-    # Bar line should have '|' at exactly that same column
+    # Bar line should have '\u2502' at exactly that same column
     assert len(bar_content) >= colon_pos + 1, \
         f"Bar content too short ({len(bar_content)}) for col {colon_pos}: {repr(bar_content)}"
-    assert bar_content[colon_pos] == '|', \
-        f"Expected '|' at col {colon_pos}, got {repr(bar_content[colon_pos])}: {repr(bar_content)}"
-    # All chars before the | should be spaces
+    assert bar_content[colon_pos] == '\u2502', \
+        f"Expected '\u2502' at col {colon_pos}, got {repr(bar_content[colon_pos])}: {repr(bar_content)}"
+    # All chars before the \u2502 should be spaces
     assert bar_content[:colon_pos].count(' ') == colon_pos, \
-        f"Expected {colon_pos} spaces before |, got: {repr(bar_content[:colon_pos])}"
+        f"Expected {colon_pos} spaces before \u2502, got: {repr(bar_content[:colon_pos])}"
     # Verify bar is BEFORE the overlap (line 1 is bar, line 2 is overlap)
     assert '└' not in bar_content, "Bar line should not contain └"
 
@@ -687,9 +687,9 @@ def test_tiq_vertical_bar_text_before(transcript):
     #   3                           (blank line — text_before exists, so no |)
     #   4    some text more         (Y's actual turn text, wrapped/indented)
     assert len(lines) == 4, f"Expected 4 lines, got {len(lines)}:\n{text}"
-    # Line 3 should be blank (no |)
+    # Line 3 should be blank (no \u2502)
     line3_stripped = lines[2][lines[2].index(' ') + 1:] if ' ' in lines[2] else lines[2]
-    assert '|' not in line3_stripped, f"Unexpected '|' in blank line: {repr(line3_stripped)}"
+    assert '\u2502' not in line3_stripped, f"Unexpected '\u2502' in blank line: {repr(line3_stripped)}"
     assert line3_stripped.strip() == '', f"Line 3 not blank: {repr(line3_stripped)}"
     # Line 4 should contain Y's text
     assert 'some text' in lines[3] or 'more' in lines[3], f"Line 4 missing Y's text: {lines[3]}"
