@@ -25,14 +25,30 @@ Optional but highly recommended for audio playback speed control:
 
 ## Installation guide
 
-_Note: Version 1.5.1 has been used as an example in this installation guide. Please replace "1.5.1" with whichever version you are going to install._
+_Note: Version 1.6.0 has been used as an example in this installation guide. Please replace "1.6.0" with whichever version you are going to install._
 
 ### Windows
 
-1. Download the Windows installer `CapsQual_1.5.1_Setup.exe` or the portable executable: `CapsQual_1.5.1.exe`.
+1. Download the Windows installer `CapsQual_1.6.0_Setup.exe` or the portable executable: `CapsQual_1.6.0.exe`.
 2. If you downloaded the installer, double‑click and follow the on‑screen instructions.
-3. If you downloaded the portable version, simply unzip the file in any folder and double‑click `CapsQual_1.5.1.exe` to run. A system warning may show up, since this software does not contain any official certificates. You may ignore this at your own discretion.
+3. If you downloaded the portable version, simply unzip the file in any folder and double‑click `CapsQual_1.6.0.exe` to run. A system warning may show up, since this software does not contain any official certificates. You may ignore this at your own discretion.
 4. (Optional) Install [VLC](https://www.videolan.org/) to enable playback speed control and better audio compatibility before running CapsQual.
+
+To run from source:
+
+```cmd
+rem 1. Install Python 3.9+ from python.org (check "Add Python to PATH")
+rem 2. Clone the repository
+git clone https://github.com/anouarg88/CapsQual.git
+cd CapsQual
+rem 3. Create a virtual environment
+python -m venv venv
+venv\Scripts\activate
+rem 4. Install dependencies
+pip install -r requirements.txt
+rem 5. Run
+python main.py
+```
 
 ### macOS
 
@@ -42,127 +58,68 @@ Two versions are provided:
 - `CapsQual-macOS-AppleSilicon` for Macs with Apple Silicon (M1, M2, M3)
 
 1. Download the appropriate `.zip` file.
-2. Open the downloaded file and drag `CapsQual_1.5.1.app` to your `Applications` folder.
+2. Open the downloaded file and drag `CapsQual_1.6.0.app` to your `Applications` folder.
 3. The first time you run the app, macOS may warn you that it is from an unidentified developer.  
    To bypass this, right‑click (or Ctrl‑click) the app and select **Open**, then click **Open** again.
 4. (Optional) Install [VLC](https://www.videolan.org/) to enable playback speed control before running CapsQual.
 
+To run from source:
+
+```bash
+# 1. Install Python 3.9+ (via Homebrew)
+brew install python
+# 2. Clone the repository
+git clone https://github.com/anouarg88/CapsQual.git
+cd CapsQual
+# 3. Create a virtual environment
+python3 -m venv venv
+source venv/bin/activate
+# 4. Install dependencies
+pip install -r requirements.txt
+# 5. (Optional) VLC for audio speed control
+brew install vlc
+# 6. Run
+python3 main.py
+```
+
+If `pip install` fails, try `pip install PyQt5 python-docx numpy soundfile python-vlc` instead.  
+If the fallback audio player doesn't work, install `portaudio` via `brew install portaudio`.
+
 ### Linux (Debian/Ubuntu 22.04 or newer)
 
-1. Download `CapsQual_1.5.1-linux.tar.gz`.
+1. Download `CapsQual_1.6.0-linux.tar.gz`.
 2. Open a terminal in the download folder and unfold the archive:
    ```bash
-   tar -xzf CapsQual_1.5.1-linux.tar.gz
+   tar -xzf CapsQual_1.6.0-linux.tar.gz
    ```
 3. Make the extracted file executable:
    ```bash
-   chmod +x CapsQual_1.5.1
+   chmod +x CapsQual_1.6.0
    ```
 4. Run the program:
    ```bash
-   ./CapsQual_1.5.1
+   ./CapsQual_1.6.0
    ```
 5. (Optional) Install VLC using your package manager (e.g., `sudo apt install vlc` on Debian/Ubuntu) to enable playback speed control.
 
-For Ubuntu versions < 22.04, run from source (see below).
+To run from source (also required for Ubuntu < 22.04):
 
-### Running CapsQual from Source
+```bash
+# 1. Install system dependencies
+sudo apt update && sudo apt install -y python3-venv python3-pyqt5 portaudio19-dev
+# 2. Clone the repository
+git clone https://github.com/anouarg88/CapsQual.git
+cd CapsQual
+# 3. Create a virtual environment
+python3 -m venv venv --system-site-packages
+source venv/bin/activate
+# 4. Install dependencies (If installation of pyaudio fails, make sure python-vlc is installed)
+pip install -r requirements.txt
+# 5. Run
+python3 main.py
+```
 
-***Linux:***
-
-1. Install system dependencies
-
-   Open a terminal and run:
-   ```bash
-   sudo apt update
-   sudo apt install -y python3-venv python3-pyqt5 portaudio19-dev
-   ```
- 
-2. Clone the repository:
-   ```bash
-   git clone https://github.com/anouarg88/CapsQual.git
-   cd CapsQual
-   ```
-   (Or download and unpack the archive from this release page.)
-
-3. Create a virtual environment (recommended):
-   ```bash
-   python3 -m venv venv --system-site-packages
-   source venv/bin/activate
-   ```
-4. Install python dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-   If you don't have pip installed, run ```sudo apt install python3-pip``` first.
-   
-6. Run the application:
-   ```bash
-   python3 main.py
-   ```
-
-***macOS:***
-
-1. Install Python 3.9 or later** (e.g., via [Homebrew](https://brew.sh/):).
-
-   Open a terminal and run:
-   ```bash/zsh
-   brew install python
-   ```
-3. Clone the repository:
-   ```bash/zsh
-   git clone https://github.com/anouarg88/CapsQual.git
-   ```
-4. Create a virtual environment (recommended):
-   ```bash/zsh
-   cd CapsQual
-   python3 -m venv venv
-   source venv/bin/activate
-   ```
-
-5. Install python dependencies
-   ```bash/zsh
-   pip install -r requirements.txt
-   ```
-   (If installing dependencies from requirements.txt fails, which it might for some versions, run `pip install PyQt5 python-docx numpy soundfile python-vlc` instead. Note that the fallback audio player will not be available - see step 4.)
-   
-4. Install VLC for full audio support (optional but highly recommended)
-   ```bash
-   brew install vlc
-   ```
-   
-5. Run the application:
-   ```bash
-   python3 main.py
-   ```
-   (On macOS, you may need to install `portaudio` via Homebrew if you want a fallback audio player: `brew install portaudio`. If the fallback audio player does not work, instlall VLC using: `brew install vlc`.)
-
-
-***Windows:***
-1. Install Python 3.9 or later from [python.org](https://www.python.org/downloads/). During installation, make sure to check “Add Python to PATH”.
-
-2. Clone the repository
-   Open a command prompt (or Powershell):
-   ```cmd
-   git clone https://github.com/anouarg88/CapsQual.git
-   ```
-
-4. Create a virtual environment (recommended)
-   ```cmd
-   cd CapsQual
-   python -m venv venv
-   venv\Scripts\activate
-   ```
-   
-5. Install python dependencies
-   ```cmd
-   pip install -r requirements.txt
-   ```
-   
-8. Run the application:
-   ```cmd
-   python main.py
-   ```
+If `pip` is not installed, run `sudo apt install python3-pip` first.
 
 
 If you encounter difficulties installing CapsQual, feel free to [open an issue](https://github.com/anouarg88/CapsQual/issues).
