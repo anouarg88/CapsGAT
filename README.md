@@ -195,10 +195,6 @@ You can:
 
 ---
 
-For more details, see the [CapsQual User Manual](https://github.com/anouarg88/CapsQual/wiki).
-
-CapsQual was developed using AI.
-
 # CLI Usage
 
 CapsQual can also be used from the command line for headless conversion:
@@ -216,7 +212,7 @@ capsqual input.srt -f tiq --speaker="$:"
 # Export as HTML
 capsqual input.srt -o transcript.html
 
-# Customise layout
+# Customize layout
 capsqual input.srt -f dresing_pehl --blank-lines --concatenate-turns -w 80
 ```
 
@@ -225,3 +221,7 @@ capsqual input.srt -f dresing_pehl --blank-lines --concatenate-turns -w 80
 **Export types:** `.txt` (default), `.html`, `.docx`
 
 For a full list of options, run `capsqual --help`.
+
+For more info on how to use CapsQual, see the [CapsQual User Manual](https://github.com/anouarg88/CapsQual/wiki).
+
+CapsQual was developed with the help of DeepSeek AI.
