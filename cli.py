@@ -216,7 +216,15 @@ def run_convert(args: argparse.Namespace) -> int:
     if args.output:
         out_path = Path(args.output)
     else:
-        out_path = input_path.with_suffix(".txt")
+        # Convention suffix map: internal name → filename tag
+        convention_suffixes = {
+            'gat2': '_gat',
+            'tiq': '_tiq',
+            'dresing_pehl': '_dp',
+        }
+        suffix = convention_suffixes.get(args.format, '')
+        stem = input_path.stem + suffix
+        out_path = input_path.with_name(stem).with_suffix(".txt")
 
     # ── 5. Generate transcript ──────────────────────────────────
     from generators import generate_transcript_text

@@ -3950,8 +3950,15 @@ Engineered with DeepSeek V3.2
         else:
             default_name = "transcript"
 
-        if settings['convention'] != 'gat2':
-            default_name += f"_{settings['convention']}"
+        # Convention suffix map: internal name → filename tag
+        convention_suffixes = {
+            'gat2': '_gat',
+            'tiq': '_tiq',
+            'dresing_pehl': '_dp',
+        }
+        suffix = convention_suffixes.get(settings['convention'], '')
+        if suffix:
+            default_name += suffix
 
         default_name += file_ext
 
