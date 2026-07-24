@@ -801,8 +801,13 @@ def generate_tiq_text(
     # Store wrapped lines per first-block-index for overlap column calculation
     _turn_wrapped_map = {}
     def _emit_one_turn(speaker, blocks, start_time):
-        """Emit a turn with overlaps interleaved between wrapped lines."""
-        if not blocks: return
+        """Emit a turn with overlaps interleaved between wrapped lines.
+        
+        Returns True if any content was emitted, False if the turn
+        was a pure-overlap already fully emitted inline (e.g., its
+        content was absorbed by a previous turn's overlap processing).
+        """
+        if not blocks: return False
         prefix = _speaker_prefix(speaker)
         cw = wrap_length - line_num_padding - len(prefix) if wrap_length > 0 else 0
 
@@ -833,7 +838,7 @@ def generate_tiq_text(
                         break
         
         if not turn_text and not has_overlap_target:
-            return
+            return False
         ts = time_to_seconds(start_time) if start_time and include_timestamps else None
 
         # Wrap the turn text and track character positions at each line        # Wrap the turn text and track character positions at each line
@@ -1135,37 +1140,65 @@ def generate_tiq_text(
         
         for line_str, _ in wrapped_lines:
             content_lines.append(line_str)
+        return True
     # Walk all segments and emit turn-by-turn with interleaved overlaps
+    _pending_bar_counts = {}  # {prefix: count} for deferred bars from all paths
+    def _find_next_turn_idx(seg_idx):
+        """Return index of the next 'turn' segment after seg_idx, skipping 'other' segments."""
+        j = seg_idx + 1
+        while j < len(all_segments):
+            if all_segments[j]['type'] == 'turn':
+                return j
+            j += 1
+        return None
+    def _maybe_insert_bar_for_pure_overlap_segment(seg, seg_idx):
+        """Defer bar insertion for a pure-overlap segment whose overlap
+        was absorbed by the target turn's emission.
+        
+        Simply increments the pending bar count for this speaker prefix.
+        All actual bar insertion happens in the post-process.
+        """
+        for b in seg['blocks']:
+            info = b.get('overlap_info')
+            if not info and INDENT_PLACEHOLDER in b.get('raw_text', ''):
+                info = _infer_overlap_info_from_raw_text(b, INDENT_PLACEHOLDER)
+            if info and not info.get('text_before', '').strip():
+                prefix = _speaker_prefix(seg['speaker'])
+                _pending_bar_counts[prefix] = _pending_bar_counts.get(prefix, 0) + 1
+                return
+
+
     for i, seg in enumerate(all_segments):
         if seg['type'] == 'turn':
-            _emit_one_turn(seg['speaker'], seg['blocks'], seg.get('start_time'))
+            emitted = _emit_one_turn(seg['speaker'], seg['blocks'], seg.get('start_time'))
+
+            # When a pure-overlap segment returned False because its overlap was
+            # already emitted inline by a previous turn (via overlap_map), we still
+            # need to insert the vertical bar before the already-emitted overlap line.
+            if not emitted and add_blank_line:
+                _maybe_insert_bar_for_pure_overlap_segment(seg, i)
+
             # Add blank line / vertical bar between turns when requested
-            if add_blank_line and i + 1 < len(all_segments):
-                next_seg = all_segments[i + 1]
-                if next_seg['type'] == 'turn':
-                    first_blk = next_seg['blocks'][0]
+            if emitted and add_blank_line and i + 1 < len(all_segments):
+                # Determine the effective next turn: skip over pause/comment segments.
+                effective_next_idx = _find_next_turn_idx(i)
+                effective_next_turn = all_segments[effective_next_idx] if effective_next_idx is not None else None
+
+                if effective_next_turn is not None:
+                    first_blk = effective_next_turn['blocks'][0]
                     info = first_blk.get('overlap_info')
                     if not info and INDENT_PLACEHOLDER in first_blk.get('raw_text', ''):
                         info = _infer_overlap_info_from_raw_text(first_blk, INDENT_PLACEHOLDER)
-                    if info and not info.get('text_before', '').strip():
-                        # Pure overlap: find └ column from the actual emitted overlap line
-                        # and insert the bar BEFORE that line
-                        next_prefix = _speaker_prefix(next_seg['speaker'])
-                        bar_col = 0
-                        overlap_idx = None
-                        for ci, cl in enumerate(content_lines):
-                            if '└' in cl and cl.startswith(next_prefix):
-                                bar_col = cl.index('└')
-                                overlap_idx = ci
-                                break
-                        if overlap_idx is not None:
-                            content_lines.insert(overlap_idx, ' ' * bar_col + '|')
-                        else:
-                            content_lines.append(' ' * bar_col + '|')
+                    is_pure_overlap = (info and not info.get('text_before', '').strip())
+
+                    if is_pure_overlap:
+                        next_prefix = _speaker_prefix(effective_next_turn['speaker'])
+                        _pending_bar_counts[next_prefix] = _pending_bar_counts.get(next_prefix, 0) + 1
                     else:
                         content_lines.append('')
                 else:
-                    content_lines.append('')
+                    # No turn after us — nothing to separate from.
+                    pass
         elif seg['type'] == 'other':
             block = seg['block']
             if block.get('is_empty'):
@@ -1204,7 +1237,22 @@ def generate_tiq_text(
                     else:
                         content_lines.append(sp + text)
                 else:
-                    content_lines.append(sp + text)
+                    content_lines.append(sp + text)    
+    # Post-process: insert deferred bars before pure-overlap lines
+    # that were emitted in a later segment than the overlap block.
+    # For each speaker prefix, insert count bars before distinct
+    # overlap lines. Bars are inserted bottom-up to avoid index shifting.
+    for prefix, count in _pending_bar_counts.items():
+        if count <= 0:
+            continue
+        # Collect positions of all overlap lines with this prefix (bottom-up)
+        positions = []
+        for ci, cl in enumerate(content_lines):
+            if '\u2514' in cl and cl.startswith(prefix):
+                positions.append((ci, cl.index('\u2514')))
+        # Insert bars before the first `count` positions (if fewer, all of them)
+        for ci, bar_col in reversed(positions[:count]):
+            content_lines.insert(ci, ' ' * bar_col + '|')
     
     # Build line-numbered output
     total_lines = len(content_lines)
