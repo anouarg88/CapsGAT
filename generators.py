@@ -14,7 +14,7 @@ import re
 import json
 from pathlib import Path
 
-from transcript import Transcript, INDENT_PLACEHOLDER, PAUSE_PATTERN
+from transcript import Transcript, INDENT_PLACEHOLDER, PAUSE_PATTERN, ATOMIC_PATTERN
 
 
 # ──────────────────────────────────────────────
@@ -1229,10 +1229,14 @@ def _group_into_turns(transcript: Transcript, include_timestamps=False):
 
 
 def _tokenize_with_pauses(text):
-    """Split text into tokens, keeping pause symbols whole and spaces as separate tokens."""
+    """Split text into tokens, keeping atomic markers whole and spaces as separate tokens.
+    
+    Atomic markers include: formatting markers (#@B, #@/B, #@I, #@/I, #@U, #@/U),
+    pause symbols, overlap markers, and TiQ short laughter (@(.)@).
+    """
     tokens = []
     last_end = 0
-    for match in PAUSE_PATTERN.finditer(text):
+    for match in ATOMIC_PATTERN.finditer(text):
         start, end = match.span()
         if start > last_end:
             preceding = text[last_end:start]
@@ -1248,11 +1252,15 @@ def _tokenize_with_pauses(text):
 
 
 def _tokenize_cjk_with_pauses(text):
-    """Split CJK text into tokens: either a single character, or a whole pause symbol."""
+    """Split CJK text into tokens: either a single character, or a whole atomic marker.
+    
+    Atomic markers include: formatting markers (#@B, #@/B, #@I, #@/I, #@U, #@/U),
+    pause symbols, overlap markers, and TiQ short laughter (@(.)@).
+    """
     tokens = []
     i = 0
     while i < len(text):
-        m = PAUSE_PATTERN.match(text, i)
+        m = ATOMIC_PATTERN.match(text, i)
         if m:
             tokens.append(m.group())
             i = m.end()

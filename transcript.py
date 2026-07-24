@@ -19,6 +19,15 @@ PAUSE_PATTERN = re.compile(
     r'\(\.\)|\(-+\)|\(\d+(?:\.\d+)?\)|°h+|h+°|@\(\.\)@|@\(\d+s\)@|//|<<.*?>>|\[.*?\]|\(\(.*?\)\)|└'
 )
 
+# Regex for ALL atomic tokens during line-wrapping.
+# Includes formatting markers (#@B, #@/B, #@I, #@/I, #@U, #@/U),
+# pause symbols, and overlap markers.
+# Excludes comment-like wrappers (<<...>>, ((...)), [...]) which are
+# variable-length and should be allowed to break across lines.
+ATOMIC_PATTERN = re.compile(
+    r'#@[BIU]|#@/[BIU]|\(\.\)|\(-+\)|\(\d+(?:\.\d+)?\)|°h+|h+°|@\(\.\)@|@\(\d+s\)@|//|└'
+)
+
 
 # ── Core data model ───────────────────────────────────────────────
 
