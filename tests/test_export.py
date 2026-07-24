@@ -1033,3 +1033,157 @@ def test_tiq_overlap_does_not_wrap(transcript):
     overlap_lines = [l for l in lines if '└' in l]
     assert len(overlap_lines) == 1, \
         f"Overlap should be on 1 line, got {len(overlap_lines)}:\n{text}"
+
+
+# ----------------------------------------------------------------------
+# Atomic marker tests — formatting markers must stay intact during wrapping
+# ----------------------------------------------------------------------
+
+def test_atomic_markers_tokenize_with_pauses():
+    """_tokenize_with_pauses should keep formatting markers as whole tokens."""
+    from generators import _tokenize_with_pauses
+    text = "Hello #@Bbold#@/B world"
+    tokens = _tokenize_with_pauses(text)
+    assert "#@B" in tokens, f"#@B should be a token, got {tokens}"
+    assert "#@/B" in tokens, f"#@/B should be a token, got {tokens}"
+
+
+def test_atomic_markers_tokenize_cjk():
+    """_tokenize_cjk_with_pauses should keep formatting markers as whole tokens."""
+    from generators import _tokenize_cjk_with_pauses
+    text = "这是#@B重要字#@/B测试"
+    tokens = _tokenize_cjk_with_pauses(text)
+    assert "#@B" in tokens, f"#@B should be a token, got {tokens}"
+    assert "#@/B" in tokens, f"#@/B should be a token, got {tokens}"
+
+
+def test_atomic_markers_italic():
+    """Italic markers (#@I, #@/I) should be atomic in CJK tokenizer."""
+    from generators import _tokenize_cjk_with_pauses
+    text = "强调#@I斜体#@/I结束"
+    tokens = _tokenize_cjk_with_pauses(text)
+    assert "#@I" in tokens, f"#@I should be a token, got {tokens}"
+    assert "#@/I" in tokens, f"#@/I should be a token, got {tokens}"
+
+
+def test_atomic_markers_underline():
+    """Underline markers (#@U, #@/U) should be atomic in CJK tokenizer."""
+    from generators import _tokenize_cjk_with_pauses
+    text = "下划线#@U文字#@/U结束"
+    tokens = _tokenize_cjk_with_pauses(text)
+    assert "#@U" in tokens, f"#@U should be a token, got {tokens}"
+    assert "#@/U" in tokens, f"#@/U should be a token, got {tokens}"
+
+
+def test_atomic_markers_all_formats_cjk():
+    """All three formatting markers should survive CJK wrapping in GAT2 export."""
+    text = "这是#@B重要字#@/B和#@I斜体字#@/I还有#@U下划线#@/U结束"
+    transcript = Transcript(
+        blocks=[{
+            'index': 1, 'start_time': '00:00:00,000', 'end_time': '00:00:02,000',
+            'text': text, 'raw_text': text,
+            'speaker': 0, 'is_turn_start': True
+        }],
+        speakers=["A"], cjk_mode=True
+    )
+    # Wrap at narrow width to force line breaks
+    result = generate_gat2_text(
+        transcript, include_timestamps=False, wrap_enabled=True,
+        wrap_length=20, character_wrap=False, concatenate_turns=False
+    )
+    assert "#@B" in result, f"#@B marker missing in output:\n{result}"
+    assert "#@/B" in result, f"#@/B marker missing in output:\n{result}"
+    assert "#@I" in result, f"#@I marker missing in output:\n{result}"
+    assert "#@/I" in result, f"#@/I marker missing in output:\n{result}"
+    assert "#@U" in result, f"#@U marker missing in output:\n{result}"
+    assert "#@/U" in result, f"#@/U marker missing in output:\n{result}"
+
+
+def test_atomic_pauses_cjk():
+    """Pause symbols should remain atomic in CJK wrapping."""
+    from generators import _tokenize_cjk_with_pauses
+    text = "的话(.)我就想(.)去法国"
+    tokens = _tokenize_cjk_with_pauses(text)
+    assert "(.)" in tokens, f"(.) should be a token, got {tokens}"
+
+
+def test_atomic_tiq_laughter():
+    """TiQ short laughter @(.)@ should be atomic."""
+    from generators import _tokenize_with_pauses
+    text = "Hello @(.)@ world"
+    tokens = _tokenize_with_pauses(text)
+    assert "@(.)@" in tokens, f"@(.)@ should be a token, got {tokens}"
+
+
+def test_atomic_tiq_laughter_cjk():
+    """TiQ short laughter @(.)@ should be atomic in CJK tokenizer."""
+    from generators import _tokenize_cjk_with_pauses
+    text = "@(.)@哈哈哈哈"
+    tokens = _tokenize_cjk_with_pauses(text)
+    assert "@(.)@" in tokens, f"@(.)@ should be a token, got {tokens}"
+
+
+def test_atomic_comment_wrappers_not_atomic():
+    """Comment-like wrappers (<<...>>, ((...))) should NOT be atomic in CJK mode.
+    
+    They contain variable-length content and should be character-split
+    during CJK wrapping (same as regular text).
+    """
+    from generators import _tokenize_cjk_with_pauses
+    text = "((咳嗽))"
+    tokens = _tokenize_cjk_with_pauses(text)
+    # Each character should be its own token since ((...)) is not in ATOMIC_PATTERN
+    assert all(len(t) == 1 for t in tokens), \
+        f"((...)) comment should be split into single-char tokens, got {tokens}"
+
+
+def test_atomic_bracket_comments_not_atomic():
+    """Bracket comments [...] should NOT be atomic in CJK mode."""
+    from generators import _tokenize_cjk_with_pauses
+    text = "[笑声]"
+    tokens = _tokenize_cjk_with_pauses(text)
+    assert all(len(t) == 1 for t in tokens), \
+        f"[...] should be split into single-char tokens, got {tokens}"
+
+
+def test_atomic_markers_in_tiq_wrapping():
+    """Formatting markers should survive in TiQ export with wrapping."""
+    text = "这是#@B重要#@/B的测试文本用来验证原子标记在换行时不会分裂"
+    transcript = Transcript(
+        blocks=[{
+            'index': 1, 'start_time': '00:00:00,000', 'end_time': '00:00:02,000',
+            'text': text, 'raw_text': text,
+            'speaker': 0, 'is_turn_start': True
+        }],
+        speakers=["A"], cjk_mode=True
+    )
+    result = generate_tiq_text(
+        transcript, include_timestamps=False, wrap_enabled=True,
+        wrap_length=25, character_wrap=False, concatenate_turns=True,
+        include_diarization=True
+    )
+    assert "#@B" in result, f"#@B marker missing in TiQ output:\n{result}"
+    assert "#@/B" in result, f"#@/B marker missing in TiQ output:\n{result}"
+
+
+def test_atomic_markers_non_cjk_wrapping():
+    """Formatting markers should survive in non-CJK wrapping."""
+    text = "This is a #@Bbold#@/B and #@Iitalic#@/I and #@Uunderline#@/U test"
+    transcript = Transcript(
+        blocks=[{
+            'index': 1, 'start_time': '00:00:00,000', 'end_time': '00:00:02,000',
+            'text': text, 'raw_text': text,
+            'speaker': 0, 'is_turn_start': True
+        }],
+        speakers=["A"], cjk_mode=False
+    )
+    result = generate_gat2_text(
+        transcript, include_timestamps=False, wrap_enabled=True,
+        wrap_length=30, character_wrap=False, concatenate_turns=False
+    )
+    assert "#@B" in result, f"#@B marker missing in output:\n{result}"
+    assert "#@/B" in result, f"#@/B marker missing in output:\n{result}"
+    assert "#@I" in result, f"#@I marker missing in output:\n{result}"
+    assert "#@/I" in result, f"#@/I marker missing in output:\n{result}"
+    assert "#@U" in result, f"#@U marker missing in output:\n{result}"
+    assert "#@/U" in result, f"#@/U marker missing in output:\n{result}"
