@@ -1595,6 +1595,9 @@ class UnassignedSegmentsDialog(QDialog):
             return "unknown"
 
 class ExportPreviewDialog(QDialog):
+    # Class-level settings cache: persists across dialog instances within a GUI session
+    _last_settings = None
+
     def __init__(self, parent=None, has_timestamps=True,
                  timestamp_style="curly", custom_pattern="{HH:mm:ss}",
                  project_info=None, audio_path=None):
@@ -1609,6 +1612,75 @@ class ExportPreviewDialog(QDialog):
         self.timestamp_style = timestamp_style
         self.custom_timestamp_pattern = custom_pattern
         self.init_ui()
+        # Restore last session's settings if available
+        self._restore_last_settings()
+
+    def accept(self):
+        """Save current settings before closing so they persist for next export."""
+        ExportPreviewDialog._last_settings = self.get_export_settings()
+        super().accept()
+
+    def _restore_last_settings(self):
+        """Apply previously saved settings to the dialog widgets."""
+        settings = ExportPreviewDialog._last_settings
+        if settings is None:
+            return
+
+        # ------ Restore format ------
+        fmt = settings.get('format', 'html')
+        if fmt == 'html':
+            self.html_radio.setChecked(True)
+        elif fmt == 'docx':
+            self.docx_radio.setChecked(True)
+        elif fmt == 'txt':
+            self.txt_radio.setChecked(True)
+        elif fmt == 'srt':
+            self.srt_radio.setChecked(True)
+
+        # ------ Restore convention ------
+        conv = settings.get('convention', 'gat2')
+        if conv == 'gat2':
+            self.convention_combo.setCurrentText("GAT2 (Conversation Analysis)")
+        elif conv == 'dresing_pehl':
+            self.convention_combo.setCurrentText("Dresing & Pehl, Kuckartz (Semantic Transcription)")
+        elif conv == 'tiq':
+            self.convention_combo.setCurrentText("TiQ (Talk in Qualitative Research)")
+
+        # ------ Override defaults set by on_convention_changed ------
+        if self.include_timestamps and 'include_timestamps' in settings:
+            self.timestamp_check.setChecked(settings['include_timestamps'])
+            self.current_include_timestamps = settings['include_timestamps']
+
+        ts_style = settings.get('timestamp_style', '')
+        if ts_style == 'curly':
+            self.ts_curly_radio.setChecked(True)
+        elif ts_style == 'hash':
+            self.ts_hash_radio.setChecked(True)
+        elif ts_style == 'bracket':
+            self.ts_bracket_radio.setChecked(True)
+        elif ts_style == 'custom':
+            self.ts_custom_radio.setChecked(True)
+            self.ts_custom_edit.setText(settings.get('custom_timestamp_pattern', ''))
+
+        self.wrap_check.setChecked(settings.get('wrap_enabled', False))
+        self.wrap_spin.setValue(settings.get('wrap_length', 60))
+        self.character_wrap_check.setChecked(settings.get('character_wrap', False))
+
+        self.title_check.setChecked(settings.get('include_title', True))
+        self.memo_check.setChecked(settings.get('include_memo', True))
+        self.audio_check.setChecked(settings.get('include_audio', True))
+
+        self.concat_check.setChecked(settings.get('concatenate_turns', False))
+        self.blank_line_check.setChecked(settings.get('add_blank_line', False))
+        delim = settings.get('delimiter_choice', 'default')
+        if delim == 'custom':
+            self.delimiter_custom.setChecked(True)
+            self.custom_delimiter_edit.setText(settings.get('custom_delimiter', ''))
+        else:
+            self.delimiter_default.setChecked(True)
+
+        self.update_export_options_state()
+        self.update_preview()
 
     def init_ui(self):
         self.setWindowTitle("Export Preview")
