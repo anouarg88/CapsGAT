@@ -1983,7 +1983,7 @@ You should have received a copy of the GNU General Public License along with thi
 <br><br>
 (c) 2026 Anouâr Gadermann
 <br>
-Engineered with DeepSeek V3.2
+CapsQual was engineered with the help of DeepSeek AI.
 
 """
         QMessageBox.about(self, "About CapsQual", about_text)
