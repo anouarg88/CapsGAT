@@ -1,14 +1,11 @@
 # Contributing to CapsQual
 
-Thanks for taking the time to contribute! 🎉
-
-Whether you're reporting a bug, suggesting a feature, or opening a pull request, your help is appreciated. This document outlines a straightforward workflow to keep things consistent.
+Thank you for your interest in contributing to CapsQual! Whether you are reporting a bug, suggesting a feature, or opening a pull request, your help is appreciated. This document outlines a straightforward workflow to keep things consistent.
 
 ---
 
 ## Table of Contents
 
-- [Code of Conduct](#code-of-conduct)
 - [How to Report Issues](#how-to-report-issues)
 - [Feature Requests](#feature-requests)
 - [Development Setup](#development-setup)
@@ -19,29 +16,23 @@ Whether you're reporting a bug, suggesting a feature, or opening a pull request,
 
 ---
 
-## Code of Conduct
-
-This project follows a **no-drama policy**: be respectful, assume good intent, and focus on the code. Harassment, trolling, and personal attacks are not welcome.
-
----
-
 ## How to Report Issues
 
 Before opening an issue, please search the [existing issues](https://github.com/anouarg88/CapsQual/issues) to avoid duplicates.
 
 ### Bug Reports
 
-When filing a bug report, include:
+When filing a bug report, please include:
 
-- **A clear title** summarising the problem.
+- **A clear title** summarizing the problem.
 - **Steps to reproduce** — what did you do, what happened, and what did you expect?
-- **Your environment** — operating system and version, Python version, CapsQual version (see `main.py` or the release tag), and whether VLC is installed.
+- **Your environment** — operating system and version, Python version, CapsQual version, and (if audio was involved) whether VLC is installed.
 - **Log output or screenshots**, if relevant.
 - **If available: a minimal example file** that triggers the bug (attach an `.srt`, `.json`, etc.).
 
 ### Feature Requests
 
-Describe the feature you would like to see in CapsQual, why the current behaviour is insufficient, and — if possible — how you imagine it working. Mock-ups or references to similar tools are especially helpful.
+Describe the feature you would like to see in CapsQual, why the current behaviour is insufficient, and — if possible — how you imagine it working. Mock-ups or references to similar tools are also helpful.
 
 ---
 
@@ -77,7 +68,7 @@ source venv/bin/activate
 ```bash
 pip install -r requirements.txt
 ```
-(If this step fails see README.md)
+(If this step fails see installation section in README.md)
 
 
 ### 4. Install Test Dependencies (optional, for running tests)
@@ -165,7 +156,7 @@ python -m pytest tests/ -v
 
 ## Pull Request Process
 
-1. **Discuss first** — unless it's a trivial fix, open an issue or comment on an existing one before writing code. This saves wasted effort.
+1. **Discuss first** — Even if it is a trivial fix, open an issue or comment on an existing one before writing code or implementing a change. This saves wasted effort.
 2. **Keep it focused** — one pull request per logical change. Avoid mixing refactoring with new features.
 3. **Write tests** for new functionality and ensure all tests pass.
 4. **Update documentation** if you change user-facing behavior (README, architecture.md, CLI help text, etc.).
@@ -175,12 +166,11 @@ python -m pytest tests/ -v
 
 ### Checklist Before Opening
 
+- [ ] Opened or commented on issue.
 - [ ] Code compiles and runs (`python main.py`)
 - [ ] Tests pass (`python -m pytest tests/ -v`)
 - [ ] New tests cover the changed behavior
-- [ ] `architecture.md` reviewed for relevance to the change
 - [ ] Documentation updated if needed (README, `architecture.md`, CLI help, etc.)
-- [ ] Commit messages follow the imperative style
 - [ ] No unrelated changes sneaked in
 
 ---
