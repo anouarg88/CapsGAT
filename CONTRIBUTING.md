@@ -166,7 +166,7 @@ python -m pytest tests/ -v
 
 ### Checklist Before Opening
 
-- [ ] Opened or commented on issue.
+- [ ] Opened new or commented on existing issue
 - [ ] Code compiles and runs (`python main.py`)
 - [ ] Tests pass (`python -m pytest tests/ -v`)
 - [ ] New tests cover the changed behavior
