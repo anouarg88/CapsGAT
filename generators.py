@@ -886,7 +886,6 @@ def generate_tiq_text(
             if character_wrap: tokens = _tokenize_cjk_with_pauses(turn_text)
             elif cjk_mode: tokens = _tokenize_cjk_with_pauses(turn_text)
             else: tokens = _tokenize_with_pauses(turn_text)
-            if ts_str: tokens.append(ts_str)
             cl = ""; cum = 0; ov_ptr = 0
 
             def _flush_line(text, start):
@@ -966,6 +965,25 @@ def generate_tiq_text(
                 else: cl += token
             if cl:
                 _flush_line(cl, cum)
+
+            # ── Timestamp anti-orphan: keep timestamp on the last text line ──
+            # Instead of letting the timestamp sit alone on a line, try to
+            # append it to the previous line. Only orphan it when the text
+            # truly fills the line (no reasonable room left).
+            #
+            # The budget is wrap_length - line_num_padding because last_str
+            # already includes the speaker prefix, and line numbers are
+            # prepended later in the final output pass.
+            if ts_str and wrapped_lines:
+                last_str, last_cum = wrapped_lines[-1]
+                budget = wrap_length - line_num_padding
+                overflow_allowed = max(4, len(ts_str) // 2)
+                if len(last_str + ts_str) <= budget + overflow_allowed:
+                    wrapped_lines[-1] = (last_str + ts_str, last_cum)
+                else:
+                    wrapped_lines.append((" " * len(prefix) + ts_str, cum))
+            elif ts_str:
+                wrapped_lines.append((prefix + ts_str, 0))
         elif turn_text:
             wrapped_lines.append((prefix + turn_text + ts_str, 0))
         # ── End of overlap-aware wrapping ──
