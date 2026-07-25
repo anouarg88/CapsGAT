@@ -158,6 +158,49 @@ def test_tiq_wrapping(transcript):
     )
     assert len(text) > 0
 
+
+@pytest.mark.timeout(60)
+def test_tiq_timestamp_not_orphaned(transcript):
+    """TiQ: timestamp should not sit alone on a line when the previous
+    line has enough room. Regression test for the orphaned-timestamp bug
+    where #00:00:01-8# would get its own line even though the text
+    above had 10+ characters of space left."""
+    # Same CJK text as the real-world bug report, wrap_length=40.
+    transcript.cjk_mode = True
+    transcript.blocks = [
+        {
+            'index': 0,
+            'text': '好那开始之前呢我想请你就是在脑海里面想象一下你理想中的未来是什么样的包括你日常生活还有你身边的环境和人还有你毕业之后想做的工作等等各方面然后你可以描述一下你理想中的未来吗',
+            'raw_text': '好那开始之前呢我想请你就是在脑海里面想象一下你理想中的未来是什么样的包括你日常生活还有你身边的环境和人还有你毕业之后想做的工作等等各方面然后你可以描述一下你理想中的未来吗',
+            'speaker': 0,
+            'start_time': '00:00:01,800',
+            'end_time': '00:00:10,000',
+            'is_turn_start': True,
+        }
+    ]
+    transcript.speakers = ['A']
+
+    text = generate_tiq_text(
+        transcript,
+        include_timestamps=True,
+        wrap_enabled=True,
+        wrap_length=40,
+        concatenate_turns=True,
+        include_diarization=True,
+    )
+
+    lines = text.split('\n')
+    # A line that is ONLY indentation + a timestamp (e.g. "    #00:00:01-8#")
+    # means the timestamp was orphaned.  Check: no line should match this pattern.
+    orphan_pattern = re.compile(r'^\s+#\d{2}:\d{2}:\d{2}-\d#$')
+
+    for line in lines:
+        assert not orphan_pattern.match(line), (
+            f"Orphaned timestamp found: {line!r} — timestamp should be "
+            f"on the same line as the last text, not alone on its own line"
+        )
+
+
 # ----------------------------------------------------------------------
 # SRT export tests
 # ----------------------------------------------------------------------
