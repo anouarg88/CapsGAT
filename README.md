@@ -197,30 +197,30 @@ You can:
 
 # CLI Usage
 
-CapsQual can also be used from the command line for headless conversion:
+CapsQual can also be used from the command line for headless conversion (Run from one directory level above CapsQual):
 
 ```bash
 # Convert an SRT file to GAT2 transcript
-capsqual transcript.srt
+python -m CapsQual transcript.srt
 
 # Launch the GUI
-capsqual -g
+python -m CapsQual -g
 
 # TiQ format with auto-diarization (speaker names before colons)
-capsqual input.srt -f tiq --speaker="$:"
+python -m CapsQual input.srt -f tiq --speaker="$:"
 
 # Export as HTML
-capsqual input.srt -o transcript.html
+python -m CapsQual input.srt -o transcript.html
 
 # Customize layout
-capsqual input.srt -f dresing_pehl --blank-lines --concatenate-turns -w 80
+python -m CapsQual input.srt -f dresing_pehl --blank-lines
 ```
 
 **Supported input formats:** `.srt`, `.vtt`, `.txt`, `.tsv`, `.json`  
 **Output formats:** GAT2 (default), TiQ, Dresing & Pehl  
 **Export types:** `.txt` (default), `.html`, `.docx`
 
-For a full list of options, run `capsqual --help`.
+For a full list of options, run `python -m CapsQual --help`.
 
 For more info on how to use CapsQual, see the [CapsQual User Manual](https://github.com/anouarg88/CapsQual/wiki).
 
