@@ -26,6 +26,27 @@ Alice: How are you?
 Unassigned line
 """
 
+CONSECUTIVE_SAME_SPEAKER_SRT = """1
+00:00:01,000 --> 00:00:02,500
+Alice: First thing
+
+2
+00:00:03,000 --> 00:00:04,500
+Alice: Second thing
+
+3
+00:00:05,000 --> 00:00:06,000
+Alice: Third thing
+
+4
+00:00:07,000 --> 00:00:08,500
+Bob: Only bob thing
+
+5
+00:00:09,000 --> 00:00:10,000
+Alice: Fourth thing
+"""
+
 
 # ── Fixtures ──────────────────────────────────────────────────────
 
@@ -49,6 +70,19 @@ def out_file():
         path = f.name
     if os.path.exists(path):
         os.unlink(path)  # we want a clean slate
+    yield path
+    if os.path.exists(path):
+        os.unlink(path)
+
+
+@pytest.fixture
+def consecutive_srt_file():
+    """Temporary SRT with consecutive same-speaker blocks (Alice×3, Bob, Alice)."""
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".srt", encoding="utf-8", delete=False
+    ) as f:
+        f.write(CONSECUTIVE_SAME_SPEAKER_SRT)
+        path = f.name
     yield path
     if os.path.exists(path):
         os.unlink(path)
@@ -333,6 +367,107 @@ class TestConversion:
         from cli import main
         rc = main(["nonexistent_file.srt"])
         assert rc == 1
+
+
+# ── Concatenation / turn-merging tests ─────────────────────────────
+
+class TestConcatenation:
+    """Verify that consecutive same-speaker blocks are merged into turns."""
+
+    def test_dp_merges_consecutive_same_speaker(self, consecutive_srt_file, out_file):
+        """D&P always concatenates — 3 consecutive Alice blocks → 1 turn."""
+        from cli import main
+        rc = main([consecutive_srt_file, "-f", "dresing_pehl",
+                    "--speaker", "$:", "--no-timestamps", "-o", out_file])
+        assert rc == 0
+        with open(out_file, encoding="utf-8") as f:
+            content = f.read()
+        lines = [l for l in content.split("\n") if l.strip()]
+        # 5 blocks → 3 turns: Alice×1, Bob×1, Alice×1
+        assert len(lines) == 3, (
+            f"Expected 3 merged turns, got {len(lines)} lines: {lines}"
+        )
+        # First turn: all three Alice blocks merged
+        assert "First thing" in lines[0]
+        assert "Second thing" in lines[0]
+        assert "Third thing" in lines[0]
+        # Second turn: Bob alone
+        assert "Only bob thing" in lines[1]
+        # Third turn: Alice alone
+        assert "Fourth thing" in lines[2]
+
+    def test_tiq_merges_consecutive_same_speaker(self, consecutive_srt_file, out_file):
+        """TiQ always concatenates — consecutive blocks → merged turns."""
+        from cli import main
+        rc = main([consecutive_srt_file, "-f", "tiq",
+                    "--speaker", "$:", "--no-timestamps", "-o", out_file])
+        assert rc == 0
+        with open(out_file, encoding="utf-8") as f:
+            content = f.read()
+        lines = [l for l in content.split("\n") if l.strip()]
+        # TiQ has numbered lines — 3 turns expected
+        assert len(lines) == 3, (
+            f"Expected 3 merged turns, got {len(lines)} lines: {lines}"
+        )
+        assert "First thing" in lines[0] and "Third thing" in lines[0]
+        assert "Only bob thing" in lines[1]
+        assert "Fourth thing" in lines[2]
+
+    def test_gat2_with_concatenate_merges_turns(self, consecutive_srt_file, out_file):
+        """GAT2 with --concatenate-turns merges consecutive same-speaker blocks."""
+        from cli import main
+        rc = main([consecutive_srt_file, "--concatenate-turns",
+                    "--speaker", "$:", "--no-timestamps", "-o", out_file])
+        assert rc == 0
+        with open(out_file, encoding="utf-8") as f:
+            content = f.read()
+        lines = [l for l in content.split("\n") if l.strip()]
+        assert len(lines) == 3, (
+            f"Expected 3 merged turns, got {len(lines)} lines: {lines}"
+        )
+        assert "First thing" in lines[0] and "Third thing" in lines[0]
+        assert "Only bob thing" in lines[1]
+        assert "Fourth thing" in lines[2]
+
+    def test_gat2_without_concatenate_keeps_flat(self, consecutive_srt_file, out_file):
+        """GAT2 without --concatenate-turns: 5 blocks → 5 lines."""
+        from cli import main
+        rc = main([consecutive_srt_file, "--speaker", "$:",
+                    "--no-timestamps", "-o", out_file])
+        assert rc == 0
+        with open(out_file, encoding="utf-8") as f:
+            content = f.read()
+        lines = [l for l in content.split("\n") if l.strip()]
+        assert len(lines) == 5, (
+            f"Expected 5 flat blocks, got {len(lines)} lines: {lines}"
+        )
+
+    def test_clean_asr_dp_merges_all(self, out_file):
+        """Untouched ASR SRT (no speaker labels) → one merged turn in D&P."""
+        from cli import main
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".srt", encoding="utf-8", delete=False
+        ) as f:
+            f.write("1\n00:00:01,000 --> 00:00:02,000\nfirst line\n\n"
+                    "2\n00:00:03,000 --> 00:00:04,000\nsecond line\n\n"
+                    "3\n00:00:05,000 --> 00:00:06,000\nthird line\n")
+            asr_path = f.name
+        try:
+            rc = main([asr_path, "-f", "dresing_pehl",
+                        "--speaker", "", "--include-unassigned",
+                        "--no-timestamps", "-o", out_file])
+            assert rc == 0
+            with open(out_file, encoding="utf-8") as f:
+                content = f.read()
+            lines = [l for l in content.split("\n") if l.strip()]
+            assert len(lines) == 1, (
+                f"Expected 1 merged turn for clean ASR, got {len(lines)}: {lines}"
+            )
+            assert "first line" in lines[0]
+            assert "second line" in lines[0]
+            assert "third line" in lines[0]
+        finally:
+            os.unlink(asr_path)
 
 
 # ── Edge cases ────────────────────────────────────────────────────
