@@ -212,6 +212,18 @@ def run_convert(args: argparse.Namespace) -> int:
             if block["speaker"] is None and not block.get("is_pause") and not block.get("is_comment"):
                 block["speaker"] = 0
 
+    # ── Recompute is_turn_start after speaker assignment ───────
+    for i, block in enumerate(blocks):
+        if i == 0:
+            block["is_turn_start"] = True
+        else:
+            prev_speaker = blocks[i - 1].get("speaker")
+            curr_speaker = block.get("speaker")
+            block["is_turn_start"] = not (
+                prev_speaker is not None
+                and prev_speaker == curr_speaker
+            )
+
     # ── 4. Determine output path ────────────────────────────────
     if args.output:
         out_path = Path(args.output)
@@ -243,7 +255,9 @@ def run_convert(args: argparse.Namespace) -> int:
         wrap_length=wrap_length,
         character_wrap=args.character_wrap,
         add_blank_line=args.blank_lines,
-        concatenate_turns=args.concatenate_turns,
+        concatenate_turns=(
+            True if args.format in ("tiq", "dresing_pehl") else args.concatenate_turns
+        ),
         delimiter_choice=args.delimiter,
         custom_delimiter=args.custom_delimiter or "",
     )
