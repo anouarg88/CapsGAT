@@ -31,20 +31,20 @@ jobs:
           # Output file is dist/main.exe
 
       - name: Rename executable
-        run: mv dist/main.exe dist/CapsQual_1.6.0.exe
+        run: mv dist/main.exe dist/CapsQual_1.6.1.exe
         shell: bash
 
       - name: Upload artifact (Windows .exe for CI/debug)
         uses: actions/upload-artifact@v4
         with:
           name: CapsQual-Windows-Portable
-          path: dist/CapsQual_1.6.0.exe
+          path: dist/CapsQual_1.6.1.exe
 
       - name: Upload Windows exe as release asset
         if: ${{ github.event_name == 'release' }}
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/CapsQual_1.6.0.exe
+          files: dist/CapsQual_1.6.1.exe
 
 
   build-ubuntu:
@@ -75,23 +75,23 @@ jobs:
           # Output is dist/main
 
       - name: Rename executable
-        run: mv dist/main dist/CapsQual_1.6.0
+        run: mv dist/main dist/CapsQual_1.6.1
 
       - name: Upload artifact (Ubuntu binary for CI/debug)
         uses: actions/upload-artifact@v4
         with:
           name: CapsQual-Ubuntu
-          path: dist/CapsQual_1.6.0
+          path: dist/CapsQual_1.6.1
 
       - name: Tar the Ubuntu binary for release
         if: ${{ github.event_name == 'release' }}
-        run: tar -czf CapsQual_1.6.0-linux.tar.gz -C dist CapsQual_1.6.0
+        run: tar -czf CapsQual_1.6.1-linux.tar.gz -C dist CapsQual_1.6.1
 
       - name: Upload Linux tar as release asset
         if: ${{ github.event_name == 'release' }}
         uses: softprops/action-gh-release@v2
         with:
-          files: CapsQual_1.6.0-linux.tar.gz
+          files: CapsQual_1.6.1-linux.tar.gz
 
   build-macos-intel:
     runs-on: macos-15-intel
@@ -115,23 +115,23 @@ jobs:
 
       - name: Build with PyInstaller
         run: |
-          pyinstaller --icon "images/logo.icns" --add-data "images/*:images" -w --name "CapsQual_1.6.0" main.py
-          # Output is dist/CapsQual_1.6.0.app
+          pyinstaller --icon "images/logo.icns" --add-data "images/*:images" -w --name "CapsQual_1.6.1" main.py
+          # Output is dist/CapsQual_1.6.1.app
 
       - name: Zip .app bundle for release
-        run: cd dist && zip -r ../CapsQual_1.6.0-macOS-Intel.zip CapsQual_1.6.0.app
+        run: cd dist && zip -r ../CapsQual_1.6.1-macOS-Intel.zip CapsQual_1.6.1.app
 
       - name: Upload artifact (macOS Intel .app for CI/debug)
         uses: actions/upload-artifact@v4
         with:
           name: CapsQual-macOS-Intel
-          path: dist/CapsQual_1.6.0.app
+          path: dist/CapsQual_1.6.1.app
 
       - name: Upload macOS .app.zip as release asset
         if: ${{ github.event_name == 'release' }}
         uses: softprops/action-gh-release@v2
         with:
-          files: CapsQual_1.6.0-macOS-Intel.zip
+          files: CapsQual_1.6.1-macOS-Intel.zip
 
   build-macos-arm64:
     runs-on: macos-15
@@ -155,20 +155,20 @@ jobs:
 
       - name: Build with PyInstaller
         run: |
-          pyinstaller --icon "images/logo.icns" --add-data "images/*:images" -w --name "CapsQual_1.6.0" main.py
-          # Output is dist/CapsQual_1.6.0.app
+          pyinstaller --icon "images/logo.icns" --add-data "images/*:images" -w --name "CapsQual_1.6.1" main.py
+          # Output is dist/CapsQual_1.6.1.app
 
       - name: Zip .app bundle for release
-        run: cd dist && zip -r ../CapsQual_1.6.0-macOS-AppleSilicon.zip CapsQual_1.6.0.app
+        run: cd dist && zip -r ../CapsQual_1.6.1-macOS-AppleSilicon.zip CapsQual_1.6.1.app
 
       - name: Upload artifact (macOS ARM .app for CI/debug)
         uses: actions/upload-artifact@v4
         with:
           name: CapsQual-macOS-AppleSilicon
-          path: dist/CapsQual_1.6.0.app
+          path: dist/CapsQual_1.6.1.app
           
       - name: Upload macOS .app.zip as release asset
         if: ${{ github.event_name == 'release' }}
         uses: softprops/action-gh-release@v2
         with:
-          files: CapsQual_1.6.0-macOS-AppleSilicon.zip
+          files: CapsQual_1.6.1-macOS-AppleSilicon.zip
