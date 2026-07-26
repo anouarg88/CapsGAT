@@ -44,15 +44,15 @@ class WaveformViewer(QWidget):
     @staticmethod
     def _light_theme():
         return {
-            'bg': QColor(255, 255, 255),
-            'wf_bg': QColor(200, 200, 205),
+            'bg': QColor(240, 240, 240),
+            'wf_bg': QColor(180, 180, 185),
             'wf_sel': QColor(0, 0, 0),
             'handle': QColor(100, 123, 234),
             'handle_text_bg': QColor(245, 245, 245),
             'playhead': QColor(255, 80, 80),
             'text': QColor(80, 80, 80),
             'zoom_btn': QColor(220, 220, 220),
-            'zoom_bg': QColor(240, 240, 240),
+            'zoom_bg': QColor(230, 230, 230),
             'zoom_text': QColor(80, 80, 80),
         }
 
@@ -549,8 +549,9 @@ class SpeedKnob(QWidget):
         if radius < 5:
             return
 
-        painter.setBrush(QColor(240, 240, 240))
-        painter.setPen(QPen(QColor(180, 180, 180), 2))
+        pal = self.palette()
+        painter.setBrush(pal.button())
+        painter.setPen(QPen(pal.mid(), 2))
         painter.drawEllipse(center, radius, radius)
 
         angle = 142 + (self.value - self.min_value) / (self.max_value - self.min_value) * 270
@@ -559,10 +560,10 @@ class SpeedKnob(QWidget):
         end_x = center.x() + ilen * math.cos(angle_rad)
         end_y = center.y() + ilen * math.sin(angle_rad)
 
-        painter.setPen(QPen(QColor(0, 120, 215), 2))
+        painter.setPen(QPen(pal.highlight(), 2))
         painter.drawLine(center, QPoint(int(end_x), int(end_y)))
 
-        painter.setBrush(QColor(0, 120, 215))
+        painter.setBrush(pal.highlight())
         painter.setPen(Qt.NoPen)
         painter.drawEllipse(center, max(2, radius // 10), max(2, radius // 10))
 

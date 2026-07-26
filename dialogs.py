@@ -22,58 +22,9 @@ from export import build_html_content
 
 
 
-def _is_dark_parent(parent):
-    """Check if a parent/ancestor widget is in dark theme."""
-    if parent is None:
-        return False
-    try:
-        if hasattr(parent, 'current_theme'):
-            return parent.current_theme == "dark"
-        if hasattr(parent, '_is_dark') and callable(parent._is_dark):
-            return parent._is_dark()
-        # Walk up parent chain
-        gp = getattr(parent, 'parent', lambda: None)()
-        if gp is not None:
-            return _is_dark_parent(gp)
-    except AttributeError:
-        pass
-    return False
-
-
-def _dark_style_sheet():
-    """Return a stylesheet for dark-themed input widgets."""
-    return """
-        QTextEdit, QLineEdit, QPlainTextEdit {
-            background-color: #3a3a3a;
-            color: #cccccc;
-            border: 1px solid #555;
-        }
-        QTextEdit:focus, QLineEdit:focus {
-            border: 1px solid #4a90e2;
-        }
-        QLabel {
-            color: #cccccc;
-        }
-        QDialog {
-            background-color: #2d2d2d;
-        }
-    """
-
-
-def _dark_button_style():
-    """Return a stylesheet for dark-themed QPushButton."""
-    return """
-        QPushButton {
-            background-color: #3a3a3a;
-            color: #cccccc;
-            border: 1px solid #555;
-            padding: 4px 8px;
-        }
-        QPushButton:hover {
-            background-color: #4a4a4a;
-            border-color: #888;
-        }
-    """
+def _is_dark_theme(widget):
+    """Check whether *widget* is using the dark palette via its QPalette."""
+    return widget.palette().window().color().lightness() < 128
 
 
 
@@ -86,7 +37,7 @@ class TextSelectionDialog(QDialog):
         self.block_text = block_text
         self.start_pos = 0
         self.end_pos = 0
-        self.dark = _is_dark_parent(self)
+        self.dark = _is_dark_theme(self)
         self.init_ui()
         
     def init_ui(self):
@@ -186,7 +137,7 @@ class BlockSplitDialog(QDialog):
         super().__init__(parent)
         self.block_text = block_text
         self.split_position = 0
-        self.dark = _is_dark_parent(self)
+        self.dark = _is_dark_theme(self)
         self.init_ui()
         
     def init_ui(self):
@@ -1258,8 +1209,6 @@ class CommentDialog(QDialog):
         self.setWindowTitle("Add Comment")
         self.setGeometry(300, 300, 500, 200)
 
-        dark = _is_dark_parent(self)
-        
         layout = QVBoxLayout(self)
         
         instructions = QLabel("Enter your comment (will be formatted as ((comment))):")
@@ -1276,10 +1225,6 @@ class CommentDialog(QDialog):
         layout.addWidget(button_box)
         
         self.comment_edit.setFocus()
-
-        if dark:
-            self.setStyleSheet(_dark_style_sheet())
-            instructions.setStyleSheet("font-weight: bold; color: #ffffff;")
         
     def get_comment(self):
         return f"(({self.comment_edit.text()}))"
@@ -1295,7 +1240,6 @@ class RichEditDialog(QDialog):
         self.setWindowTitle("Edit Segment Content")
         self.setGeometry(300, 300, 600, 150)
 
-        dark = _is_dark_parent(self)
         layout = QVBoxLayout(self)
 
         # Toolbar with formatting buttons
@@ -1327,34 +1271,20 @@ class RichEditDialog(QDialog):
         # Single‑line text edit
         self.text_edit = QLineEdit()
         self.text_edit.setText(self.current_text)
-        if dark:
-            self.text_edit.setStyleSheet("""
-                QLineEdit {
-                    font-family: monospace;
-                    font-size: 14px;
-                    padding: 8px;
-                    border: 1px solid #555;
-                    border-radius: 5px;
-                    background-color: #3a3a3a;
-                    color: #cccccc;
-                }
-                QLineEdit:focus {
-                    border: 1px solid #4a90e2;
-                }
-            """)
-        else:
-            self.text_edit.setStyleSheet("""
-                QLineEdit {
-                    font-family: monospace;
-                    font-size: 14px;
-                    padding: 8px;
-                    border: 2px solid #ccc;
-                    border-radius: 5px;
-                }
-                QLineEdit:focus {
-                    border: 2px solid #4a90e2;
-                }
-            """)
+        self.text_edit.setStyleSheet("""
+            QLineEdit {
+                font-family: monospace;
+                font-size: 14px;
+                padding: 8px;
+                background-color: palette(base);
+                color: palette(text);
+                border: 2px solid palette(mid);
+                border-radius: 5px;
+            }
+            QLineEdit:focus {
+                border: 2px solid #4a90e2;
+            }
+        """)
         self.text_edit.returnPressed.connect(self.accept)
         layout.addWidget(self.text_edit)
 
@@ -1374,12 +1304,6 @@ class RichEditDialog(QDialog):
 
         self.text_edit.setFocus()
         self.text_edit.selectAll()
-
-        if dark:
-            self.setStyleSheet("""
-                QDialog { background-color: #2d2d2d; }
-                QLabel { color: #cccccc; }
-            """)
 
     def insert_format(self, start_marker, end_marker):
         """Wrap selected text with markers."""
@@ -2460,7 +2384,6 @@ class EnhancedPlacementDialog(QDialog):
         self.setWindowTitle(f"Insert {self.symbol_info.get('category', 'Symbol').title()}")
         self.setGeometry(300, 300, 700, 400)
 
-        dark = _is_dark_parent(self)
         layout = QVBoxLayout(self)
         
         # Instructions based on symbol type
@@ -2473,18 +2396,15 @@ class EnhancedPlacementDialog(QDialog):
         self.text_display = QTextEdit()
         self.text_display.setPlainText(self.current_text)
         self.text_display.setMaximumHeight(150)
-        if dark:
-            self.text_display.setStyleSheet("""
-                font-family: monospace;
-                font-size: 14px;
-                background-color: #3a3a3a;
-                color: #cccccc;
-                border: 1px solid #555;
-                selection-background-color: #2a6bcf;
-                selection-color: #ffffff;
-            """)
-        else:
-            self.text_display.setStyleSheet("font-family: monospace; font-size: 14px;")
+        self.text_display.setStyleSheet("""
+            font-family: monospace;
+            font-size: 14px;
+            background-color: palette(base);
+            color: palette(text);
+            border: 2px solid palette(mid);
+            selection-background-color: palette(highlight);
+            selection-color: palette(highlighted-text);
+        """)
         layout.addWidget(self.text_display)
         
         # Selection info
@@ -2512,12 +2432,6 @@ class EnhancedPlacementDialog(QDialog):
         self.setFocusPolicy(Qt.StrongFocus)
         self.setFocus()
         self.text_display.setFocus()
-
-        if dark:
-            self.setStyleSheet(_dark_style_sheet())
-            instructions_label.setStyleSheet("font-weight: bold; color: #ffffff;")
-            self.selection_label.setStyleSheet("color: #cccccc;")
-            self.option_label.setStyleSheet("color: #cccccc;")
         
     def get_instructions(self):
         """Get instructions based on symbol type"""
@@ -2638,7 +2552,7 @@ class PlacementDialog(QDialog):
         self.placement_position = 0
         self.create_new_line = False
         self.cjk_mode = cjk_mode
-        self.dark = _is_dark_parent(self)
+        self.dark = _is_dark_theme(self)
         self.init_ui()
         
     def init_ui(self):
@@ -2654,18 +2568,15 @@ class PlacementDialog(QDialog):
         self.text_display = QTextEdit()
         self.text_display.setReadOnly(True)
         self.text_display.setMaximumHeight(100)
-        if self.dark:
-            self.text_display.setStyleSheet("""
-                font-family: monospace;
-                font-size: 14px;
-                background-color: #3a3a3a;
-                color: #cccccc;
-                border: 1px solid #555;
-                selection-background-color: #2a6bcf;
-                selection-color: #ffffff;
-            """)
-        else:
-            self.text_display.setStyleSheet("font-family: monospace; font-size: 14px;")
+        self.text_display.setStyleSheet("""
+            font-family: monospace;
+            font-size: 14px;
+            background-color: palette(base);
+            color: palette(text);
+            border: 2px solid palette(mid);
+            selection-background-color: palette(highlight);
+            selection-color: palette(highlighted-text);
+        """)
         layout.addWidget(self.text_display)
 
         self.option_label = QLabel("Placement: Insert in current line (Press N to create new line)")
@@ -2683,11 +2594,6 @@ class PlacementDialog(QDialog):
         self.update_display()
         self.setFocusPolicy(Qt.StrongFocus)
         self.setFocus()
-
-        if self.dark:
-            self.setStyleSheet(_dark_style_sheet())
-            instructions.setStyleSheet("font-weight: bold; color: #ffffff;")
-            self.option_label.setStyleSheet("color: #cccccc;")
         
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Left:

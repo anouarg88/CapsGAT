@@ -27,7 +27,7 @@ from PyQt5.QtWidgets import (
     QGroupBox, QScrollArea, QSizePolicy, QComboBox, QStackedWidget, QStyle, QSplashScreen, QSplitter, QSplitterHandle, QToolButton
 )
 from PyQt5.QtCore import Qt, QTimer, QUrl, pyqtSignal, QPoint, QRect, QElapsedTimer, QThread, QSize, QRegularExpression, QSettings
-from PyQt5.QtGui import QFont, QKeySequence, QColor, QTextCharFormat, QTextCursor, QIcon, QPixmap
+from PyQt5.QtGui import QFont, QKeySequence, QColor, QPalette, QTextCharFormat, QTextCursor, QIcon, QPixmap
 
 from utils import resource_path, logger
 from generators import (
@@ -221,6 +221,8 @@ class SRTEditor(QMainWindow):
         self.text_display_font = QFont("Arial", 12)
         self.has_unsaved_changes = False
         self.current_theme = "light"
+        # Set initial theme palette so all widgets inherit theme colours
+        QApplication.instance().setPalette(self._light_palette())
         self.playback_speed = 1.0
         self.segment_sync_buffer = 0
         self.original_audio_duration = 0
@@ -357,9 +359,10 @@ class SRTEditor(QMainWindow):
         self.current_info_label = QLabel("No block selected")
         self.current_info_label.setStyleSheet("""
             QLabel {
-                background-color: #f0f0f0;
+                background-color: palette(window);
+                color: palette(windowtext);
                 padding: 10px;
-                border: 2px solid #ccc;
+                border: 2px solid palette(mid);
                 border-radius: 5px;
                 font-weight: bold;
             }
@@ -377,8 +380,9 @@ class SRTEditor(QMainWindow):
         self.text_display.setFont(self.text_display_font)
         self.text_display.setStyleSheet("""
             QTextEdit {
-                background-color: #fafafa;
-                border: 2px solid #ddd;
+                background-color: palette(base);
+                color: palette(text);
+                border: 2px solid palette(mid);
                 border-radius: 5px;
                 padding: 10px;
             }
@@ -437,25 +441,25 @@ class SRTEditor(QMainWindow):
         self.btn_remove_speaker.setFixedSize(25, 25)
         self.btn_remove_speaker.setStyleSheet("""
             QPushButton {
-                background-color: #f0f0f0;
-                border: 2px solid #ccc;
+                background-color: palette(button);
+                color: palette(buttontext);
+                border: 2px solid palette(mid);
                 border-radius: 12px;
                 font-size: 16px;
                 font-weight: bold;
                 padding-bottom: 2px;
-                color: #333;
             }
             QPushButton:hover {
-                background-color: #e0e0e0;
-                border-color: #999;
+                background-color: palette(light);
+                border-color: palette(dark);
             }
             QPushButton:pressed {
-                background-color: #d0d0d0;
+                background-color: palette(mid);
             }
             QPushButton:disabled {
-                background-color: #f8f8f8;
-                border-color: #ddd;
-                color: #aaa;
+                background-color: palette(window);
+                border-color: palette(mid);
+                color: palette(disabled, buttontext);
             }
         """)
         self.btn_remove_speaker.clicked.connect(self.decrease_speaker_count)
@@ -469,7 +473,6 @@ class SRTEditor(QMainWindow):
             QLabel {
                 font-size: 14px;
                 font-weight: bold;
-                color: #333;
             }
         """)
         header_layout.addWidget(self.speaker_count_label)
@@ -752,6 +755,8 @@ class SRTEditor(QMainWindow):
         
         self.update_splash("Setting up shortcuts...")
         self.setup_shortcuts()
+        # Apply initial theme QSS (buttons, scrollbars, group boxes, labels)
+        self._apply_theme_qss()
     
     def preload_modules(self):
         """Preload heavy audio modules while splash is still visible."""
@@ -2231,26 +2236,15 @@ CapsQual was engineered with the help of DeepSeek AI.
             speaker_name_edit.editingFinished.connect(lambda checked=False, idx=i: self.rename_speaker(idx))
             speaker_name_edit.setFixedWidth(120)
             speaker_name_edit.setMinimumHeight(18)
-            if self.current_theme == "dark":
-                speaker_name_edit.setStyleSheet("""
-                    QLineEdit {
-                        background-color: #3a3a3a;
-                        color: #ffffff;
-                        border: 2px solid #555;
-                        border-radius: 3px;
-                        padding: 2px;
-                    }
-                """)
-            else:
-                speaker_name_edit.setStyleSheet("""
-                    QLineEdit {
-                        background-color: #ffffff;
-                        color: #000000;
-                        border: 2px solid #ccc;
-                        border-radius: 3px;
-                        padding: 2px;
-                    }
-                """)
+            speaker_name_edit.setStyleSheet("""
+                QLineEdit {
+                    background-color: palette(base);
+                    color: palette(text);
+                    border: 2px solid palette(mid);
+                    border-radius: 3px;
+                    padding: 2px;
+                }
+            """)
             
             speaker_btn = QPushButton(f"Assign ({i+1})")
             speaker_btn.clicked.connect(lambda checked, idx=i: self.assign_speaker(idx))
@@ -2261,7 +2255,7 @@ CapsQual was engineered with the help of DeepSeek AI.
                     QPushButton {{ 
                         background-color: {self.speaker_colors[i].name()}; 
                         color: white;
-                        border: 2px solid #676767;
+                        border: 2px solid palette(mid);
                         padding: 1px 1px;
                         font-weight: bold;
                         min-width: 100px;
@@ -2275,7 +2269,7 @@ CapsQual was engineered with the help of DeepSeek AI.
                 speaker_btn.setStyleSheet(f"""
                     QPushButton {{ 
                         background-color: {self.speaker_colors[i].name()}; 
-                        border: 2px solid darkgray;
+                        border: 2px solid palette(mid);
                         padding: 1px 1px;
                         font-weight: bold;
                         min-width: 100px;
@@ -2406,39 +2400,366 @@ CapsQual was engineered with the help of DeepSeek AI.
             QMessageBox.critical(self, "Error", f"Failed to load audio: {str(e)}")
             self.audio_player = None
             self._clear_waveform_audio()
+    @staticmethod
+    def _light_palette():
+        """QPalette for the light theme."""
+        p = QPalette()
+        p.setColor(QPalette.Window, QColor(240, 240, 240))
+        p.setColor(QPalette.WindowText, QColor(30, 30, 30))
+        p.setColor(QPalette.Base, QColor(255, 255, 255))
+        p.setColor(QPalette.AlternateBase, QColor(245, 245, 245))
+        p.setColor(QPalette.Text, QColor(30, 30, 30))
+        p.setColor(QPalette.Button, QColor(240, 240, 240))
+        p.setColor(QPalette.ButtonText, QColor(30, 30, 30))
+        p.setColor(QPalette.Highlight, QColor(100, 123, 234))
+        p.setColor(QPalette.HighlightedText, QColor(255, 255, 255))
+        p.setColor(QPalette.ToolTipBase, QColor(255, 255, 220))
+        p.setColor(QPalette.ToolTipText, QColor(30, 30, 30))
+        p.setColor(QPalette.Mid, QColor(200, 200, 200))
+        p.setColor(QPalette.Dark, QColor(180, 180, 180))
+        p.setColor(QPalette.Disabled, QPalette.WindowText, QColor(160, 160, 160))
+        p.setColor(QPalette.Disabled, QPalette.Text, QColor(160, 160, 160))
+        p.setColor(QPalette.Disabled, QPalette.ButtonText, QColor(160, 160, 160))
+        return p
+
+    @staticmethod
+    def _dark_palette():
+        """QPalette for the dark theme."""
+        p = QPalette()
+        p.setColor(QPalette.Window, QColor(45, 45, 48))
+        p.setColor(QPalette.WindowText, QColor(200, 200, 200))
+        p.setColor(QPalette.Base, QColor(58, 58, 58))
+        p.setColor(QPalette.AlternateBase, QColor(55, 55, 58))
+        p.setColor(QPalette.Text, QColor(204, 204, 204))
+        p.setColor(QPalette.Button, QColor(58, 58, 58))
+        p.setColor(QPalette.ButtonText, QColor(200, 200, 200))
+        p.setColor(QPalette.Highlight, QColor(100, 123, 234))
+        p.setColor(QPalette.HighlightedText, QColor(255, 255, 255))
+        p.setColor(QPalette.ToolTipBase, QColor(60, 60, 65))
+        p.setColor(QPalette.ToolTipText, QColor(200, 200, 200))
+        p.setColor(QPalette.Mid, QColor(85, 85, 85))
+        p.setColor(QPalette.Dark, QColor(50, 50, 50))
+        p.setColor(QPalette.Disabled, QPalette.WindowText, QColor(120, 120, 120))
+        p.setColor(QPalette.Disabled, QPalette.Text, QColor(120, 120, 120))
+        p.setColor(QPalette.Disabled, QPalette.ButtonText, QColor(120, 120, 120))
+        return p
+
+    def _apply_theme_qss(self):
+        """(Re)apply global stylesheet using palette() references.
+
+        Set on QApplication so that *all* windows (including dialogs)
+        inherit the same QSS rules.  Widget types such as QPushButton,
+        QScrollBar, QCheckBox, QRadioButton, QComboBox, QSpinBox, QSlider,
+        QMenuBar, QToolButton, and QGroupBox ignore QPalette on Windows
+        and require QSS.
+        """
+        app = QApplication.instance()
+        pal = app.palette()
+        # Inject concrete hex colours for sub-controls where palette() is
+        # unreliable (notably QGroupBox::title).
+        _wt = pal.color(QPalette.WindowText).name()
+        _tex = pal.color(QPalette.Text).name()
+        _btn = pal.color(QPalette.Button).name()
+        _btnt = pal.color(QPalette.ButtonText).name()
+        _base = pal.color(QPalette.Base).name()
+        _win = pal.color(QPalette.Window).name()
+        _mid = pal.color(QPalette.Mid).name()
+        _dark = pal.color(QPalette.Dark).name()
+        _light = pal.color(QPalette.Light).name()
+        _hl = pal.color(QPalette.Highlight).name()
+        _hlt = pal.color(QPalette.HighlightedText).name()
+        _dis_btnt = pal.color(QPalette.Disabled, QPalette.ButtonText).name()
+
+        app.setStyleSheet(f"""
+            /* ── Menu bar ─────────────────────────────────────── */
+            QMenuBar {{
+                background-color: {_win};
+                color: {_wt};
+                border-bottom: 1px solid {_mid};
+            }}
+            QMenuBar::item {{
+                background: transparent;
+                color: {_wt};
+                padding: 4px 10px;
+            }}
+            QMenuBar::item:selected {{
+                background-color: {_hl};
+                color: {_hlt};
+            }}
+            QMenu {{
+                background-color: {_win};
+                color: {_wt};
+                border: 1px solid {_mid};
+            }}
+            QMenu::item {{
+                padding: 4px 20px;
+                color: {_wt};
+            }}
+            QMenu::item:selected {{
+                background-color: {_hl};
+                color: {_hlt};
+            }}
+            QMenu::separator {{
+                height: 1px;
+                background: {_mid};
+                margin: 4px 8px;
+            }}
+
+            /* ── Push buttons ─────────────────────────────────── */
+            QPushButton {{
+                background-color: {_btn};
+                color: {_btnt};
+                border: 1px solid {_mid};
+                border-radius: 4px;
+                padding: 4px 8px;
+            }}
+            QPushButton:hover {{
+                background-color: {_light};
+                border-color: {_dark};
+            }}
+            QPushButton:pressed {{
+                background-color: {_mid};
+            }}
+            QPushButton:disabled {{
+                color: {_dis_btnt};
+                border-color: {_mid};
+            }}
+
+            /* ── Message boxes ────────────────────────────────── */
+            QMessageBox {{
+                background-color: {_win};
+                color: {_wt};
+            }}
+            QMessageBox QLabel {{
+                color: {_wt};
+            }}
+            QMessageBox QPushButton {{
+                min-width: 70px;
+            }}
+
+            /* ── Tool buttons (splitter toggle, etc.) ─────────── */
+            QToolButton {{
+                background-color: {_btn};
+                color: {_btnt};
+                border: 1px solid {_mid};
+                border-radius: 4px;
+            }}
+            QToolButton:hover {{
+                background-color: {_light};
+                border-color: {_dark};
+            }}
+
+            /* ── Group boxes ──────────────────────────────────── */
+            QGroupBox {{
+                border: 1px solid {_mid};
+                border-radius: 3px;
+                margin-top: 0.9em;
+                font-size: 11px;
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                left: 8px;
+                padding: 0 4px;
+                color: {_wt};
+            }}
+
+            /* ── Scroll bars ──────────────────────────────────── */
+            QScrollBar:vertical {{
+                background: {_win};
+                width: 10px;
+                margin: 0;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {_mid};
+                min-height: 20px;
+                border-radius: 5px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: {_dark};
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0;
+            }}
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+                background: none;
+            }}
+            QScrollBar:horizontal {{
+                background: {_win};
+                height: 10px;
+                margin: 0;
+            }}
+            QScrollBar::handle:horizontal {{
+                background: {_mid};
+                min-width: 20px;
+                border-radius: 5px;
+            }}
+            QScrollBar::handle:horizontal:hover {{
+                background: {_dark};
+            }}
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+                width: 0;
+            }}
+            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
+                background: none;
+            }}
+
+            /* ── List widget ──────────────────────────────────── */
+            QListWidget {{
+                background-color: {_base};
+                color: {_tex};
+                border: 1px solid {_mid};
+                border-radius: 4px;
+                padding: 2px;
+            }}
+            QListWidget::item {{
+                color: {_tex};
+            }}
+
+            /* ── Check boxes / radio buttons ──────────────────── */
+            QCheckBox, QRadioButton {{
+                color: {_wt};
+                spacing: 4px;
+            }}
+            QCheckBox::indicator, QRadioButton::indicator {{
+                width: 14px;
+                height: 14px;
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {_hl};
+                border: 1px solid {_hl};
+                border-radius: 3px;
+            }}
+            QCheckBox::indicator:unchecked {{
+                background-color: {_base};
+                border: 1px solid {_mid};
+                border-radius: 3px;
+            }}
+            QCheckBox::indicator:disabled {{
+                background-color: {_win};
+                border: 1px solid {_mid};
+            }}
+            QRadioButton::indicator:checked {{
+                background-color: {_hl};
+                border: 1px solid {_hl};
+                border-radius: 7px;
+            }}
+            QRadioButton::indicator:unchecked {{
+                background-color: {_base};
+                border: 1px solid {_mid};
+                border-radius: 7px;
+            }}
+
+            /* ── Combo box (dropdown) ─────────────────────────── */
+            QComboBox {{
+                background-color: {_base};
+                color: {_tex};
+                border: 1px solid {_mid};
+                border-radius: 4px;
+                padding: 2px 6px;
+            }}
+            QComboBox:hover {{
+                border-color: {_dark};
+            }}
+            QComboBox::drop-down {{
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 20px;
+                border-left: 1px solid {_mid};
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {_win};
+                color: {_wt};
+                selection-background-color: {_hl};
+                selection-color: {_hlt};
+            }}
+
+            /* ── Spin boxes ───────────────────────────────────── */
+            QSpinBox, QDoubleSpinBox {{
+                background-color: {_base};
+                color: {_tex};
+                border: 1px solid {_mid};
+                border-radius: 4px;
+                padding: 2px 4px;
+            }}
+
+            /* ── Text input fields ────────────────────────────── */
+            QLineEdit, QTextEdit, QPlainTextEdit {{
+                background-color: {_base};
+                color: {_tex};
+                border: 1px solid {_mid};
+                border-radius: 4px;
+            }}
+            QLineEdit:focus, QTextEdit:focus {{
+                border-color: {_hl};
+            }}
+
+            /* ── Slider (audio progress) ──────────────────────── */
+            QSlider::groove:horizontal {{
+                background: {_mid};
+                height: 6px;
+                border-radius: 3px;
+            }}
+            QSlider::handle:horizontal {{
+                background: {_hl};
+                width: 14px;
+                height: 14px;
+                margin: -4px 0;
+                border-radius: 7px;
+            }}
+            QSlider::sub-page:horizontal {{
+                background: {_hl};
+                border-radius: 3px;
+            }}
+            QSlider::add-page:horizontal {{
+                background: {_mid};
+                border-radius: 3px;
+            }}
+
+            /* ── Labels ───────────────────────────────────────── */
+            QLabel {{
+                color: {_wt};
+            }}
+        """)
+        # ── Per-widget overrides (different border-radius/padding) ──
+        self.text_display.setStyleSheet("""
+            QTextEdit {
+                background-color: palette(base);
+                color: palette(text);
+                border: 2px solid palette(mid);
+                border-radius: 5px;
+                padding: 10px;
+            }
+        """)
+        self.current_info_label.setStyleSheet("""
+            QLabel {
+                background-color: palette(window);
+                color: palette(windowtext);
+                padding: 10px;
+                border: 2px solid palette(mid);
+                border-radius: 5px;
+                font-weight: bold;
+            }
+        """)
+        self.audio_info_label.setStyleSheet("""
+            QLabel {
+                padding: 0px;
+                border-radius: 3px;
+                font-size: 11px;
+            }
+        """)
+
     def apply_viewer_theme(self, theme):
         self.current_theme = theme
+
+        # 1. Set global palette on QApplication — affects every widget
+        app = QApplication.instance()
+        app.setPalette(self._dark_palette() if theme == "dark" else self._light_palette())
+
+        # 2. Re-apply structural QSS so palette() references re-evaluate
+        self._apply_theme_qss()
+
+        # 3. Update speaker colour palette
         if theme == "dark":
-            self.text_display.setStyleSheet("""
-                QTextEdit {
-                    background-color: #2b2b2b;
-                    color: #ffffff;
-                    border: 2px solid #555;
-                    border-radius: 5px;
-                    padding: 10px;
-                }
-            """)
-            self.current_info_label.setStyleSheet("""
-                QLabel {
-                    background-color: #3a3a3a;
-                    color: #ffffff;
-                    padding: 10px;
-                    border: 2px solid #555;
-                    border-radius: 5px;
-                    font-weight: bold;
-                }
-            """)
-            # Unassigned list (dark)
-            self.unassigned_list.setStyleSheet("""
-                QListWidget {
-                    background-color: #3a3a3a;
-                    color: #ffffff;
-                    border: 2px solid #555;
-                    border-radius: 5px;
-                    padding: 4px;
-                }
-            """)
-            # Dark theme palette
             self.speaker_color_palette = [
                 QColor(60, 80, 100),   # Dark blue
                 QColor(100, 60, 60),   # Dark red
@@ -2450,36 +2771,6 @@ CapsQual was engineered with the help of DeepSeek AI.
                 QColor(100, 60, 80)    # Dark pink
             ]
         else:
-            self.text_display.setStyleSheet("""
-                QTextEdit {
-                    background-color: #fafafa;
-                    color: #000000;
-                    border: 2px solid #ddd;
-                    border-radius: 5px;
-                    padding: 10px;
-                }
-            """)
-            self.current_info_label.setStyleSheet("""
-                QLabel {
-                    background-color: #f0f0f0;
-                    color: #000000;
-                    padding: 10px;
-                    border: 2px solid #ccc;
-                    border-radius: 5px;
-                    font-weight: bold;
-                }
-            """)
-            # Unassigned list (light)
-            self.unassigned_list.setStyleSheet("""
-                QListWidget {
-                    background-color: #fafafa;
-                    color: #000000;
-                    border: 2px solid #ddd;
-                    border-radius: 5px;
-                    padding: 4px;
-                }
-            """)
-            # Light theme palette
             self.speaker_color_palette = [
                 QColor(220, 240, 255),  # Light blue
                 QColor(255, 220, 220),  # Light red
@@ -2490,8 +2781,8 @@ CapsQual was engineered with the help of DeepSeek AI.
                 QColor(200, 230, 230),  # Light cyan
                 QColor(255, 210, 230)   # Light pink
             ]
-        
-        # Rebuild speaker colors from new palette
+
+        # 4. Rebuild speaker colors from new palette
         self.speaker_colors = []
         for i in range(len(self.speakers)):
             if i < len(self.speaker_color_palette):
@@ -2499,7 +2790,7 @@ CapsQual was engineered with the help of DeepSeek AI.
             else:
                 self.speaker_colors.append(QColor(200, 200, 200))
 
-        # Sync waveform viewer theme
+        # 5. Sync waveform viewer theme
         if hasattr(self, 'waveform_viewer'):
             self.waveform_viewer.set_theme(theme)
 
@@ -2604,7 +2895,7 @@ CapsQual was engineered with the help of DeepSeek AI.
 
         current_format = QTextCharFormat()
         if self.current_theme == "dark":
-            current_format.setBackground(QColor(120, 120, 200))
+            current_format.setBackground(QColor(80, 80, 160))
         else:
             current_format.setBackground(QColor(255, 240, 200))
         current_format.setFontWeight(QFont.Bold)
