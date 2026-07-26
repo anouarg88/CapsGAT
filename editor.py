@@ -2428,7 +2428,7 @@ CapsQual was engineered with the help of DeepSeek AI.
         p = QPalette()
         p.setColor(QPalette.Window, QColor(45, 45, 48))
         p.setColor(QPalette.WindowText, QColor(200, 200, 200))
-        p.setColor(QPalette.Base, QColor(58, 58, 58))
+        p.setColor(QPalette.Base, QColor(21, 21, 25))
         p.setColor(QPalette.AlternateBase, QColor(55, 55, 58))
         p.setColor(QPalette.Text, QColor(204, 204, 204))
         p.setColor(QPalette.Button, QColor(58, 58, 58))
