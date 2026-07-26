@@ -343,29 +343,29 @@ class WaveformViewer(QWidget):
             lw = hw * 2
 
             if which == 'start':
-                # Label box flush with top, vertical line down to bottom
-                r = QRect(hx - hw, 0, lw, lh)
+                # Label box 1 px from top, vertical line 1 px from bottom
+                r = QRect(hx - hw, 1, lw, lh)
                 p.setPen(QPen(C['handle'], 1))
                 p.setBrush(C['handle_text_bg'])
                 p.drawRect(r)
                 p.setPen(C['text'])
                 p.drawText(r, Qt.AlignCenter, lbl)
                 p.setPen(QPen(C['handle'], 2))
-                p.drawLine(hx, lh, hx, h)
+                p.drawLine(hx, 1 + lh, hx, h - 1)
                 p.setPen(QPen(C['handle'], 1))
-                p.drawLine(hx - tick, h, hx + tick, h)
+                p.drawLine(hx - tick, h - 1, hx + tick, h - 1)
             else:
-                # Label box flush with bottom, vertical line up to top
-                r = QRect(hx - hw, h - lh, lw, lh)
+                # Label box 1 px from bottom, vertical line 1 px from top
+                r = QRect(hx - hw, h - lh - 1, lw, lh)
                 p.setPen(QPen(C['handle'], 1))
                 p.setBrush(C['handle_text_bg'])
                 p.drawRect(r)
                 p.setPen(C['text'])
                 p.drawText(r, Qt.AlignCenter, lbl)
                 p.setPen(QPen(C['handle'], 2))
-                p.drawLine(hx, 0, hx, h - lh)
+                p.drawLine(hx, 1, hx, h - lh - 1)
                 p.setPen(QPen(C['handle'], 1))
-                p.drawLine(hx - tick, 0, hx + tick, 0)
+                p.drawLine(hx - tick, 1, hx + tick, 1)
 
         p.setFont(font)
 
