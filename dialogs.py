@@ -1123,8 +1123,9 @@ class EnhancedSymbolDialog(QDialog):
             self.update_category_display()
 
     def export_custom_symbols(self):
+        base_dir = getattr(self.parent(), '_base_dir_for_dialog', lambda: '')()
         file_path, _ = QFileDialog.getSaveFileName(
-            self, "Export Custom Symbols", "",
+            self, "Export Custom Symbols", base_dir,
             "JSON Files (*.json);;All Files (*)"
         )
         if file_path:
@@ -1136,8 +1137,9 @@ class EnhancedSymbolDialog(QDialog):
                 QMessageBox.critical(self, "Error", f"Could not export: {e}")
 
     def import_custom_symbols(self):
+        base_dir = getattr(self.parent(), '_base_dir_for_dialog', lambda: '')()
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "Import Custom Symbols", "",
+            self, "Import Custom Symbols", base_dir,
             "JSON Files (*.json);;All Files (*)"
         )
         if file_path:
@@ -1337,16 +1339,17 @@ class RichEditDialog(QDialog):
         return self.text_edit.text()
 
 class SettingsDialog(QDialog):
-    def __init__(self, current_font, current_theme, cjk_mode, parent=None):
+    def __init__(self, current_font, current_theme, cjk_mode, base_directory, parent=None):
         super().__init__(parent)
         self.selected_font = current_font
         self.current_theme = current_theme
         self.cjk_mode = cjk_mode
+        self.base_directory = base_directory  # '' means system default
         self.init_ui()
         
     def init_ui(self):
         self.setWindowTitle("Settings")
-        self.setGeometry(100, 100, 400, 200)
+        self.setGeometry(100, 100, 480, 320)
         
         layout = QVBoxLayout(self)
         
@@ -1376,6 +1379,30 @@ class SettingsDialog(QDialog):
         cjk_layout.addWidget(self.cjk_checkbox)
         layout.addLayout(cjk_layout)
         
+        # Default path
+        layout.addWidget(QLabel("Default path:"))
+        self.base_system_radio = QRadioButton("System default")
+        self.base_system_radio.setChecked(not self.base_directory)
+        layout.addWidget(self.base_system_radio)
+
+        custom_row = QHBoxLayout()
+        self.base_custom_radio = QRadioButton("Custom path:")
+        self.base_custom_radio.setChecked(bool(self.base_directory))
+        self.base_path_input = QLineEdit()
+        self.base_path_input.setReadOnly(True)
+        self.base_path_input.setPlaceholderText("System default")
+        self.browse_btn = QPushButton("Browse…")
+        self.browse_btn.clicked.connect(self.select_base_dir)
+        self._update_base_path_display()
+        # Enable/disable input + button when radio toggles
+        self.base_system_radio.toggled.connect(self._on_base_radio_toggled)
+        self.base_custom_radio.toggled.connect(self._on_base_radio_toggled)
+        custom_row.addWidget(self.base_custom_radio)
+        custom_row.addWidget(self.base_path_input)
+        custom_row.addWidget(self.browse_btn)
+        custom_row.addStretch()
+        layout.addLayout(custom_row)
+
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
@@ -1395,6 +1422,31 @@ class SettingsDialog(QDialog):
     
     def get_cjk_mode(self):
         return self.cjk_checkbox.isChecked()
+    
+    def _update_base_path_display(self):
+        if self.base_custom_radio.isChecked() and self.base_directory:
+            self.base_path_input.setText(self.base_directory)
+        else:
+            self.base_path_input.clear()
+        self.base_path_input.setEnabled(self.base_custom_radio.isChecked())
+        self.browse_btn.setEnabled(self.base_custom_radio.isChecked())
+
+    def _on_base_radio_toggled(self):
+        self._update_base_path_display()
+
+    def select_base_dir(self):
+        start_dir = self.base_directory if self.base_directory else ""
+        directory = QFileDialog.getExistingDirectory(
+            self, "Choose Default Path", start_dir
+        )
+        if directory:
+            self.base_directory = directory
+            self.base_path_input.setText(directory)
+    
+    def get_base_directory(self):
+        if self.base_system_radio.isChecked():
+            return ""
+        return self.base_directory
 
 class ProjectMemoDialog(QDialog):
     def __init__(self, project_name="", project_memo="", parent=None):

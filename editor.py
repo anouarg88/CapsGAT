@@ -1226,7 +1226,7 @@ class SRTEditor(QMainWindow):
     def export_custom_symbols(self):
         """Export custom symbols to file"""
         file_path, _ = QFileDialog.getSaveFileName(
-            self, "Export Custom Symbols", "",
+            self, "Export Custom Symbols", self._base_dir_for_dialog(),
             "JSON Files (*.json);;All Files (*)"
         )
         if file_path:
@@ -1240,7 +1240,7 @@ class SRTEditor(QMainWindow):
     def import_custom_symbols(self):
         """Import custom symbols from file"""
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "Import Custom Symbols", "",
+            self, "Import Custom Symbols", self._base_dir_for_dialog(),
             "JSON Files (*.json);;All Files (*)"
         )
         if file_path:
@@ -1421,7 +1421,7 @@ class SRTEditor(QMainWindow):
     def load_audio_file(self):
         """Load an audio file using appropriate player"""
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "Load Audio File", "", 
+            self, "Load Audio File", self._base_dir_for_dialog(), 
             "Audio Files (*.mp3 *.wav *.ogg *.m4a *.flac *.aac *.wma);;All Files (*)"
         )
         
@@ -2048,17 +2048,31 @@ CapsQual was engineered with the help of DeepSeek AI.
         """Save project with new filename"""
         self.save_project(force_save_as=True)
         
+    def _base_dir_for_dialog(self):
+        """Return the user-configured base directory, or '' for system default."""
+        base = QSettings('CapsQual', 'Preferences').value('base_directory', '')
+        if base and Path(base).is_dir():
+            return base
+        return ''
+
     def open_settings(self):
         old_font = QFont(self.text_display_font)
         old_cjk = self.cjk_mode
-        dialog = SettingsDialog(self.text_display_font, self.current_theme, self.cjk_mode, self)
+        old_base = QSettings('CapsQual', 'Preferences').value('base_directory', '')
+        dialog = SettingsDialog(self.text_display_font, self.current_theme, self.cjk_mode,
+                                old_base, self)
         if dialog.exec_() == QDialog.Accepted:
             new_font = dialog.get_font()
             new_cjk = dialog.get_cjk_mode()
             theme = dialog.get_theme()
+            new_base = dialog.get_base_directory()
 
             # Apply theme globally (persisted via QSettings — not a project change)
             self.apply_viewer_theme(theme)
+
+            # Apply base directory globally
+            if new_base != old_base:
+                QSettings('CapsQual', 'Preferences').setValue('base_directory', new_base)
 
             # Apply font and CJK mode
             font_changed = (new_font.family() != old_font.family() or
@@ -2100,7 +2114,7 @@ CapsQual was engineered with the help of DeepSeek AI.
             return
             
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "Open File", "", 
+            self, "Open File", self._base_dir_for_dialog(), 
             "All Supported Files (*.srt *.vtt *.txt *.json *.tsv);;SRT Files (*.srt);;VTT Files (*.vtt);;Text Files (*.txt);;JSON Files (*.json);;TSV Files (*.tsv)"
         )
         if file_path:
@@ -2181,7 +2195,7 @@ CapsQual was engineered with the help of DeepSeek AI.
         if not self.check_unsaved_changes():
             return
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "Load Project", "",
+            self, "Load Project", self._base_dir_for_dialog(),
             "CapsQual/CapsGAT Project (*.capsqual *.capsgat);;All Files (*)"
         )
         if file_path:
@@ -4224,6 +4238,11 @@ CapsQual was engineered with the help of DeepSeek AI.
                     default_name = str(Path(self.current_file_path).with_suffix('.capsqual'))
                 else:
                     default_name = "transcript_project.capsqual"
+                # Prepend base directory to bare filenames
+                if default_name and not os.path.dirname(default_name):
+                    base = self._base_dir_for_dialog()
+                    if base:
+                        default_name = os.path.join(base, default_name)
 
             file_path, _ = QFileDialog.getSaveFileName(
                 self,
@@ -4371,6 +4390,12 @@ CapsQual was engineered with the help of DeepSeek AI.
             default_name += suffix
 
         default_name += file_ext
+
+        # Prepend base directory to bare filenames
+        if default_name and not os.path.dirname(default_name):
+            base = self._base_dir_for_dialog()
+            if base:
+                default_name = os.path.join(base, default_name)
 
         file_path, _ = QFileDialog.getSaveFileName(
             self, f"Export Transcript", default_name,
