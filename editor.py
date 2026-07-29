@@ -441,25 +441,10 @@ class SRTEditor(QMainWindow):
         self.btn_remove_speaker.setFixedSize(25, 25)
         self.btn_remove_speaker.setStyleSheet("""
             QPushButton {
-                background-color: palette(button);
-                color: palette(buttontext);
-                border: 2px solid palette(mid);
                 border-radius: 12px;
                 font-size: 16px;
                 font-weight: bold;
-                padding-bottom: 2px;
-            }
-            QPushButton:hover {
-                background-color: palette(light);
-                border-color: palette(dark);
-            }
-            QPushButton:pressed {
-                background-color: palette(mid);
-            }
-            QPushButton:disabled {
-                background-color: palette(window);
-                border-color: palette(mid);
-                color: palette(disabled, buttontext);
+                padding: 0px;
             }
         """)
         self.btn_remove_speaker.clicked.connect(self.decrease_speaker_count)
@@ -2409,7 +2394,7 @@ CapsQual was engineered with the help of DeepSeek AI.
         p.setColor(QPalette.Base, QColor(255, 255, 255))
         p.setColor(QPalette.AlternateBase, QColor(245, 245, 245))
         p.setColor(QPalette.Text, QColor(30, 30, 30))
-        p.setColor(QPalette.Button, QColor(240, 240, 240))
+        p.setColor(QPalette.Button, QColor(255, 255, 255))
         p.setColor(QPalette.ButtonText, QColor(30, 30, 30))
         p.setColor(QPalette.Highlight, QColor(100, 123, 234))
         p.setColor(QPalette.HighlightedText, QColor(255, 255, 255))
@@ -2469,6 +2454,13 @@ CapsQual was engineered with the help of DeepSeek AI.
         _hl = pal.color(QPalette.Highlight).name()
         _hlt = pal.color(QPalette.HighlightedText).name()
         _dis_btnt = pal.color(QPalette.Disabled, QPalette.ButtonText).name()
+        # Compute button hover colours per theme
+        if self.current_theme == "dark":
+            _btn_hover = QColor(70, 70, 73).name()  # slightly brighter than button(58)
+            _btnt_hover = pal.color(QPalette.ButtonText).name()  # same text colour
+        else:
+            _btn_hover = _hl  # use highlight blue in light mode
+            _btnt_hover = _hlt  # white text on blue
 
         app.setStyleSheet(f"""
             /* ── Menu bar ─────────────────────────────────────── */
@@ -2514,13 +2506,15 @@ CapsQual was engineered with the help of DeepSeek AI.
                 padding: 4px 8px;
             }}
             QPushButton:hover {{
-                background-color: {_light};
+                background-color: {_btn_hover};
+                color: {_btnt_hover};
                 border-color: {_dark};
             }}
             QPushButton:pressed {{
                 background-color: {_mid};
             }}
             QPushButton:disabled {{
+                background-color: {_win};
                 color: {_dis_btnt};
                 border-color: {_mid};
             }}
@@ -2545,8 +2539,14 @@ CapsQual was engineered with the help of DeepSeek AI.
                 border-radius: 4px;
             }}
             QToolButton:hover {{
-                background-color: {_light};
+                background-color: {_btn_hover};
+                color: {_btnt_hover};
                 border-color: {_dark};
+            }}
+            QToolButton:disabled {{
+                background-color: {_win};
+                color: {_dis_btnt};
+                border-color: {_mid};
             }}
 
             /* ── Group boxes ──────────────────────────────────── */
@@ -2614,11 +2614,19 @@ CapsQual was engineered with the help of DeepSeek AI.
             QListWidget::item {{
                 color: {_tex};
             }}
+            QListWidget:disabled {{
+                background-color: {_win};
+                color: {_dis_btnt};
+                border-color: {_mid};
+            }}
 
             /* ── Check boxes / radio buttons ──────────────────── */
             QCheckBox, QRadioButton {{
                 color: {_wt};
                 spacing: 4px;
+            }}
+            QCheckBox:disabled, QRadioButton:disabled {{
+                color: {_dis_btnt};
             }}
             QCheckBox::indicator, QRadioButton::indicator {{
                 width: 14px;
@@ -2627,19 +2635,28 @@ CapsQual was engineered with the help of DeepSeek AI.
             QCheckBox::indicator:checked {{
                 background-color: {_hl};
                 border: 1px solid {_hl};
-                border-radius: 3px;
             }}
             QCheckBox::indicator:unchecked {{
                 background-color: {_base};
                 border: 1px solid {_mid};
-                border-radius: 3px;
             }}
-            QCheckBox::indicator:disabled {{
+            QCheckBox::indicator:hover:unchecked {{
+                border-color: {_hl};
+            }}
+            QCheckBox::indicator:disabled:checked {{
+                background-color: {_mid};
+                border: 1px solid {_mid};
+            }}
+            QCheckBox::indicator:disabled:unchecked {{
                 background-color: {_win};
                 border: 1px solid {_mid};
             }}
             QRadioButton::indicator:checked {{
-                background-color: {_hl};
+                background: qradialgradient(
+                    cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5,
+                    stop:0 #ffffff, stop:0.40 #ffffff,
+                    stop:0.42 {_hl}, stop:1 {_hl}
+                );
                 border: 1px solid {_hl};
                 border-radius: 7px;
             }}
@@ -2647,6 +2664,9 @@ CapsQual was engineered with the help of DeepSeek AI.
                 background-color: {_base};
                 border: 1px solid {_mid};
                 border-radius: 7px;
+            }}
+            QRadioButton::indicator:hover:unchecked {{
+                border-color: {_hl};
             }}
 
             /* ── Combo box (dropdown) ─────────────────────────── */
@@ -2659,6 +2679,11 @@ CapsQual was engineered with the help of DeepSeek AI.
             }}
             QComboBox:hover {{
                 border-color: {_dark};
+            }}
+            QComboBox:disabled {{
+                background-color: {_win};
+                color: {_dis_btnt};
+                border-color: {_mid};
             }}
             QComboBox::drop-down {{
                 subcontrol-origin: padding;
@@ -2681,6 +2706,11 @@ CapsQual was engineered with the help of DeepSeek AI.
                 border-radius: 4px;
                 padding: 2px 4px;
             }}
+            QSpinBox:disabled, QDoubleSpinBox:disabled {{
+                background-color: {_win};
+                color: {_dis_btnt};
+                border-color: {_mid};
+            }}
 
             /* ── Text input fields ────────────────────────────── */
             QLineEdit, QTextEdit, QPlainTextEdit {{
@@ -2691,6 +2721,11 @@ CapsQual was engineered with the help of DeepSeek AI.
             }}
             QLineEdit:focus, QTextEdit:focus {{
                 border-color: {_hl};
+            }}
+            QLineEdit:disabled, QTextEdit:disabled, QPlainTextEdit:disabled {{
+                background-color: {_win};
+                color: {_dis_btnt};
+                border-color: {_mid};
             }}
 
             /* ── Slider (audio progress) ──────────────────────── */
@@ -2718,6 +2753,9 @@ CapsQual was engineered with the help of DeepSeek AI.
             /* ── Labels ───────────────────────────────────────── */
             QLabel {{
                 color: {_wt};
+            }}
+            QLabel:disabled {{
+                color: {_dis_btnt};
             }}
         """)
         # ── Per-widget overrides (different border-radius/padding) ──
@@ -2761,14 +2799,14 @@ CapsQual was engineered with the help of DeepSeek AI.
         # 3. Update speaker colour palette
         if theme == "dark":
             self.speaker_color_palette = [
-                QColor(60, 80, 100),   # Dark blue
-                QColor(100, 60, 60),   # Dark red
-                QColor(60, 100, 60),   # Dark green
-                QColor(100, 100, 60),  # Dark yellow
-                QColor(80, 60, 100),   # Dark purple
-                QColor(100, 70, 50),   # Dark orange
-                QColor(50, 80, 80),    # Dark cyan
-                QColor(100, 60, 80)    # Dark pink
+                QColor(80, 120, 160),   # Steel blue
+                QColor(170, 80, 80),    # Brick red
+                QColor(75, 155, 75),    # Forest green
+                QColor(170, 170, 80),   # Olive yellow
+                QColor(130, 80, 170),   # Amethyst
+                QColor(175, 110, 60),   # Burnt orange
+                QColor(65, 130, 130),   # Teal
+                QColor(170, 80, 120)    # Rose
             ]
         else:
             self.speaker_color_palette = [
@@ -2793,6 +2831,37 @@ CapsQual was engineered with the help of DeepSeek AI.
         # 5. Sync waveform viewer theme
         if hasattr(self, 'waveform_viewer'):
             self.waveform_viewer.set_theme(theme)
+        # 6. Update export button style for current theme
+        if theme == "dark":
+            self.btn_quick_export.setStyleSheet("""
+                QPushButton {
+                    background-color: #1e7230;
+                    padding: 2px 7px;
+                    font-size: 12px;
+                    font-weight: bold;
+                    color: white;
+                    border: 0px;
+                    border-radius: 5px;
+                }
+                QPushButton:hover {
+                    background-color: #2d9e45;
+                }
+            """)
+        else:
+            self.btn_quick_export.setStyleSheet("""
+                QPushButton {
+                    background-color: #124607;
+                    padding: 2px 7px;
+                    font-size: 12px;
+                    font-weight: bold;
+                    color: white;
+                    border: 0px;
+                    border-radius: 5px;
+                }
+                QPushButton:hover {
+                    background-color: #71906a;
+                }
+            """)
 
         self.create_speaker_widgets()
         self.update_display()
