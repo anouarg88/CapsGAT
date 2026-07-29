@@ -74,21 +74,23 @@ Hello world
 00:00:03.000 --> 00:00:04.500
 Second line
 """
-    blocks = parse_vtt(content)
+    blocks, speakers = parse_vtt(content)
     assert len(blocks) == 2
     assert blocks[0]['text'] == "Hello world"
     assert blocks[0]['start_time'] == "00:00:01,000"
     assert blocks[0]['end_time'] == "00:00:02,500"
     assert blocks[1]['text'] == "Second line"
+    assert speakers == []
 
 def test_parse_vtt_no_header():
     """WebVTT content without the WEBVTT header should still parse."""
     content = """00:00:01.000 --> 00:00:02.500
 Hello world
 """
-    blocks = parse_vtt(content)
+    blocks, speakers = parse_vtt(content)
     assert len(blocks) == 1
     assert blocks[0]['text'] == "Hello world"
+    assert speakers == []
 
 def test_parse_vtt_with_cue_settings():
     """VTT cues with settings after the timestamp should be ignored."""
@@ -97,7 +99,7 @@ def test_parse_vtt_with_cue_settings():
 00:00:01.000 --> 00:00:02.500 align:start line:90%
 Hello world
 """
-    blocks = parse_vtt(content)
+    blocks, speakers = parse_vtt(content)
     assert len(blocks) == 1
     assert blocks[0]['text'] == "Hello world"
 
@@ -108,18 +110,19 @@ def test_parse_vtt_comma_separator():
 00:00:01,000 --> 00:00:02,500
 Hello world
 """
-    blocks = parse_vtt(content)
+    blocks, speakers = parse_vtt(content)
     assert len(blocks) == 1
     assert blocks[0]['start_time'] == "00:00:01,000"
 
 def test_parse_vtt_header_only():
-    """Only a WEBVTT header with no cues should return empty list."""
+    """Only a WEBVTT header with no cues should return empty lists."""
     content = "WEBVTT\n"
-    blocks = parse_vtt(content)
+    blocks, speakers = parse_vtt(content)
     assert blocks == []
+    assert speakers == []
 
 def test_parse_vtt_speaker_prefix():
-    """VTT cues with Speaker: text should preserve the speaker prefix."""
+    """VTT cues with Speaker: text should preserve the prefix (no <v> tag, so speaker is None)."""
     content = """WEBVTT
 
 00:00:01.000 --> 00:00:02.500
@@ -128,12 +131,13 @@ Alice: Hello world
 00:00:03.000 --> 00:00:04.500
 Bob: Hi there
 """
-    blocks = parse_vtt(content)
+    blocks, speakers = parse_vtt(content)
     assert len(blocks) == 2
     assert blocks[0]['text'] == "Alice: Hello world"
     assert blocks[1]['text'] == "Bob: Hi there"
-    # Speaker is not parsed by parse_vtt itself — that's CLI's job
+    # Without <v> tags, speaker prefix stays in text (CLI's _apply_speaker_pattern handles it)
     assert blocks[0]['speaker'] is None
+    assert speakers == []
 
 
 def test_convert_vtt_tags_bold():
@@ -168,31 +172,31 @@ def test_convert_vtt_tags_unclosed():
     assert result == "#@BHello"
 
 def test_convert_vtt_tags_voice_basic():
-    """<v Alice> extracts speaker and prepends Speaker: prefix."""
+    """<v Alice> extracts speaker, strips tag, returns clean text."""
     from parsers import _convert_vtt_tags
     result, speaker = _convert_vtt_tags("<v Alice>Hello world")
-    assert result == "Alice: Hello world"
+    assert result == "Hello world"
     assert speaker == "Alice"
 
 def test_convert_vtt_tags_voice_with_closing():
-    """<v Alice>text</v> strips both tags and prepends prefix."""
+    """<v Alice>text</v> strips both tags, returns clean text."""
     from parsers import _convert_vtt_tags
     result, speaker = _convert_vtt_tags("<v Alice>Hello world</v>")
-    assert result == "Alice: Hello world"
+    assert result == "Hello world"
     assert speaker == "Alice"
 
 def test_convert_vtt_tags_voice_with_class():
     """<v.loud Bob> ignores voice class, extracts speaker."""
     from parsers import _convert_vtt_tags
     result, speaker = _convert_vtt_tags("<v.loud Bob>Hello")
-    assert result == "Bob: Hello"
+    assert result == "Hello"
     assert speaker == "Bob"
 
 def test_convert_vtt_tags_voice_multiword_name():
     """Speaker names with spaces are preserved."""
     from parsers import _convert_vtt_tags
     result, speaker = _convert_vtt_tags("<v Alice Smith>Hello</v>")
-    assert result == "Alice Smith: Hello"
+    assert result == "Hello"
     assert speaker == "Alice Smith"
 
 def test_convert_vtt_tags_class_span_stripped():
@@ -206,7 +210,7 @@ def test_convert_vtt_tags_mixed():
     """Voice tag + formatting tags in one cue."""
     from parsers import _convert_vtt_tags
     result, speaker = _convert_vtt_tags("<v Alice><b>Hello</b> world <i>there</i>")
-    assert result == "Alice: #@BHello#@/B world #@Ithere#@/I"
+    assert result == "#@BHello#@/B world #@Ithere#@/I"
     assert speaker == "Alice"
 
 def test_parse_vtt_note_blocks_skipped():
@@ -223,7 +227,7 @@ First cue
 00:00:03.000 --> 00:00:04.500
 Second cue
 """
-    blocks = parse_vtt(content)
+    blocks, speakers = parse_vtt(content)
     assert len(blocks) == 2
     assert blocks[0]['text'] == "First cue"
     assert blocks[1]['text'] == "Second cue"
@@ -238,10 +242,13 @@ def test_parse_vtt_with_voice_tags():
 00:00:03.000 --> 00:00:04.500
 <v Bob>Hi there</v>
 """
-    blocks = parse_vtt(content)
+    blocks, speakers = parse_vtt(content)
     assert len(blocks) == 2
-    assert blocks[0]['text'] == "Alice: Hello world"
-    assert blocks[1]['text'] == "Bob: Hi there"
+    assert blocks[0]['text'] == "Hello world"
+    assert blocks[0]['speaker'] == 0
+    assert blocks[1]['text'] == "Hi there"
+    assert blocks[1]['speaker'] == 1
+    assert speakers == ["Alice", "Bob"]
 
 def test_parse_vtt_with_formatting_tags():
     """Full parse_vtt with bold/italic formatting tags."""
@@ -253,9 +260,10 @@ def test_parse_vtt_with_formatting_tags():
 00:00:03.000 --> 00:00:04.500
 <u>Underlined</u> word
 """
-    blocks = parse_vtt(content)
+    blocks, speakers = parse_vtt(content)
     assert blocks[0]['text'] == "#@BBold#@/B and #@Iitalic#@/I text"
     assert blocks[1]['text'] == "#@UUnderlined#@/U word"
+    assert speakers == []
 
 def test_parse_vtt_note_before_cues():
     """NOTE block before the first cue is skipped."""
@@ -267,6 +275,6 @@ Some metadata here
 00:00:01.000 --> 00:00:02.500
 First cue
 """
-    blocks = parse_vtt(content)
+    blocks, speakers = parse_vtt(content)
     assert len(blocks) == 1
     assert blocks[0]['text'] == "First cue"

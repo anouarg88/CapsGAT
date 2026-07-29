@@ -288,9 +288,9 @@ class TestConversion:
         with open(out_file, encoding="utf-8") as f:
             content = f.read()
         # TiQ blank lines appear as a line with just a number (and trailing space)
-        # Pattern: "1 A: ...\n2 \n3 B: ..."
-        assert "A:" in content
-        assert "B:" in content
+        # Pattern: "1 Alice: ...\n2 \n3 Bob: ..."
+        assert "Alice:" in content
+        assert "Bob:" in content
         # There should be more lines with blank-lines enabled
         line_count = len(content.split("\n"))
         assert line_count >= 3  # at least 3 lines including blank ones
