@@ -12,9 +12,7 @@ from pathlib import Path
 from datetime import datetime
 from collections import deque
 import queue
-import threading
 import string
-import time
 import copy
 
 from PyQt5.QtWidgets import (
@@ -47,7 +45,7 @@ from export import (
 from transcript import Transcript
 from parsers import parse_srt, parse_text, parse_tsv, parse_json, parse_vtt
 from highlighting import FormattingMarkerHighlighter
-from audio_players import SimpleAudioPlayer, VlcAudioPlayer, has_pyaudio
+from audio_players import VlcAudioPlayer
 from dialogs import (
     TextSelectionDialog, BlockSplitDialog, EnhancedSymbolDialog, CommentDialog,
     RichEditDialog, EditTimestampsDialog, SettingsDialog, ProjectMemoDialog, JsonImportDialog,
@@ -778,10 +776,8 @@ class SRTEditor(QMainWindow):
         self._apply_theme_qss()
     
     def preload_modules(self):
-        """Preload heavy audio modules while splash is still visible."""
-        # These imports will happen now, while splash is up
+        """Preload heavy modules while splash is still visible."""
         try:
-            import pyaudio
             import soundfile
             import numpy
         except ImportError:
@@ -855,7 +851,12 @@ class SRTEditor(QMainWindow):
             if ext in ('.capsqual', '.capsgat'):
                 self.load_project_from_path(path)
             else:
+                # Non-project files are imported fresh — reset project-scoped state
+                # first, so stale metadata (name, memo, audio) doesn't leak from
+                # the previously open project.
+                self._reset_project_state()
                 self.load_file_from_path(path)
+                self.clear_unsaved_changes()
                
                 
     def push_undo(self):
@@ -870,6 +871,59 @@ class SRTEditor(QMainWindow):
         if len(self.undo_stack) > self.max_undo:
             self.undo_stack.pop(0)
         self.update_undo_redo_actions()
+
+    def _reset_project_state(self):
+        """Clear project-scoped state for a fresh file import.
+
+        Resets everything NOT reloaded by load_file_from_path, so stale metadata
+        (project name, memo, audio) from a previous session does not leak when
+        opening a subtitle file from the recent-files list.
+        """
+        # ── Project identity ────────────────────────────────────
+        self.project_name = ""
+        self.project_memo = ""
+        self.source_file = ""
+
+        # ── Audio ────────────────────────────────────────────────
+        if self.audio_player:
+            self.audio_player.cleanup()
+            self.audio_player = None
+        self.audio_file_path = None
+        self._clear_waveform_audio()
+        self.audio_info_label.setText("No audio loaded")
+        self.playback_speed = 1.0
+        self.speed_knob.value = 1.0
+        self.speed_knob.update()
+        self.speed_normal_btn.setText("1.0x")
+        self.original_audio_duration = 0
+        self.is_playing = False
+        self.auto_sync_enabled = False
+        self.auto_pause_enabled = False
+        self.auto_sync_check.setChecked(False)
+        self.auto_pause_check.setChecked(False)
+        self.auto_sync_check.setEnabled(False)
+        self.auto_pause_check.setEnabled(False)
+        self.audio_progress.setEnabled(False)
+        self.audio_progress.setValue(0)
+        self.time_label.setText("00:00 / 00:00")
+        self.btn_play.setEnabled(False)
+        self.btn_rewind.setEnabled(False)
+        self.btn_forward.setEnabled(False)
+        self.btn_play_segment.setEnabled(False)
+        self.update_speed_controls_state()
+
+        # ── Speakers ─────────────────────────────────────────────
+        self.speakers = ["A", "B", "C", "D"]
+        self.speaker_colors = self.speaker_color_palette[:4]
+        self.speaker_count_label.setText("4")
+        self.create_speaker_widgets()
+        self.setup_shortcuts()
+
+        # ── Metadata / flags ─────────────────────────────────────
+        self.cjk_mode = False
+        self.timestamp_style = "curly"
+        self.custom_timestamp_pattern = "{HH:mm:ss}"
+        self.file_has_timestamps = False
 
     def undo(self):
         if not self.undo_stack:
@@ -1404,18 +1458,15 @@ class SRTEditor(QMainWindow):
                     self.auto_sync_with_audio(current_time)
     
     def update_speed_controls_state(self):
-        """Enable speed controls only if the current player is a VlcAudioPlayer."""
-        if self.audio_player and isinstance(self.audio_player, VlcAudioPlayer):
-            self.speed_knob.setEnabled(True)
-            self.speed_slower_btn.setEnabled(True)
-            self.speed_normal_btn.setEnabled(True)
-            self.speed_faster_btn.setEnabled(True)
+        """Enable speed controls when an audio player is active."""
+        enabled = self.audio_player is not None
+        self.speed_knob.setEnabled(enabled)
+        self.speed_slower_btn.setEnabled(enabled)
+        self.speed_normal_btn.setEnabled(enabled)
+        self.speed_faster_btn.setEnabled(enabled)
+        if enabled:
             self.speed_knob.setToolTip("Adjust playback speed")
         else:
-            self.speed_knob.setEnabled(False)
-            self.speed_slower_btn.setEnabled(False)
-            self.speed_normal_btn.setEnabled(False)
-            self.speed_faster_btn.setEnabled(False)
             self.speed_knob.setToolTip("Speed control requires VLC media player")
     
     def load_audio_file(self):
@@ -1467,23 +1518,14 @@ class SRTEditor(QMainWindow):
         
         self.update_splash("Loading audio player...")
         
-        # Try to create VLC player first
         try:
             self.audio_player = VlcAudioPlayer()
-            player_name = "VLC"
-            vlc_ok = True
         except Exception as e:
             logger.warning(f"VLC not available: {e}")
-            # Fallback to simple player
-            if has_pyaudio():
-                self.audio_player = SimpleAudioPlayer()
-                player_name = "Simple (fallback)"
-                vlc_ok = False
-            else:
-                QMessageBox.warning(self, "No Audio Backend", 
-                    "Neither VLC nor PyAudio is available.\n\n"
-                    "Please install VLC from https://www.videolan.org/vlc/")
-                return
+            QMessageBox.warning(self, "VLC Required",
+                "VLC media player is not available.\n\n"
+                "Please install VLC from https://www.videolan.org/vlc/")
+            return
         
         # Connect signals
         self.audio_player.playback_started.connect(self.on_playback_started)
@@ -1503,14 +1545,7 @@ class SRTEditor(QMainWindow):
             audio_name = Path(file_path).name
 
             # Update status label
-            # Update status label            audio_name = Path(file_path).name
-            
-            # Update status label
-            if vlc_ok:
-                status = f"Audio loaded: {audio_name}"
-            else:
-                status = f"Audio loaded: {audio_name} (⚠ VLC not found)"
-            self.audio_info_label.setText(status)
+            self.audio_info_label.setText(f"Audio loaded: {audio_name}")
             
             # Enable basic controls
             self.btn_play.setEnabled(True)
@@ -1524,7 +1559,7 @@ class SRTEditor(QMainWindow):
             # Update speed controls based on player type
             self.update_speed_controls_state()
             
-            logger.info(f"Audio loaded with {player_name} player: {audio_name}")
+            logger.info(f"Audio loaded with VLC player: {audio_name}")
         else:
             QMessageBox.critical(self, "Error", f"Failed to load audio file (Install VLC)")
             self.audio_player = None
@@ -1541,10 +1576,6 @@ class SRTEditor(QMainWindow):
             self.btn_play.setText("▶ (End)")
             self.is_playing = False
         else:
-            # For fallback player, ensure thread is running
-            if isinstance(self.audio_player, SimpleAudioPlayer) and not self.audio_player.isRunning():
-                self.audio_player.start()
-            
             self.audio_player.play()
             self.btn_play.setText("⏸ (End)")
             self.is_playing = True
@@ -1615,12 +1646,6 @@ class SRTEditor(QMainWindow):
         if not self.audio_player:
             QMessageBox.information(self, "No Audio",
                 "No audio file loaded.")
-            return
-
-        if not isinstance(self.audio_player, VlcAudioPlayer):
-            QMessageBox.information(self, "Speed Control Not Available",
-                "Playback speed control requires VLC media player.\n\n"
-                "Please install VLC from https://www.videolan.org/vlc/")
             return
 
         new_speed = max(0.5, min(2.0, new_speed))
@@ -2240,6 +2265,17 @@ CapsQual was engineered with the help of DeepSeek AI.
 
             self.current_block_index = project_data['current_block_index']
             self.transcript.speakers = project_data['speakers']
+            # Rebuild speaker UI to match loaded speaker list
+            self.speaker_colors = []
+            for i in range(len(self.speakers)):
+                if i < len(self.speaker_color_palette):
+                    self.speaker_colors.append(self.speaker_color_palette[i])
+                else:
+                    self.speaker_colors.append(QColor(200, 200, 200))
+            self.speaker_count_label.setText(str(len(self.speakers)))
+            self.create_speaker_widgets()
+            self.setup_shortcuts()
+
             # Use the actual project file path being opened, not the stored source_file
             self.current_file_path = file_path
             # Preserve original source file path separately for reference
@@ -2410,18 +2446,11 @@ CapsQual was engineered with the help of DeepSeek AI.
             self.audio_player.cleanup()
             self.audio_player = None
 
-        # Try to create VLC player first
         try:
             self.audio_player = VlcAudioPlayer()
-            vlc_ok = True
         except Exception:
-            # Fallback to simple player
-            if has_pyaudio():
-                self.audio_player = SimpleAudioPlayer()
-                vlc_ok = False
-            else:
-                logger.error("No audio backend available for project loading")
-                return
+            logger.error("VLC not available for project audio loading")
+            return
 
         # Connect signals
         self.audio_player.playback_started.connect(self.on_playback_started)
