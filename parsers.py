@@ -85,22 +85,76 @@ _VTT_TIMESTAMP_RE = re.compile(
     r'(\d{2}):(\d{2}):(\d{2})[.,](\d{3})'
 )
 
+# Matches WebVTT inline tags: <v Speaker>, <b>, <i>, <u>, <c.class>,
+# and their closing counterparts.
+_VTT_TAG_RE = re.compile(
+    r'<v(?:\.[a-zA-Z][\w-]*)?\s+(?P<voice>[^>]+)>'  # <v SpeakerName>
+    r'|</v>'                                           # </v>
+    r'|(?P<bold_open><b>)'                             # <b>
+    r'|(?P<bold_close></b>)'                           # </b>
+    r'|(?P<italic_open><i>)'                           # <i>
+    r'|(?P<italic_close></i>)'                         # </i>
+    r'|(?P<underline_open><u>)'                        # <u>
+    r'|(?P<underline_close></u>)'                      # </u>
+    r'|</?c(?:\.[a-zA-Z][\w-]*)?>'                     # <c.class> / </c>
+)
+
+# CapsQual internal formatting markers
+_VTT_TO_CAPSQUAL = {
+    '<b>':  '#@B',   '</b>':  '#@/B',
+    '<i>':  '#@I',   '</i>':  '#@/I',
+    '<u>':  '#@U',   '</u>':  '#@/U',
+}
+
+
+def _convert_vtt_tags(text: str) -> tuple[str, str | None]:
+    """Convert WebVTT inline tags into CapsQual's internal format.
+
+    Returns ``(converted_text, voice_speaker_or_none)``.
+    - ``<v SpeakerName>`` → speaker extracted, tag stripped
+    - ``<b>`` / ``<i>`` / ``<u>`` → ``#@B`` / ``#@I`` / ``#@U`` markers
+    - ``<c.class>`` / ``</c>`` → stripped (class spans not directly supported)
+    """
+    speaker: str | None = None
+
+    def _sub(m: re.Match) -> str:
+        nonlocal speaker
+        if m.group('voice'):
+            # <v SpeakerName> — extract speaker, strip tag
+            speaker = m.group('voice').strip()
+            return ''
+        if m.group(0) == '</v>':
+            return ''
+        for raw, marker in _VTT_TO_CAPSQUAL.items():
+            if m.group(0) == raw:
+                return marker
+        # <c.class> or </c> — strip
+        return ''
+
+    converted = _VTT_TAG_RE.sub(_sub, text)
+
+    # Collapse multiple spaces caused by tag stripping
+    converted = re.sub(r'  +', ' ', converted).strip()
+
+    # Prepend speaker as "SpeakerName: " prefix (matches noScribe/Whisper convention,
+    # which the CLI's detect_speakers() already understands)
+    if speaker and converted:
+        converted = f"{speaker}: {converted}"
+
+    return converted, speaker
+
 
 def parse_vtt(content: str) -> list[dict]:
     """Parse WebVTT subtitle content into a list of block dicts.
 
-    Handles standard WebVTT format (including noScribe/Whisper output):
+    Handles standard WebVTT format including inline tags:
 
-        WEBVTT
+    - ``<v SpeakerName>`` voice tags → ``SpeakerName: text`` prefix, tags stripped
+    - ``<b>``, ``<i>``, ``<u>`` HTML formatting → ``#@B``, ``#@I``, ``#@U`` markers
+    - ``<c.class>`` span tags → stripped
+    - ``NOTE`` blocks → skipped
 
-        00:00:01.000 --> 00:00:02.500
-        Alice: Hello world
-
-        00:00:03.000 --> 00:00:04.500 align:end
-        Bob: Hi there
-
-    Accepts both ``.`` and ``,`` as millisecond separators and ignores
-    optional cue settings after the ``-->`` line.
+    Also handles ``Speaker: text`` prefix style (noScribe/Whisper convention).
     """
     blocks: list[dict] = []
     text = content.strip()
@@ -118,6 +172,11 @@ def parse_vtt(content: str) -> list[dict]:
     for cue in cues:
         lines = cue.strip().split('\n')
         if not lines:
+            continue
+
+        # Skip NOTE blocks (first non‑empty line is "NOTE", no timestamp)
+        first_non_empty = next((l for l in lines if l.strip()), '')
+        if first_non_empty.strip().upper().startswith('NOTE') and '-->' not in first_non_empty:
             continue
 
         time_line = None
@@ -139,7 +198,10 @@ def parse_vtt(content: str) -> list[dict]:
         if not m:
             continue
 
-        text = '\n'.join(lines[text_start:]).strip() if text_start < len(lines) else ""
+        cue_text = '\n'.join(lines[text_start:]).strip() if text_start < len(lines) else ""
+
+        # Convert VTT inline tags → CapsQual markers
+        cue_text, vtt_speaker = _convert_vtt_tags(cue_text)
 
         block_data = {
             'index': len(blocks) + 1,
@@ -149,8 +211,8 @@ def parse_vtt(content: str) -> list[dict]:
             'end_time':
                 f"{m.group(5)}:{m.group(6)}:{m.group(7)},{m.group(8)}",
             'end_ms': int(m.group(8)),
-            'text': text,
-            'raw_text': text,
+            'text': cue_text,
+            'raw_text': cue_text,
             'speaker': None,
             'is_turn_start': True,
         }
