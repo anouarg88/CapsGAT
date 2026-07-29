@@ -742,7 +742,7 @@ def generate_tiq_text(
         if not text: return
         cw = wrap_length - line_num_padding - len(prefix) if wrap_length > 0 else 0
         ts_str = ""
-        if ts and include_timestamps:
+        if ts is not None and include_timestamps:
             ts_str = " " + format_timestamp(ts, timestamp_style, custom_pattern)
         if wrap_enabled and cw > 10:
             if character_wrap: tokens = _tokenize_cjk_with_pauses(text)
@@ -845,7 +845,7 @@ def generate_tiq_text(
         wrapped_lines = []  # (line_str, cumulative_char_pos_start)
         cw_actual = cw if (wrap_enabled and cw > 10) else 0
         ts_str = ""
-        if ts and include_timestamps:
+        if ts is not None and include_timestamps:
             ts_str = " " + format_timestamp(ts, timestamp_style, custom_pattern)
 
         # ── Collect overlap targets for this turn ──
@@ -1919,7 +1919,7 @@ def _retag_formatting_spans_in_lines(lines):
 def generate_transcript_text(
     transcript,
     include_timestamps=True,
-    timestamp_style="hash",
+    timestamp_style=None,
     custom_pattern=None,
     convention="gat2",
     include_diarization=True,
@@ -1932,6 +1932,8 @@ def generate_transcript_text(
     custom_delimiter=""
 ):
     """Route to the correct convention-specific generator."""
+    if timestamp_style is None:
+        timestamp_style = "curly" if convention == "gat2" else "hash"
     if convention == "dresing_pehl":
         return generate_dresing_pehl_text(
             transcript, include_timestamps, timestamp_style, custom_pattern, include_diarization,
