@@ -82,8 +82,7 @@ brew install vlc
 python3 main.py
 ```
 
-If `pip install` fails, try `pip install PyQt5 python-docx numpy soundfile python-vlc` instead.  
-If the fallback audio player doesn't work, install `portaudio` via `brew install portaudio`.
+If `pip install` fails, try `pip install PyQt5 python-docx numpy soundfile python-vlc` instead.
 
 ### Linux (Debian/Ubuntu 22.04 or newer)
 
@@ -106,14 +105,14 @@ To run from source (also required for Ubuntu < 22.04):
 
 ```bash
 # 1. Install system dependencies
-sudo apt update && sudo apt install -y python3-venv python3-pyqt5 portaudio19-dev
+sudo apt update && sudo apt install -y python3-venv python3-pyqt5 vlc
 # 2. Clone the repository
 git clone https://github.com/anouarg88/CapsQual.git
 cd CapsQual
 # 3. Create a virtual environment
 python3 -m venv venv --system-site-packages
 source venv/bin/activate
-# 4. Install dependencies (If installation of pyaudio fails, make sure python-vlc is installed)
+# 4. Install dependencies
 pip install -r requirements.txt
 # 5. Run
 python3 main.py

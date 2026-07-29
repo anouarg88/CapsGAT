@@ -17,7 +17,7 @@ main.py                  ← Entry point (bootstrap + splash)
    ├── generators.py     ← Transcript text generation (GAT2/TiQ/Dresing&Pehl)
    ├── export.py         ← File writing (HTML/DOCX/TXT/SRT)
    │
-   ├── audio_players.py  ← Audio playback (VLC + PyAudio)
+   ├── audio_players.py  ← Audio playback (VLC)
    ├── widgets.py        ← Custom UI widgets
    ├── highlighting.py   ← Syntax highlighting
    ├── utils.py          ← Shared utilities
@@ -160,10 +160,9 @@ Consolidates file I/O for all export formats. Pure Python (no Qt imports).
 
 | Class | Purpose |
 |-------|---------|
-| `SimpleAudioPlayer(QThread)` | Fallback player using PyAudio/soundfile (no speed control) |
-| `VLCPlayer` | VLC-based player with speed control (0.5x–2.0x) |
+| `VlcAudioPlayer(QThread)` | VLC-based player with speed control (0.5x–2.0x) |
 
-Both implement signals: `playback_started`, `playback_stopped`, `position_changed`
+Signals: `playback_started`, `playback_paused`, `playback_stopped`, `position_changed`, `end_reached`
 
 ---
 
@@ -210,8 +209,7 @@ Run with: `python -m pytest tests/ -v`
 |---------|---------|
 | `PyQt5` | GUI framework |
 | `python-docx` | DOCX export |
-| `pyaudio` | Fallback audio playback |
-| `soundfile` | Audio file reading for fallback player |
+| `soundfile` | Audio file reading for waveform viewer |
 | `numpy` | Audio data processing |
 | `python-vlc` | VLC-based audio playback with speed control |
 
@@ -301,7 +299,7 @@ Run with: `python -m pytest tests/ -v`
 | Change HTML export appearance | `export.py` — `build_html_content()` |
 | Add a new dialog | `dialogs.py` — create a new `QDialog` subclass |
 | Change the main editor UI | `editor.py` — `SRTEditor` class |
-| Edit audio playback | `audio_players.py` — `SimpleAudioPlayer` or `VLCPlayer` |
+| Edit audio playback | `audio_players.py` — `VlcAudioPlayer` |
 | Add/modify tests | `tests/` directory |
 | Change keyboard shortcuts | `editor.py` |
 | Modify symbol/annotation logic | `editor.py` |

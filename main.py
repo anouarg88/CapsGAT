@@ -30,7 +30,7 @@ def main():
 
     # Preload heavy modules while splash is still visible
     if splash:
-        splash.showMessage("Loading audio modules...", Qt.AlignBottom | Qt.AlignCenter, Qt.black)
+        splash.showMessage("Loading modules...", Qt.AlignBottom | Qt.AlignCenter, Qt.black)
         app.processEvents()
     editor.preload_modules()   # this will take the time
 
