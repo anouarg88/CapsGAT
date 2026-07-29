@@ -189,20 +189,6 @@ class SRTEditor(QMainWindow):
         self.transcript = Transcript()
         self.current_block_index = 0
 
-        self.speaker_color_palette = [
-            QColor(220, 240, 255),  # Light blue
-            QColor(255, 220, 220),  # Light red
-            QColor(220, 255, 220),  # Light green
-            QColor(255, 255, 200),  # Light yellow
-            QColor(230, 200, 255),  # Light purple
-            QColor(255, 200, 150),  # Light orange
-            QColor(200, 230, 230),  # Light cyan
-            QColor(255, 210, 230)   # Light pink
-        ]
-
-        # Initialize speaker colors from palette
-        self.speaker_colors = self.speaker_color_palette[:4]  # First 4 colors for initial speakers
-
         self.recent_files = []
         self.max_recent = 10
         self.load_recent_files()
@@ -220,9 +206,40 @@ class SRTEditor(QMainWindow):
         self.project_memo = ""
         self.text_display_font = QFont("Arial", 12)
         self.has_unsaved_changes = False
-        self.current_theme = "light"
+        # Load theme from global preferences (QSettings), not from projects
+        theme_settings = QSettings('CapsQual', 'Preferences')
+        self.current_theme = theme_settings.value('viewer_theme', 'light')
         # Set initial theme palette so all widgets inherit theme colours
-        QApplication.instance().setPalette(self._light_palette())
+        QApplication.instance().setPalette(
+            self._dark_palette() if self.current_theme == "dark" else self._light_palette()
+        )
+
+        # Set up speaker colour palette based on loaded theme (before init_ui creates widgets)
+        if self.current_theme == "dark":
+            self.speaker_color_palette = [
+                QColor(80, 120, 160),   # Steel blue
+                QColor(170, 80, 80),    # Brick red
+                QColor(75, 155, 75),    # Forest green
+                QColor(170, 170, 80),   # Olive yellow
+                QColor(130, 80, 170),   # Amethyst
+                QColor(175, 110, 60),   # Burnt orange
+                QColor(65, 130, 130),   # Teal
+                QColor(170, 80, 120)    # Rose
+            ]
+        else:
+            self.speaker_color_palette = [
+                QColor(220, 240, 255),  # Light blue
+                QColor(255, 220, 220),  # Light red
+                QColor(220, 255, 220),  # Light green
+                QColor(255, 255, 200),  # Light yellow
+                QColor(230, 200, 255),  # Light purple
+                QColor(255, 200, 150),  # Light orange
+                QColor(200, 230, 230),  # Light cyan
+                QColor(255, 210, 230)   # Light pink
+            ]
+
+        # Initialize speaker colors from palette
+        self.speaker_colors = self.speaker_color_palette[:4]
         self.playback_speed = 1.0
         self.segment_sync_buffer = 0
         self.original_audio_duration = 0
@@ -241,6 +258,23 @@ class SRTEditor(QMainWindow):
 
         self.update_splash("Creating user interface...")
         self.init_ui()
+
+        # Fix up export button style for dark theme (init_ui hardcodes light)
+        if self.current_theme == "dark" and hasattr(self, 'btn_quick_export'):
+            self.btn_quick_export.setStyleSheet("""
+                QPushButton {
+                    background-color: #1e7230;
+                    padding: 2px 7px;
+                    font-size: 12px;
+                    font-weight: bold;
+                    color: white;
+                    border: 0px;
+                    border-radius: 5px;
+                }
+                QPushButton:hover {
+                    background-color: #2d9e45;
+                }
+            """)
     
     def time_label_clicked(self, event):
         self.jump_to_time()
@@ -2015,16 +2049,30 @@ CapsQual was engineered with the help of DeepSeek AI.
         self.save_project(force_save_as=True)
         
     def open_settings(self):
+        old_font = QFont(self.text_display_font)
+        old_cjk = self.cjk_mode
         dialog = SettingsDialog(self.text_display_font, self.current_theme, self.cjk_mode, self)
         if dialog.exec_() == QDialog.Accepted:
-            self.text_display_font = dialog.get_font()
-            self.text_display.setFont(self.text_display_font)
+            new_font = dialog.get_font()
+            new_cjk = dialog.get_cjk_mode()
             theme = dialog.get_theme()
+
+            # Apply theme globally (persisted via QSettings — not a project change)
             self.apply_viewer_theme(theme)
-            # Update cjk_mode
-            self.cjk_mode = dialog.get_cjk_mode()
-            self.update_display()   # refresh display to apply indentation changes
-            self.mark_unsaved_changes()
+
+            # Apply font and CJK mode
+            font_changed = (new_font.family() != old_font.family() or
+                            new_font.pointSize() != old_font.pointSize())
+            if font_changed:
+                self.text_display_font = new_font
+                self.text_display.setFont(self.text_display_font)
+            if new_cjk != old_cjk:
+                self.cjk_mode = new_cjk
+                self.update_display()   # refresh display to apply indentation changes
+
+            # Only mark unsaved if font or CJK mode changed (theme is global, not project-scoped)
+            if font_changed or new_cjk != old_cjk:
+                self.mark_unsaved_changes()
             
     def open_project_memo(self):
         """Open project memo dialog"""
@@ -2184,8 +2232,8 @@ CapsQual was engineered with the help of DeepSeek AI.
                 self.original_audio_duration = 0
                 self.load_audio_file_for_project(audio_path, self.playback_speed)
 
-            viewer_theme = project_data.get('viewer_theme', 'light')
-            self.apply_viewer_theme(viewer_theme)
+            # Theme is no longer project-scoped — ignore viewer_theme from old
+            # project files. Theme preference is managed via QSettings globally.
 
             self.speed_knob.value = self.playback_speed
             self.speed_knob.update()
@@ -2788,6 +2836,9 @@ CapsQual was engineered with the help of DeepSeek AI.
 
     def apply_viewer_theme(self, theme):
         self.current_theme = theme
+
+        # Persist theme to global QSettings (NOT per-project)
+        QSettings('CapsQual', 'Preferences').setValue('viewer_theme', theme)
 
         # 1. Set global palette on QApplication — affects every widget
         app = QApplication.instance()
@@ -4203,7 +4254,6 @@ CapsQual was engineered with the help of DeepSeek AI.
                     'family': self.text_display_font.family(),
                     'size': self.text_display_font.pointSize()
                 },
-                'viewer_theme': self.current_theme,
                 'playback_speed': self.playback_speed,
                 'cjk_mode': self.cjk_mode,
                 'timestamp_style': self.timestamp_style,
