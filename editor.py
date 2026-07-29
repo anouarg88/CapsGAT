@@ -2504,7 +2504,7 @@ CapsQual was engineered with the help of DeepSeek AI.
         p.setColor(QPalette.Text, QColor(30, 30, 30))
         p.setColor(QPalette.Button, QColor(255, 255, 255))
         p.setColor(QPalette.ButtonText, QColor(30, 30, 30))
-        p.setColor(QPalette.Highlight, QColor(100, 123, 234))
+        p.setColor(QPalette.Highlight, QColor(17, 82, 212))
         p.setColor(QPalette.HighlightedText, QColor(255, 255, 255))
         p.setColor(QPalette.ToolTipBase, QColor(255, 255, 220))
         p.setColor(QPalette.ToolTipText, QColor(30, 30, 30))
@@ -2526,7 +2526,7 @@ CapsQual was engineered with the help of DeepSeek AI.
         p.setColor(QPalette.Text, QColor(204, 204, 204))
         p.setColor(QPalette.Button, QColor(58, 58, 58))
         p.setColor(QPalette.ButtonText, QColor(200, 200, 200))
-        p.setColor(QPalette.Highlight, QColor(100, 123, 234))
+        p.setColor(QPalette.Highlight, QColor(100,123,234))
         p.setColor(QPalette.HighlightedText, QColor(255, 255, 255))
         p.setColor(QPalette.ToolTipBase, QColor(60, 60, 65))
         p.setColor(QPalette.ToolTipText, QColor(200, 200, 200))
@@ -2567,7 +2567,7 @@ CapsQual was engineered with the help of DeepSeek AI.
             _btn_hover = QColor(70, 70, 73).name()  # slightly brighter than button(58)
             _btnt_hover = pal.color(QPalette.ButtonText).name()  # same text colour
         else:
-            _btn_hover = _hl  # use highlight blue in light mode
+            _btn_hover = QColor(190, 190, 193).name() # slightly darker than button
             _btnt_hover = _hlt  # white text on blue
 
         app.setStyleSheet(f"""
