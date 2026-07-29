@@ -2178,6 +2178,9 @@ CapsQual was engineered with the help of DeepSeek AI.
 
             self.add_to_recent(file_path)
 
+            # Auto-detect speakers from "Speaker: text" prefixes
+            self._auto_detect_speakers()
+
             self.update_display()
             self.mark_unsaved_changes()
             self.undo_stack.clear()
@@ -3059,6 +3062,82 @@ CapsQual was engineered with the help of DeepSeek AI.
             self.current_block_index += 1
             self.update_display()
             
+    def _auto_detect_speakers(self):
+        """Scan blocks for ``Speaker: text`` prefixes and assign speakers.
+
+        Used after loading subtitle files that may contain speaker prefixes
+        (e.g. WebVTT ``<v Alice>`` tags converted to ``Alice: text``,
+        or noScribe/Whisper ``Speaker: text`` convention).
+
+        Detected speakers replace the default A/B/C/D list (up to 8).
+        If no speaker prefixes are found, the block list is unchanged.
+        """
+        blocks = self.srt_blocks
+        if not blocks:
+            return
+
+        # Pattern: "Name: rest" at start of text
+        speaker_re = re.compile(r'^([A-Za-z0-9\u00C0-\u024F_. \-]+?):\s*(.*)')
+        speaker_names: list[str] = []
+        speaker_map: dict[str, int] = {}
+
+        for block in blocks:
+            if block.get('speaker') is not None:
+                continue
+            text = block.get('raw_text') or block.get('text', '')
+            m = speaker_re.match(text)
+            if not m:
+                continue
+            name = m.group(1).strip()
+            rest = m.group(2).strip()
+            if not rest:
+                # Don't strip if there's nothing after the colon (edge case)
+                continue
+
+            if name not in speaker_map:
+                if len(speaker_names) >= 8:
+                    break  # max 8 speakers
+                speaker_map[name] = len(speaker_names)
+                speaker_names.append(name)
+
+            block['speaker'] = speaker_map[name]
+            block['raw_text'] = rest
+            block['text'] = rest
+
+        if not speaker_names:
+            return  # nothing detected
+
+        # Update editor speaker state
+        self.speakers = speaker_names
+        # Pad to at least 2 speakers
+        while len(self.speakers) < 2:
+            next_letter = chr(ord('A') + len(self.speakers))
+            if next_letter not in self.speakers:
+                self.speakers.append(next_letter)
+
+        # Rebuild speaker colors for detected count
+        self.speaker_colors = []
+        for i in range(len(self.speakers)):
+            if i < len(self.speaker_color_palette):
+                self.speaker_colors.append(self.speaker_color_palette[i])
+            else:
+                self.speaker_colors.append(QColor(200, 200, 200))
+
+        self.speaker_count_label.setText(str(len(self.speakers)))
+        self.create_speaker_widgets()
+        self.setup_shortcuts()
+
+        # Recompute is_turn_start after speaker assignment
+        for i, block in enumerate(blocks):
+            if i == 0:
+                block['is_turn_start'] = True
+            else:
+                prev_speaker = blocks[i - 1].get('speaker')
+                curr_speaker = block.get('speaker')
+                block['is_turn_start'] = not (
+                    prev_speaker is not None
+                    and prev_speaker == curr_speaker
+                )
     def assign_speaker(self, speaker_idx):
         if not self.srt_blocks or speaker_idx >= len(self.speakers):
             return
