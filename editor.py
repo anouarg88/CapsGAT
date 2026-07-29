@@ -2159,7 +2159,21 @@ CapsQual was engineered with the help of DeepSeek AI.
             elif file_extension == '.vtt':
                 with open(file_path, 'r', encoding='utf-8') as f:
                     content = f.read()
-                self.transcript.blocks = parse_vtt(content)
+                blocks, vtt_speakers = parse_vtt(content)
+                self.transcript.blocks = blocks
+                # Use VTT <v> tag speaker names if present
+                if vtt_speakers:
+                    self.speakers = vtt_speakers
+                    # Rebuild speaker colors
+                    self.speaker_colors = []
+                    for i in range(len(self.speakers)):
+                        if i < len(self.speaker_color_palette):
+                            self.speaker_colors.append(self.speaker_color_palette[i])
+                        else:
+                            self.speaker_colors.append(QColor(200, 200, 200))
+                    self.speaker_count_label.setText(str(len(self.speakers)))
+                    self.create_speaker_widgets()
+                    self.setup_shortcuts()
                 self.update_menu_state()
                 self.file_has_timestamps = True
 

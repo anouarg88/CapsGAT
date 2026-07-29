@@ -49,17 +49,20 @@ def _compile_speaker_pattern(pattern_spec: str) -> tuple[re.Pattern, str]:
 
 def _apply_speaker_pattern(blocks: list[dict],
                             pattern: re.Pattern,
-                            pattern_kind: str) -> list[dict]:
+                            pattern_kind: str,
+                            start_offset: int = 0) -> tuple[list[dict], list[str]]:
     """Apply a speaker-detection pattern to all unassigned blocks.
 
-    Modifies blocks in place and returns them for convenience.
+    Modifies blocks in place and returns ``(blocks, speaker_names)``.
+    *start_offset* shifts speaker indices (use when blocks already have
+    speakers assigned from another source, e.g. ``<v>`` VTT tags).
     """
     speaker_names: list[str] = []
     speaker_map: dict[str, int] = {}
 
     for block in blocks:
         if block["speaker"] is not None:
-            continue  # already assigned
+            continue  # already assigned (e.g. by <v> tag parsing)
         text = block.get("raw_text") or block.get("text", "")
         m = pattern.match(text)
         if not m:
@@ -69,14 +72,14 @@ def _apply_speaker_pattern(blocks: list[dict],
 
         # Register or look up speaker
         if name not in speaker_map:
-            speaker_map[name] = len(speaker_names)
+            speaker_map[name] = start_offset + len(speaker_names)
             speaker_names.append(name)
 
         block["speaker"] = speaker_map[name]
         block["raw_text"] = rest
         block["text"] = rest
 
-    return blocks
+    return blocks, speaker_names
 
 
 # ── Argument parser ───────────────────────────────────────────────
@@ -178,7 +181,7 @@ def run_convert(args: argparse.Namespace) -> int:
         elif ext == ".tsv":
             blocks = parse_tsv(raw)
         elif ext == ".vtt":
-            blocks = parse_vtt(raw)
+            blocks, vtt_speakers = parse_vtt(raw)
         elif ext == ".json":
             import json as _json
             data = _json.loads(raw)
@@ -191,17 +194,29 @@ def run_convert(args: argparse.Namespace) -> int:
         return 1
 
     # ── 2. Apply speaker detection if requested ─────────────────
+    vtt_names = locals().get('vtt_speakers', [])
+    pattern_speaker_names: list[str] = []
     if args.speaker:
         pattern, kind = _compile_speaker_pattern(args.speaker)
-        _apply_speaker_pattern(blocks, pattern, kind)
+        blocks, pattern_speaker_names = _apply_speaker_pattern(
+            blocks, pattern, kind, start_offset=len(vtt_names)
+        )
+
+    all_speaker_names: list[str] = list(vtt_names) + pattern_speaker_names
 
     # ── 3. Build Transcript ─────────────────────────────────────
     has_ts = any(
         b.get("start_time") for b in blocks if b.get("start_time")
     )
+    speakers = all_speaker_names if all_speaker_names else ["A", "B", "C", "D"]
+    # Pad to at least 2 speakers
+    while len(speakers) < 2:
+        next_letter = chr(ord('A') + len(speakers))
+        if next_letter not in speakers:
+            speakers.append(next_letter)
     transcript = Transcript(
         blocks=blocks,
-        speakers=["A", "B", "C", "D"],
+        speakers=speakers,
         cjk_mode=False,
         file_has_timestamps=has_ts,
     )

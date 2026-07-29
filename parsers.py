@@ -136,27 +136,25 @@ def _convert_vtt_tags(text: str) -> tuple[str, str | None]:
     # Collapse multiple spaces caused by tag stripping
     converted = re.sub(r'  +', ' ', converted).strip()
 
-    # Prepend speaker as "SpeakerName: " prefix (matches noScribe/Whisper convention,
-    # which the CLI's detect_speakers() already understands)
-    if speaker and converted:
-        converted = f"{speaker}: {converted}"
-
     return converted, speaker
 
 
-def parse_vtt(content: str) -> list[dict]:
-    """Parse WebVTT subtitle content into a list of block dicts.
+def parse_vtt(content: str) -> tuple[list[dict], list[str]]:
+    """Parse WebVTT subtitle content into a list of block dicts and detected speakers.
 
     Handles standard WebVTT format including inline tags:
 
-    - ``<v SpeakerName>`` voice tags → ``SpeakerName: text`` prefix, tags stripped
+    - ``<v SpeakerName>`` voice tags → speaker extracted, assigned to block
     - ``<b>``, ``<i>``, ``<u>`` HTML formatting → ``#@B``, ``#@I``, ``#@U`` markers
     - ``<c.class>`` span tags → stripped
     - ``NOTE`` blocks → skipped
 
-    Also handles ``Speaker: text`` prefix style (noScribe/Whisper convention).
+    Returns ``(blocks, vtt_speakers)`` where ``vtt_speakers`` is a list of
+    speaker names detected from ``<v>`` tags, in discovery order.
     """
     blocks: list[dict] = []
+    vtt_speakers: list[str] = []
+    vtt_speaker_map: dict[str, int] = {}
     text = content.strip()
 
     # Strip the WEBVTT header (first line) if present
@@ -165,7 +163,7 @@ def parse_vtt(content: str) -> list[dict]:
         if first_newline != -1:
             text = text[first_newline:].strip()
         else:
-            return []  # header only, no cues
+            return [], []  # header only, no cues
 
     cues = text.split('\n\n')
 
@@ -203,6 +201,14 @@ def parse_vtt(content: str) -> list[dict]:
         # Convert VTT inline tags → CapsQual markers
         cue_text, vtt_speaker = _convert_vtt_tags(cue_text)
 
+        # Assign speaker from <v> tag
+        speaker_idx: int | None = None
+        if vtt_speaker:
+            if vtt_speaker not in vtt_speaker_map:
+                vtt_speaker_map[vtt_speaker] = len(vtt_speakers)
+                vtt_speakers.append(vtt_speaker)
+            speaker_idx = vtt_speaker_map[vtt_speaker]
+
         block_data = {
             'index': len(blocks) + 1,
             'start_time':
@@ -213,12 +219,12 @@ def parse_vtt(content: str) -> list[dict]:
             'end_ms': int(m.group(8)),
             'text': cue_text,
             'raw_text': cue_text,
-            'speaker': None,
+            'speaker': speaker_idx,
             'is_turn_start': True,
         }
         blocks.append(block_data)
 
-    return blocks
+    return blocks, vtt_speakers
 
 
 def parse_srt(content: str) -> list[dict]:
