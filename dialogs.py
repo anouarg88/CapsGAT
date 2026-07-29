@@ -1349,41 +1349,27 @@ class SettingsDialog(QDialog):
         
     def init_ui(self):
         self.setWindowTitle("Settings")
-        self.setGeometry(100, 100, 480, 320)
+        self.setGeometry(100, 100, 500, 360)
         
         layout = QVBoxLayout(self)
         
-        # Font selection
-        font_layout = QHBoxLayout()
-        font_layout.addWidget(QLabel("Text Display Font:"))
-        self.font_button = QPushButton(f"{self.selected_font.family()} {self.selected_font.pointSize()}pt")
-        self.font_button.clicked.connect(self.select_font)
-        font_layout.addWidget(self.font_button)
-        font_layout.addStretch()
-        layout.addLayout(font_layout)
+        # ── GUI Settings ─────────────────────────────────────────
+        gui_group = QGroupBox("GUI Settings")
+        gui_layout = QVBoxLayout(gui_group)
         
-        # Theme selection
         theme_layout = QHBoxLayout()
-        theme_layout.addWidget(QLabel("Viewer Theme:"))
+        theme_layout.addWidget(QLabel("Theme:"))
         self.theme_combo = QComboBox()
         self.theme_combo.addItems(["Light", "Dark"])
         self.theme_combo.setCurrentText(self.current_theme.capitalize())
         theme_layout.addWidget(self.theme_combo)
         theme_layout.addStretch()
-        layout.addLayout(theme_layout)
+        gui_layout.addLayout(theme_layout)
         
-        # CJK optimization checkbox
-        cjk_layout = QHBoxLayout()
-        self.cjk_checkbox = QCheckBox("Optimize for CJK (double spaces for overlap indentation)")
-        self.cjk_checkbox.setChecked(self.cjk_mode)
-        cjk_layout.addWidget(self.cjk_checkbox)
-        layout.addLayout(cjk_layout)
-        
-        # Default path
-        layout.addWidget(QLabel("Default path:"))
+        gui_layout.addWidget(QLabel("Default path:"))
         self.base_system_radio = QRadioButton("System default")
         self.base_system_radio.setChecked(not self.base_directory)
-        layout.addWidget(self.base_system_radio)
+        gui_layout.addWidget(self.base_system_radio)
 
         custom_row = QHBoxLayout()
         self.base_custom_radio = QRadioButton("Custom path:")
@@ -1391,17 +1377,36 @@ class SettingsDialog(QDialog):
         self.base_path_input = QLineEdit()
         self.base_path_input.setReadOnly(True)
         self.base_path_input.setPlaceholderText("System default")
-        self.browse_btn = QPushButton("Browse…")
+        self.browse_btn = QPushButton("Browse\u2026")
         self.browse_btn.clicked.connect(self.select_base_dir)
         self._update_base_path_display()
-        # Enable/disable input + button when radio toggles
         self.base_system_radio.toggled.connect(self._on_base_radio_toggled)
         self.base_custom_radio.toggled.connect(self._on_base_radio_toggled)
         custom_row.addWidget(self.base_custom_radio)
         custom_row.addWidget(self.base_path_input)
         custom_row.addWidget(self.browse_btn)
         custom_row.addStretch()
-        layout.addLayout(custom_row)
+        gui_layout.addLayout(custom_row)
+
+        layout.addWidget(gui_group)
+        
+        # ── Project Settings ─────────────────────────────────────
+        project_group = QGroupBox("Project Settings")
+        project_layout = QVBoxLayout(project_group)
+        
+        font_layout = QHBoxLayout()
+        font_layout.addWidget(QLabel("Text Display Font:"))
+        self.font_button = QPushButton(f"{self.selected_font.family()} {self.selected_font.pointSize()}pt")
+        self.font_button.clicked.connect(self.select_font)
+        font_layout.addWidget(self.font_button)
+        font_layout.addStretch()
+        project_layout.addLayout(font_layout)
+        
+        self.cjk_checkbox = QCheckBox("Optimize for CJK (double spaces for overlap indentation)")
+        self.cjk_checkbox.setChecked(self.cjk_mode)
+        project_layout.addWidget(self.cjk_checkbox)
+
+        layout.addWidget(project_group)
 
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         button_box.accepted.connect(self.accept)
