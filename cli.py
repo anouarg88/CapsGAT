@@ -117,9 +117,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-t", "--timestamps", default=True,
                         action=argparse.BooleanOptionalAction,
                         help="Include timestamps (default: True)")
-    parser.add_argument("--timestamp-style", default="curly",
+    parser.add_argument("--timestamp-style", default=None,
                         choices=["curly", "hash", "bracket", "custom"],
-                        help="Timestamp style (default: curly)")
+                        help="Timestamp style (curly for GAT2, hash for TiQ/D&P)")
     parser.add_argument("--custom-pattern",
                         help="Custom timestamp pattern (e.g. '{HH:mm:ss}')")
 

@@ -4426,7 +4426,7 @@ CapsQual was engineered with the help of DeepSeek AI.
             else:
                 transcript_text = generate_transcript_text(self.transcript,
                     include_timestamps=settings['include_timestamps'],
-                    timestamp_style=settings.get('timestamp_style', 'hash'),
+                    timestamp_style=settings.get('timestamp_style', None),
                     custom_pattern=settings.get('custom_timestamp_pattern', None),
                     convention=settings['convention'],
                     include_diarization=settings['include_diarization'],
