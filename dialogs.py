@@ -1,4 +1,5 @@
 """Dialog windows for CapsQual."""
+import html
 import os
 import json
 import re
@@ -116,9 +117,9 @@ class TextSelectionDialog(QDialog):
 
         html_content = f"""
         <div style="font-family: monospace; font-size: 14px; padding: 10px;">
-            <span style="background-color: {text_bg}; padding: 5px; border-radius: 3px;">{before_text}</span>
-            <span style="background-color: {sel_bg}; padding: 5px; border-radius: 3px;">{selected_text}</span>
-            <span style="background-color: {text_bg}; padding: 5px; border-radius: 3px;">{after_text}</span>
+            <span style="background-color: {text_bg}; padding: 5px; border-radius: 3px;">{html.escape(before_text)}</span>
+            <span style="background-color: {sel_bg}; padding: 5px; border-radius: 3px;">{html.escape(selected_text)}</span>
+            <span style="background-color: {text_bg}; padding: 5px; border-radius: 3px;">{html.escape(after_text)}</span>
         </div>
         """
         
@@ -127,7 +128,7 @@ class TextSelectionDialog(QDialog):
         if self.start_pos == self.end_pos:
             self.selection_label.setText(f"Selection: (none) - Position: {self.start_pos}")
         else:
-            self.selection_label.setText(f"Selection: '{selected_text}' (positions {self.start_pos}-{self.end_pos})")
+            self.selection_label.setText(f"Selection: '{html.escape(selected_text)}' (positions {self.start_pos}-{self.end_pos})")
     
     def get_selection(self):
         return self.start_pos, self.end_pos, self.block_text[self.start_pos:self.end_pos]
@@ -200,8 +201,8 @@ class BlockSplitDialog(QDialog):
 
         html_content = f"""
         <div style="font-family: monospace; font-size: 14px; padding: 10px;">
-            <span style="background-color: {before_bg}; padding: 5px; border-radius: 3px;">{before_text}</span>
-            <span style="background-color: {after_bg}; padding: 5px; border-radius: 3px;">{after_text}</span>
+            <span style="background-color: {before_bg}; padding: 5px; border-radius: 3px;">{html.escape(before_text)}</span>
+            <span style="background-color: {after_bg}; padding: 5px; border-radius: 3px;">{html.escape(after_text)}</span>
         </div>
         """
         
@@ -2515,7 +2516,7 @@ class EnhancedPlacementDialog(QDialog):
             self.selected_text_start = cursor.selectionStart()
             self.selected_text_end = cursor.selectionEnd()
             selected_text = cursor.selectedText()
-            self.selection_label.setText(f"Selected: '{selected_text}'")
+            self.selection_label.setText(f"Selected: '{html.escape(selected_text)}'")
         else:
             self.has_selection = False
             self.selection_label.setText("No text selected")
@@ -2702,8 +2703,8 @@ class PlacementDialog(QDialog):
         if self.create_new_line:
             html_content = f"""
             <div style="font-family: monospace; font-size: 14px; padding: 10px;">
-                <span style="background-color: {text_bg}; padding: 5px; border-radius: 3px;">{self.current_text}</span><br>
-                <span style="background-color: {symbol_bg}; padding: 5px; border-radius: 3px;">{self.symbol}</span>
+                <span style="background-color: {text_bg}; padding: 5px; border-radius: 3px;">{html.escape(self.current_text)}</span><br>
+                <span style="background-color: {symbol_bg}; padding: 5px; border-radius: 3px;">{html.escape(self.symbol)}</span>
             </div>
             """
             self.option_label.setText("Placement: Create new line with symbol (Press N for inline)")
@@ -2712,9 +2713,9 @@ class PlacementDialog(QDialog):
             after_text = self.current_text[self.placement_position:]
             html_content = f"""
             <div style="font-family: monospace; font-size: 14px; padding: 10px;">
-                <span style="background-color: {text_bg}; padding: 5px; border-radius: 3px;">{before_text}</span>
-                <span style="background-color: {symbol_bg}; padding: 5px; border-radius: 3px;">{self.symbol}</span>
-                <span style="background-color: {text_bg}; padding: 5px; border-radius: 3px;">{after_text}</span>
+                <span style="background-color: {text_bg}; padding: 5px; border-radius: 3px;">{html.escape(before_text)}</span>
+                <span style="background-color: {symbol_bg}; padding: 5px; border-radius: 3px;">{html.escape(self.symbol)}</span>
+                <span style="background-color: {text_bg}; padding: 5px; border-radius: 3px;">{html.escape(after_text)}</span>
             </div>
             """
             self.option_label.setText("Placement: Insert in current line (Press N to create new line)")
