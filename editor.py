@@ -22,7 +22,7 @@ from PyQt5.QtWidgets import (
     QInputDialog, QLineEdit, QDialog, QDialogButtonBox,
     QGridLayout, QPlainTextEdit, QCheckBox, QTabWidget, QRadioButton,
     QSlider, QProgressBar, QMenuBar, QMenu, QAction, QFontDialog,
-    QGroupBox, QScrollArea, QSizePolicy, QComboBox, QStackedWidget, QStyle, QSplashScreen, QSplitter, QSplitterHandle, QToolButton
+    QGroupBox, QScrollArea, QSizePolicy, QComboBox, QStackedWidget, QStyle, QSplashScreen
 )
 from PyQt5.QtCore import Qt, QTimer, QUrl, pyqtSignal, QPoint, QRect, QElapsedTimer, QThread, QSize, QRegularExpression, QSettings
 from PyQt5.QtGui import QFont, QKeySequence, QColor, QPalette, QTextCharFormat, QTextCursor, QIcon, QPixmap
@@ -52,97 +52,8 @@ from dialogs import (
     UnassignedSegmentsDialog, ExportPreviewDialog, SearchDialog, JumpToTimeDialog,
     EnhancedPlacementDialog, PlacementDialog, InsertPausesDialog
 )
-from widgets import SpeedKnob, WaveformViewer
+from widgets import SpeedKnob, WaveformViewer, CollapsibleSplitter, CollapsibleSplitterHandle
 
-class CollapsibleSplitterHandle(QSplitterHandle):
-    def __init__(self, orientation, parent, right_widget):
-        super().__init__(orientation, parent)
-        self.right_widget = right_widget
-        self.collapsed = False
-        self.saved_size = None
-        
-        # Create toggle button
-        self.toggle_btn = QToolButton(self)
-        self.toggle_btn.setCursor(Qt.ArrowCursor)
-        self.toggle_btn.setFixedSize(16, 16)
-        self.update_button_icon()
-        self.toggle_btn.clicked.connect(self.toggle_collapse)
-        
-        # Update button position on resize
-        self.update_button_position()
-        
-        # Monitor splitter movement to sync state
-        splitter = self.splitter()
-        splitter.splitterMoved.connect(self.on_splitter_moved)
-    
-    def update_button_icon(self):
-        if self.collapsed:
-            self.toggle_btn.setText("◀")   # arrow left (expand)
-        else:
-            self.toggle_btn.setText("▶")   # arrow right (collapse)
-    
-    def update_button_position(self):
-        x = (self.width() - self.toggle_btn.width()) // 2
-        y = (self.height() - self.toggle_btn.height()) // 2
-        self.toggle_btn.move(x, y)
-    
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self.update_button_position()
-    
-    def on_splitter_moved(self, pos, index):
-        # After a manual resize, update collapsed state based on current width
-        QTimer.singleShot(10, self.update_state_from_size)
-    
-    def update_state_from_size(self):
-        splitter = self.splitter()
-        idx = splitter.indexOf(self.right_widget)
-        if idx == -1:
-            return
-        current_width = splitter.sizes()[idx]
-        min_width = self.right_widget.minimumWidth()
-        is_collapsed = (current_width <= min_width + 5)  # tolerance
-        if self.collapsed != is_collapsed:
-            self.collapsed = is_collapsed
-            self.update_button_icon()
-            if is_collapsed:
-                # Save the size before collapse? Actually we want to restore later.
-                # But when manually collapsing, we don't have a saved size.
-                # We'll only save size when collapsing via button.
-                pass
-    
-    def toggle_collapse(self):
-        splitter = self.splitter()
-        idx = splitter.indexOf(self.right_widget)
-        if idx == -1:
-            return
-        
-        if self.collapsed:
-            # Expand: restore saved size if available, else use a default
-            if self.saved_size is not None:
-                new_sizes = splitter.sizes()
-                new_sizes[idx] = self.saved_size
-                splitter.setSizes(new_sizes)
-            self.collapsed = False
-        else:
-            # Collapse: save current size, then set to minimum
-            sizes = splitter.sizes()
-            self.saved_size = sizes[idx]
-            new_sizes = sizes[:]
-            new_sizes[idx] = self.right_widget.minimumWidth()
-            splitter.setSizes(new_sizes)
-            self.collapsed = True
-        self.update_button_icon()
-
-
-class CollapsibleSplitter(QSplitter):
-    def __init__(self, orientation, right_widget):
-        super().__init__(orientation)
-        self.right_widget = right_widget
-    
-    def createHandle(self):
-        return CollapsibleSplitterHandle(self.orientation(), self, self.right_widget)
-    
 
 class SRTEditor(QMainWindow):
     # Constant for placeholder character (visible in viewer)

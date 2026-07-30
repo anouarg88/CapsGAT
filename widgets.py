@@ -1,7 +1,10 @@
 """Custom widgets for CapsQual."""
 import math
-from PyQt5.QtWidgets import QWidget, QSizePolicy
-from PyQt5.QtCore import Qt, pyqtSignal, QPoint, QRect, QSize
+from PyQt5.QtWidgets import (
+    QWidget, QSizePolicy, QSplitterHandle, QSplitter, QToolButton,
+    QPushButton, QHBoxLayout
+)
+from PyQt5.QtCore import Qt, pyqtSignal, QPoint, QRect, QSize, QTimer
 from PyQt5.QtGui import QPainter, QPen, QColor, QFontMetrics
 
 
@@ -628,3 +631,133 @@ class SpeedKnob(QWidget):
         else:
             self.set_value_direct(self.value - self.step)
         event.accept()
+
+
+
+
+# ── Collapsible Splitter ─────────────────────────────────────────
+
+class CollapsibleSplitterHandle(QSplitterHandle):
+    def __init__(self, orientation, parent, right_widget):
+        super().__init__(orientation, parent)
+        self.right_widget = right_widget
+        self.collapsed = False
+        self.saved_size = None
+        
+        # Create toggle button
+        self.toggle_btn = QToolButton(self)
+        self.toggle_btn.setCursor(Qt.ArrowCursor)
+        self.toggle_btn.setFixedSize(16, 16)
+        self.update_button_icon()
+        self.toggle_btn.clicked.connect(self.toggle_collapse)
+        
+        # Update button position on resize
+        self.update_button_position()
+        
+        # Monitor splitter movement to sync state
+        splitter = self.splitter()
+        splitter.splitterMoved.connect(self.on_splitter_moved)
+    
+    def update_button_icon(self):
+        if self.collapsed:
+            self.toggle_btn.setText("\u25c0")   # arrow left (expand)
+        else:
+            self.toggle_btn.setText("\u25b6")   # arrow right (collapse)
+    
+    def update_button_position(self):
+        x = (self.width() - self.toggle_btn.width()) // 2
+        y = (self.height() - self.toggle_btn.height()) // 2
+        self.toggle_btn.move(x, y)
+    
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.update_button_position()
+    
+    def on_splitter_moved(self, pos, index):
+        # After a manual resize, update collapsed state based on current width
+        QTimer.singleShot(10, self.update_state_from_size)
+    
+    def update_state_from_size(self):
+        splitter = self.splitter()
+        idx = splitter.indexOf(self.right_widget)
+        if idx == -1:
+            return
+        current_width = splitter.sizes()[idx]
+        min_width = self.right_widget.minimumWidth()
+        is_collapsed = (current_width <= min_width + 5)  # tolerance
+        if self.collapsed != is_collapsed:
+            self.collapsed = is_collapsed
+            self.update_button_icon()
+            if is_collapsed:
+                pass
+    
+    def toggle_collapse(self):
+        splitter = self.splitter()
+        idx = splitter.indexOf(self.right_widget)
+        if idx == -1:
+            return
+        
+        if self.collapsed:
+            # Expand: restore saved size if available, else use a default
+            if self.saved_size is not None:
+                new_sizes = splitter.sizes()
+                new_sizes[idx] = self.saved_size
+                splitter.setSizes(new_sizes)
+            self.collapsed = False
+        else:
+            # Collapse: save current size, then set to minimum
+            sizes = splitter.sizes()
+            self.saved_size = sizes[idx]
+            new_sizes = sizes[:]
+            new_sizes[idx] = self.right_widget.minimumWidth()
+            splitter.setSizes(new_sizes)
+            self.collapsed = True
+        self.update_button_icon()
+
+
+class CollapsibleSplitter(QSplitter):
+    def __init__(self, orientation, right_widget):
+        super().__init__(orientation)
+        self.right_widget = right_widget
+    
+    def createHandle(self):
+        return CollapsibleSplitterHandle(self.orientation(), self, self.right_widget)
+
+
+# ── Theme Toggle ──────────────────────────────────────────────────
+
+class ThemeToggle(QWidget):
+    """Pill-style light/dark toggle switch."""
+
+    def __init__(self, dark=False, parent=None):
+        super().__init__(parent)
+        self._dark = dark
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        self._light_btn = QPushButton("Light mode")
+        self._dark_btn = QPushButton("Dark mode")
+        self._light_btn.setFixedHeight(28)
+        self._dark_btn.setFixedHeight(28)
+        self._light_btn.clicked.connect(lambda: self.set_dark(False))
+        self._dark_btn.clicked.connect(lambda: self.set_dark(True))
+        layout.addWidget(self._light_btn)
+        layout.addWidget(self._dark_btn)
+        self._apply_style()
+
+    def _apply_style(self):
+        active = "background-color: #0078D4; color: #fff; border: none; font-weight: bold;"
+        inactive = "background-color: palette(button); color: palette(button-text); border: none;"
+        radius_left = "border-top-left-radius: 4px; border-bottom-left-radius: 4px;"
+        radius_right = "border-top-right-radius: 4px; border-bottom-right-radius: 4px;"
+        self._light_btn.setStyleSheet(f"QPushButton {{ {active if not self._dark else inactive} {radius_left} }}")
+        self._dark_btn.setStyleSheet(f"QPushButton {{ {active if self._dark else inactive} {radius_right} }}")
+
+    def set_dark(self, dark):
+        if dark != self._dark:
+            self._dark = dark
+            self._apply_style()
+
+    def is_dark(self):
+        return self._dark
+

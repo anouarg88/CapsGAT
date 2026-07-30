@@ -14,6 +14,8 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QFont, QKeySequence
 
+from widgets import ThemeToggle
+
 from utils import logger
 from highlighting import FormattingMarkerHighlighter
 from generators import (
@@ -1338,43 +1340,6 @@ class RichEditDialog(QDialog):
 
     def get_text(self):
         return self.text_edit.text()
-
-class ThemeToggle(QWidget):
-    """Pill-style light/dark toggle switch."""
-    toggled = (lambda self, state: None)  # placeholder, replaced via pyqtSignal pattern
-
-    def __init__(self, dark=False, parent=None):
-        super().__init__(parent)
-        self._dark = dark
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        self._light_btn = QPushButton("Light mode")
-        self._dark_btn = QPushButton("Dark mode")
-        self._light_btn.setFixedHeight(28)
-        self._dark_btn.setFixedHeight(28)
-        self._light_btn.clicked.connect(lambda: self.set_dark(False))
-        self._dark_btn.clicked.connect(lambda: self.set_dark(True))
-        layout.addWidget(self._light_btn)
-        layout.addWidget(self._dark_btn)
-        self._apply_style()
-
-    def _apply_style(self):
-        active = "background-color: #0078D4; color: #fff; border: none; font-weight: bold;"
-        inactive = "background-color: palette(button); color: palette(button-text); border: none;"
-        radius_left = "border-top-left-radius: 4px; border-bottom-left-radius: 4px;"
-        radius_right = "border-top-right-radius: 4px; border-bottom-right-radius: 4px;"
-        self._light_btn.setStyleSheet(f"QPushButton {{ {active if not self._dark else inactive} {radius_left} }}")
-        self._dark_btn.setStyleSheet(f"QPushButton {{ {active if self._dark else inactive} {radius_right} }}")
-
-    def set_dark(self, dark):
-        if dark != self._dark:
-            self._dark = dark
-            self._apply_style()
-
-    def is_dark(self):
-        return self._dark
-
 
 class SettingsDialog(QDialog):
     def __init__(self, current_font, current_theme, cjk_mode, base_directory, parent=None):
