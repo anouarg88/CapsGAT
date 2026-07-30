@@ -4,7 +4,7 @@ from PyQt5.QtWidgets import (
     QWidget, QSizePolicy, QSplitterHandle, QSplitter, QToolButton,
     QPushButton, QHBoxLayout
 )
-from PyQt5.QtCore import Qt, pyqtSignal, QPoint, QRect, QSize, QTimer
+from PyQt5.QtCore import Qt, pyqtSignal, QPoint, QRect, QSize, QTimer, QObject, QThread
 from PyQt5.QtGui import QPainter, QPen, QColor, QFontMetrics
 
 
@@ -26,6 +26,7 @@ class WaveformViewer(QWidget):
     segment_start_changed = pyqtSignal(float)
     segment_end_changed = pyqtSignal(float)
     seek_requested = pyqtSignal(float)
+    loading_complete = pyqtSignal()  # emitted when audio + peaks are fully ready
 
     # ── colour definitions ────────────────────────────────────────
 
@@ -70,6 +71,11 @@ class WaveformViewer(QWidget):
     ZOOM_BTN_GAP = 4
     ZOOM_PANEL_W = 36
     ZOOM_MARGIN = 8
+    SPINNER_TICK_MS = 40
+    SPINNER_ANGLE_STEP = 12
+    SPINNER_BLOCK_COUNT = 7
+    SPINNER_BLOCK_W = 10
+    SPINNER_BLOCK_GAP = 5
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -99,6 +105,14 @@ class WaveformViewer(QWidget):
         self._dragging = None
         self._drag_offset = 0.0
 
+        # Loading spinner
+        self._loading = False
+        self._spinner_angle = 0.0
+        self._spinner_timer = QTimer(self)
+        self._spinner_timer.timeout.connect(self._on_spinner_tick)
+        self._loader_thread = None
+        self._loader_worker = None
+
     # ── theme ─────────────────────────────────────────────────────
 
     def set_theme(self, theme_name):
@@ -113,20 +127,82 @@ class WaveformViewer(QWidget):
     # ── public API ────────────────────────────────────────────────
 
     def load_audio(self, audio_path: str):
-        try:
-            import numpy as np
-            import soundfile as sf
-            data, sr = sf.read(audio_path)
-            if len(data.shape) > 1:
-                data = data.mean(axis=1)
-            if data.dtype not in (np.float32, np.float64):
-                data = data.astype(np.float32) / 32768.0
-            self.set_audio_data(data, sr)
-        except Exception as e:
+        """Load audio data in a background thread so the UI stays responsive."""
+        self._start_loading()
+        # Use a background thread so the spinner animates during file I/O
+        self._loader_thread = QThread(self)
+        self._loader_worker = _AudioLoaderWorker(audio_path)
+        self._loader_worker.moveToThread(self._loader_thread)
+        self._loader_thread.started.connect(self._loader_worker.run)
+        self._loader_worker.finished.connect(self._on_audio_loaded)
+        self._loader_worker.finished.connect(self._loader_thread.quit)
+        self._loader_worker.finished.connect(self._loader_worker.deleteLater)
+        self._loader_thread.finished.connect(self._loader_thread.deleteLater)
+        self._loader_thread.finished.connect(self._cleanup_loader_refs)
+        self._loader_thread.start()
+
+    def _start_loading(self):
+        """Show the loading spinner and clear stale waveform data."""
+        self.audio_data = None
+        self.peaks = None
+        self._loading = True
+        self._spinner_angle = 0.0
+        self._spinner_timer.start(self.SPINNER_TICK_MS)
+        self.update()
+
+    def _stop_loading(self):
+        """Hide the loading spinner."""
+        self._loading = False
+        self._spinner_timer.stop()
+        self.update()
+
+    def _on_spinner_tick(self):
+        """Advance the spinner animation angle."""
+        self._spinner_angle = (self._spinner_angle + self.SPINNER_ANGLE_STEP) % 360.0
+        self.update()
+
+    def _on_audio_loaded(self, result):
+        """Receive audio data from the background loader thread."""
+        if result is None:
             import logging
-            logging.getLogger(__name__).warning(
-                f"WaveformViewer could not load {audio_path}: {e}")
-            self.clear_audio()
+            logging.getLogger(__name__).warning("WaveformViewer: audio load failed")
+            self._stop_loading()
+            self.loading_complete.emit()
+        else:
+            data, sr = result
+            self.audio_data = data.astype('float32')
+            self.sample_rate = int(sr)
+            self.duration = len(self.audio_data) / self.sample_rate
+            self.view_start = 0.0
+            self.view_end = self.duration
+            self._cached_width = 0
+            self.peaks = None
+            # Compute peaks in background so UI stays responsive
+            self._peaks_thread = QThread(self)
+            self._peaks_worker = _PeaksWorker(
+                self.audio_data, self.sample_rate, self.duration,
+                self.width(), self.view_start, self.view_end
+            )
+            self._peaks_worker.moveToThread(self._peaks_thread)
+            self._peaks_thread.started.connect(self._peaks_worker.run)
+            self._peaks_worker.finished.connect(self._on_peaks_computed)
+            self._peaks_worker.finished.connect(self._peaks_thread.quit)
+            self._peaks_worker.finished.connect(self._peaks_worker.deleteLater)
+            self._peaks_thread.finished.connect(self._peaks_thread.deleteLater)
+            self._peaks_thread.start()
+
+    def _on_peaks_computed(self, peaks_result):
+        """Receive pre-computed peaks from background thread."""
+        self.peaks = peaks_result
+        self._cached_width = self.width()
+        self._stop_loading()
+        self.loading_complete.emit()
+        self.update()
+
+    def _cleanup_loader_refs(self):
+        """Clear loader thread references after cleanup."""
+        self._loader_thread = None
+        self._loader_worker = None
 
     def set_audio_data(self, data, sample_rate: int):
         import numpy as np
@@ -289,9 +365,14 @@ class WaveformViewer(QWidget):
         C = self.C
         p.fillRect(0, 0, w, h, C['bg'])
 
-        if self.audio_data is None:
-            p.setPen(C['text'])
-            p.drawText(self.rect(), Qt.AlignCenter, "No audio loaded")
+        if self._loading:
+            self._draw_spinner(p, w, h, C)
+            return
+
+        if self.audio_data is None or self.peaks is None:
+            if self.audio_data is None:
+                p.setPen(C['text'])
+                p.drawText(self.rect(), Qt.AlignCenter, "No audio loaded")
             return
 
         if self._cached_width != w or self.peaks is None:
@@ -520,8 +601,104 @@ class WaveformViewer(QWidget):
         s = seconds % 60
         return f"{m}:{s:05.2f}"
 
+    def _draw_spinner(self, p, w, h, C):
+        """Draw an animated wave-of-blocks loading indicator."""
+        import math
+        n = self.SPINNER_BLOCK_COUNT
+        bw = self.SPINNER_BLOCK_W
+        gap = self.SPINNER_BLOCK_GAP
+        bar_w = n * bw + (n - 1) * gap
+        bx = (w - bar_w) // 2
+        by = h // 2 - bw // 2
+
+        phase = math.radians(self._spinner_angle)
+        handle_color = C['handle']
+
+        for i in range(n):
+            # Opacity follows a travelling sine wave
+            alpha = int(55 + 200 * (math.sin(phase - i * 0.9) + 1) / 2)
+            color = QColor(handle_color.red(), handle_color.green(),
+                           handle_color.blue(), alpha)
+            p.setPen(Qt.NoPen)
+            p.setBrush(color)
+            p.drawRoundedRect(bx + i * (bw + gap), by, bw, bw, 2, 2)
+
+        # "Loading..." text below
+        p.setPen(C['text'])
+        font = p.font()
+        font.setPointSize(8)
+        p.setFont(font)
+        text_rect = QRect(0, by + bw + 10, w, 16)
+        p.drawText(text_rect, Qt.AlignCenter, "Generating waveform...")
+
     def sizeHint(self):
         return QSize(400, self.PREFERRED_HEIGHT)
+
+
+# ── Audio Loader Worker ────────────────────────────────────────────
+
+class _AudioLoaderWorker(QObject):
+    """Loads audio data in a background thread and emits the result."""
+
+    finished = pyqtSignal(object)  # emits (data, sample_rate) tuple or None on failure
+
+    def __init__(self, audio_path: str):
+        super().__init__()
+        self._audio_path = audio_path
+
+    def run(self):
+        try:
+            import numpy as np
+            import soundfile as sf
+            data, sr = sf.read(self._audio_path)
+            if len(data.shape) > 1:
+                data = data.mean(axis=1)
+            if data.dtype not in (np.float32, np.float64):
+                data = data.astype(np.float32) / 32768.0
+            self.finished.emit((data, sr))
+        except Exception:
+            self.finished.emit(None)
+
+
+class _PeaksWorker(QObject):
+    """Computes waveform peaks in a background thread."""
+
+    finished = pyqtSignal(object)  # emits numpy array of shape (width, 2)
+
+    def __init__(self, audio_data, sample_rate, duration, width, view_start, view_end):
+        super().__init__()
+        self._audio_data = audio_data
+        self._sample_rate = sample_rate
+        self._duration = duration
+        self._width = width
+        self._view_start = view_start
+        self._view_end = view_end
+
+    def run(self):
+        import numpy as np
+        data = self._audio_data
+        sr = float(self._sample_rate)
+        n = len(data)
+        width = self._width
+        vstart = max(0.0, self._view_start)
+        vend = min(self._duration, self._view_end)
+        s0 = int(vstart * sr)
+        s1 = int(vend * sr)
+        if s1 > n:
+            s1 = n
+        span = max(1, s1 - s0)
+        peaks = np.zeros((width, 2), dtype=np.float32)
+        for col in range(width):
+            a = s0 + int(col * span / width)
+            b = s0 + int((col + 1) * span / width)
+            if b > a and b <= n:
+                chunk = data[a:b]
+                peaks[col, 0] = float(chunk.min())
+                peaks[col, 1] = float(chunk.max())
+            else:
+                peaks[col, 0] = 0.0
+                peaks[col, 1] = 0.0
+        self.finished.emit(peaks)
 
 
 # ── Speed Knob ────────────────────────────────────────────────────

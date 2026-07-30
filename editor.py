@@ -2209,6 +2209,16 @@ CapsQual was engineered with the help of DeepSeek AI.
                 self.audio_file_path = audio_path
                 self.original_audio_duration = 0
                 self.load_audio_file_for_project(audio_path, self.playback_speed)
+                # Defer success dialog until waveform is fully loaded
+                def _on_waveform_ready():
+                    try:
+                        self.waveform_viewer.loading_complete.disconnect(_on_waveform_ready)
+                    except TypeError:
+                        pass
+                    QMessageBox.information(self, "Success", f"Project loaded from {file_path}")
+                self.waveform_viewer.loading_complete.connect(_on_waveform_ready)
+            else:
+                QMessageBox.information(self, "Success", f"Project loaded from {file_path}")
 
             # Theme is no longer project-scoped — ignore viewer_theme from old
             # project files. Theme preference is managed via QSettings globally.
@@ -2220,8 +2230,6 @@ CapsQual was engineered with the help of DeepSeek AI.
             self.update_display()
             self.update_menu_state()
             self.clear_unsaved_changes()
-
-            QMessageBox.information(self, "Success", f"Project loaded from {file_path}")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Could not load project: {str(e)}")
 
