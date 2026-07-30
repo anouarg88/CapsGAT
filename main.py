@@ -12,6 +12,15 @@ from editor import SRTEditor
 
 def main():
     app = QApplication(sys.argv)
+    # ── Extract a file path from command-line arguments ──────────
+    # Skips flag-like args (starting with "-") and the executable name.
+    # This enables "Open With → CapsQual" and double-click file association.
+    startup_path: str | None = None
+    for arg in sys.argv[1:]:
+        if not arg.startswith("-") and os.path.exists(arg):
+            startup_path = os.path.abspath(arg)
+            break
+
 
     splash = None
     splash_path = resource_path("images/splash.png")
@@ -33,6 +42,10 @@ def main():
         splash.showMessage("Loading modules...", Qt.AlignBottom | Qt.AlignCenter, Qt.black)
         app.processEvents()
     editor.preload_modules()   # this will take the time
+    # ── Open file passed via command line (e.g. "Open With") ────
+    if startup_path:
+        editor.open_recent_file(startup_path)
+
 
     # Finish splash and show main window
     if splash:
