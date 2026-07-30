@@ -167,6 +167,7 @@ class SRTEditor(QMainWindow):
 
         self.update_splash("Creating user interface...")
         self.init_ui()
+        self.setAcceptDrops(True)
 
         # Fix up export button style for dark theme (init_ui hardcodes light)
         if self.current_theme == "dark" and hasattr(self, 'btn_quick_export'):
@@ -332,6 +333,7 @@ class SRTEditor(QMainWindow):
         """)
         self.text_display.setMinimumWidth(150)   # allow it to shrink
         self.text_display.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # horizontal scroll if needed
+        self.text_display.setAcceptDrops(False)  # let drops propagate to parent window
         left_panel.addWidget(self.text_display)
         self.highlighter = FormattingMarkerHighlighter(self.text_display.document())
         
@@ -1380,13 +1382,136 @@ class SRTEditor(QMainWindow):
         else:
             self.speed_knob.setToolTip("Speed control requires VLC media player")
     
+
+    _AUDIO_EXTENSIONS = frozenset({'.mp3', '.wav', '.ogg', '.m4a', '.flac', '.aac', '.wma'})
+    # ── Subtitle file extensions accepted via drag-and-drop ─────
+    _SUBTITLE_EXTENSIONS = frozenset({'.srt', '.vtt', '.txt', '.json', '.tsv'})
+
+    # ── Drag-and-drop support ───────────────────────────────────
+
+    def dragEnterEvent(self, event):
+        """Accept file drops that contain URLs we can handle."""
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        """Route dropped files to the appropriate handler."""
+        for url in event.mimeData().urls():
+            path = url.toLocalFile()
+            if not path or not os.path.isfile(path):
+                continue
+            ext = os.path.splitext(path)[1].lower()
+
+            if ext in ('.capsqual', '.capsgat'):
+                # ── Project file → full open (with unsaved-changes guard) ─
+                self.open_recent_file(path)
+
+            elif ext in self._AUDIO_EXTENSIONS:
+                # ── Audio file → load into current project ──────
+                self._load_audio_from_path(path)
+
+            elif ext in self._SUBTITLE_EXTENSIONS:
+                # ── Subtitle file → replace current transcript ─
+                self._drop_subtitle_file(path)
+
+    def _drop_subtitle_file(self, path):
+        """Handle a subtitle file dropped onto the editor.
+
+        If the editor already has blocks, ask the user whether to replace
+        them.  On a blank editor the file is loaded immediately.
+        """
+        if self.srt_blocks:
+            reply = QMessageBox.question(
+                self,
+                "Replace Transcript?",
+                f"Drop '{os.path.basename(path)}' — replace the current transcript?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                return
+            if not self.check_unsaved_changes():
+                return
+
+        self._reset_project_state()
+        self.load_file_from_path(path)
+        self.clear_unsaved_changes()
+
+    def _load_audio_from_path(self, file_path):
+        """Load an audio file directly (no dialog, no subtitle-scan).
+
+        Extracted from ``load_audio_file()`` so that both the File→Import
+        menu item and drag-and-drop can share the same core logic.
+        """
+        # Stop any existing audio
+        if self.audio_player:
+            self.audio_player.cleanup()
+            self.audio_player = None
+
+        # Reset speed display
+        self.playback_speed = 1.0
+        self.speed_knob.value = 1.0
+        self.speed_knob.update()
+        self.speed_normal_btn.setText("1.0x")
+
+        self.update_splash("Loading audio player...")
+
+        try:
+            self.audio_player = VlcAudioPlayer()
+        except Exception as e:
+            logger.warning(f"VLC not available: {e}")
+            QMessageBox.warning(self, "VLC Required",
+                "VLC media player is not available.\n\n"
+                "Please install VLC from https://www.videolan.org/vlc/")
+            return
+
+        # Connect signals
+        self.audio_player.playback_started.connect(self.on_playback_started)
+        self.audio_player.playback_stopped.connect(self.on_playback_stopped)
+        self.audio_player.position_changed.connect(self.on_position_changed)
+
+        if hasattr(self.audio_player, 'playback_paused'):
+            self.audio_player.playback_paused.connect(self.on_playback_paused)
+        if hasattr(self.audio_player, 'end_reached'):
+            self.audio_player.end_reached.connect(self.on_playback_ended)
+
+        # Load the file
+        if self.audio_player.load_file(file_path):
+            self.audio_file_path = file_path
+            # Load waveform data for the viewer
+            self._load_waveform_audio(file_path)
+            audio_name = Path(file_path).name
+
+            # Update status label
+            self.audio_info_label.setText(f"Audio loaded: {audio_name}")
+
+            # Enable basic controls
+            self.btn_play.setEnabled(True)
+            self.btn_rewind.setEnabled(True)
+            self.btn_forward.setEnabled(True)
+            self.btn_play_segment.setEnabled(True)
+            self.auto_sync_check.setEnabled(self.file_has_timestamps)
+            self.auto_pause_check.setEnabled(True)
+            self.audio_progress.setEnabled(True)
+
+            # Update speed controls based on player type
+            self.update_speed_controls_state()
+
+            logger.info(f"Audio loaded with VLC player: {audio_name}")
+        else:
+            QMessageBox.critical(self, "Error", f"Failed to load audio file (Install VLC)")
+            self.audio_player = None
+            self._clear_waveform_audio()
+            self.audio_info_label.setText("No audio loaded")
+
+
     def load_audio_file(self):
-        """Load an audio file using appropriate player"""
+        """Load an audio file using appropriate player (interactive dialog)."""
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "Load Audio File", self._base_dir_for_dialog(), 
+            self, "Load Audio File", self._base_dir_for_dialog(),
             "Audio Files (*.mp3 *.wav *.ogg *.m4a *.flac *.aac *.wma);;All Files (*)"
         )
-        
+
         if not file_path:
             return
 
@@ -1394,7 +1519,7 @@ class SRTEditor(QMainWindow):
         audio_dir = Path(file_path).parent
         subtitle_files = list(audio_dir.glob("*.srt")) + list(audio_dir.glob("*.json")) + \
                          list(audio_dir.glob("*.txt")) + list(audio_dir.glob("*.tsv"))
-        
+
         if subtitle_files:
             reply = QMessageBox.question(
                 self,
@@ -1402,7 +1527,7 @@ class SRTEditor(QMainWindow):
                 f"Found {len(subtitle_files)} subtitle file(s). Import one?",
                 QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel
             )
-            
+
             if reply == QMessageBox.Yes:
                 file_list = [str(f.name) for f in subtitle_files]
                 file_name, ok = QInputDialog.getItem(
@@ -1415,68 +1540,9 @@ class SRTEditor(QMainWindow):
                         self.load_file_from_path(str(subtitle_path))
             elif reply == QMessageBox.Cancel:
                 return
-        
-        # Stop any existing audio
-        if self.audio_player:
-            self.audio_player.cleanup()
-            self.audio_player = None
-        
-        # Reset speed display
-        self.playback_speed = 1.0
-        self.speed_knob.value = 1.0
-        self.speed_knob.update()
-        self.speed_normal_btn.setText("1.0x")
-        
-        self.update_splash("Loading audio player...")
-        
-        try:
-            self.audio_player = VlcAudioPlayer()
-        except Exception as e:
-            logger.warning(f"VLC not available: {e}")
-            QMessageBox.warning(self, "VLC Required",
-                "VLC media player is not available.\n\n"
-                "Please install VLC from https://www.videolan.org/vlc/")
-            return
-        
-        # Connect signals
-        self.audio_player.playback_started.connect(self.on_playback_started)
-        self.audio_player.playback_stopped.connect(self.on_playback_stopped)
-        self.audio_player.position_changed.connect(self.on_position_changed)
-        
-        if hasattr(self.audio_player, 'playback_paused'):
-            self.audio_player.playback_paused.connect(self.on_playback_paused)
-        if hasattr(self.audio_player, 'end_reached'):
-            self.audio_player.end_reached.connect(self.on_playback_ended)
-        
-        # Load the file
-        if self.audio_player.load_file(file_path):
-            self.audio_file_path = file_path
-            # Load waveform data for the viewer
-            self._load_waveform_audio(file_path)
-            audio_name = Path(file_path).name
 
-            # Update status label
-            self.audio_info_label.setText(f"Audio loaded: {audio_name}")
-            
-            # Enable basic controls
-            self.btn_play.setEnabled(True)
-            self.btn_rewind.setEnabled(True)
-            self.btn_forward.setEnabled(True)
-            self.btn_play_segment.setEnabled(True)
-            self.auto_sync_check.setEnabled(self.file_has_timestamps)
-            self.auto_pause_check.setEnabled(True)
-            self.audio_progress.setEnabled(True)
-            
-            # Update speed controls based on player type
-            self.update_speed_controls_state()
-            
-            logger.info(f"Audio loaded with VLC player: {audio_name}")
-        else:
-            QMessageBox.critical(self, "Error", f"Failed to load audio file (Install VLC)")
-            self.audio_player = None
-            self._clear_waveform_audio()
-            self.audio_info_label.setText("No audio loaded")
-    
+        self._load_audio_from_path(file_path)
+
     def toggle_playback(self):
         """Toggle play/pause"""
         if not self.audio_player:
