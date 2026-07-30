@@ -517,12 +517,12 @@ class SRTEditor(QMainWindow):
 
         # Auto-sync and Autopause checkboxes
         sync_layout = QHBoxLayout()
-        self.auto_sync_check = QCheckBox("Auto-sync to audio")
+        self.auto_sync_check = QCheckBox("Auto-sync to transcript")
         self.auto_sync_check.setEnabled(False)
         self.auto_sync_check.setChecked(False)
         self.auto_sync_check.toggled.connect(self.toggle_auto_sync)
 
-        self.auto_pause_check = QCheckBox("Autopause during editing")
+        self.auto_pause_check = QCheckBox("Pause during editing")
         self.auto_pause_check.setEnabled(False)
         self.auto_pause_check.setChecked(False)
         self.auto_pause_check.toggled.connect(self.toggle_auto_pause)
