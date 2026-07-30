@@ -1395,8 +1395,11 @@ class SettingsDialog(QDialog):
         gui_group = QGroupBox("GUI Settings")
         gui_layout = QVBoxLayout(gui_group)
         
+        theme_row = QHBoxLayout()
         self.theme_toggle = ThemeToggle(dark=(self.current_theme == "dark"))
-        gui_layout.addWidget(self.theme_toggle)
+        theme_row.addWidget(self.theme_toggle)
+        theme_row.addStretch()
+        gui_layout.addLayout(theme_row)
         
         gui_layout.addWidget(QLabel("Default path:"))
         self.base_system_radio = QRadioButton("System default")
