@@ -39,4 +39,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: CapsQual-Ubuntu
-          path: dist/CapsQual_1.6.1
+          path: dist/CapsQual_debug
