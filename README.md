@@ -3,7 +3,7 @@
 [![Run CI tests](https://github.com/anouarg88/CapsQual/actions/workflows/tests.yml/badge.svg)](https://github.com/anouarg88/CapsQual/actions/workflows/tests.yml)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21551449.svg)](https://doi.org/10.5281/zenodo.21551449)
 
-CapsQual (formerly CapsGAT) is an open source cross-platform workstation for editing and reformatting subtitle files (.SRT, .VTT, .JSON, .TSV, .TXT) into qualitative interview transcripts based on different conventions such as the minimal version of GAT2 ([Gesprächsanalytisches Transkriptionssystem 2](https://gat-to.uni-jena.de/)), TiQ (Talk in Qualitative Research) and those suggested by Kuckartz and Dresing & Pehl. The GUI enables users to assign speakers to segments quickly using keyboard shortcuts. Audio files can be imported and synced to the transcript. This is meant to reduce window-switching and simplify the formatting process. Playback speed can be adjusted (requires VLC Player to be installed). CapsQual features essential transcript-editing functionality such as segment splitting and merging, customizable symbols, overlapping speech, pauses, comments and more.  
+CapsQual (formerly CapsGAT) is an open source cross-platform workstation for editing and reformatting subtitle files (.SRT, .VTT, .JSON, .TSV, .TXT) into qualitative interview transcripts based on different conventions such as the minimal version of GAT2 ([Gesprächsanalytisches Transkriptionssystem 2](https://gat-to.uni-jena.de/)), TiQ (Talk in Qualitative Research) and those suggested by Kuckartz and Dresing & Pehl. The GUI enables users to assign speakers to segments quickly using keyboard shortcuts. Audio files can be imported and synced to the transcript. This is meant to reduce window-switching and simplify the formatting process. (Currently all audio features require VLC Player to be installed). CapsQual features essential transcript-editing functionality such as segment splitting and merging, customizable symbols, overlapping speech, pauses, comments and more.  
 
 However, it is not meant as a replacement for dedicated manual transcription software (for full-fledged, professional transcription software, check out [EXMARaLDA](https://www.exmaralda.org)), nor as an all-in-one automated transcription worksuite (for AI-powered transcription with automatic diarization check out [noScribe](https://ai4culture.eu/resources/tools/172)), but as a complementary formatting tool to be used with transcription AI models such as Whisper AI or CapsWriter, aimed at those who wish to efficiently tidy up their automatically transcribed interview-data in a user-friendly, intuitive environment. Projects can be loaded or saved. Transcripts can be exported as .HTML, .DOCX, .TXT or .SRT files.
 
@@ -36,7 +36,7 @@ _Note: Version 1.6.2 has been used as an example in this installation guide. Ple
 1. Download the Windows installer `CapsQual_1.6.2_Setup.exe` or the portable executable: `CapsQual_1.6.2.exe`.
 2. If you downloaded the installer, double‑click and follow the on‑screen instructions.
 3. If you downloaded the portable version, simply unzip the file in any folder and double‑click `CapsQual_1.6.2.exe` to run. A system warning may show up, since this software does not contain any official certificates. You may ignore this at your own discretion.
-4. (Optional) Install [VLC](https://www.videolan.org/) to enable playback speed control and better audio compatibility before running CapsQual.
+4. (Optional) Install [VLC](https://www.videolan.org/) for audio features.
 
 To run from source:
 
@@ -65,7 +65,7 @@ Two versions are provided:
 2. Open the downloaded file and drag `CapsQual_1.6.2.app` to your `Applications` folder.
 3. The first time you run the app, macOS may warn you that it is from an unidentified developer.  
    To bypass this, right‑click (or Ctrl‑click) the app and select **Open**, then click **Open** again.
-4. (Optional) Install [VLC](https://www.videolan.org/) to enable playback speed control before running CapsQual.
+4. (Optional) Install [VLC](https://www.videolan.org/) for audio features.
 
 To run from source:
 
@@ -80,13 +80,11 @@ python3 -m venv venv
 source venv/bin/activate
 # 4. Install dependencies
 pip install -r requirements.txt
-# 5. (Optional) VLC for audio speed control
+# 5. (Optional) VLC for audio features.
 brew install vlc
 # 6. Run
 python3 main.py
 ```
-
-If `pip install` fails, try `pip install PyQt5 python-docx numpy soundfile python-vlc` instead.
 
 ### Linux (Debian/Ubuntu 22.04 or newer)
 
@@ -103,7 +101,7 @@ If `pip install` fails, try `pip install PyQt5 python-docx numpy soundfile pytho
    ```bash
    ./CapsQual_1.6.2
    ```
-5. (Optional) Install VLC using your package manager (e.g., `sudo apt install vlc` on Debian/Ubuntu) to enable playback speed control.
+5. (Optional) Install VLC using your package manager (e.g., `sudo apt install vlc` on Debian/Ubuntu) for audio features.
 
 To run from source (also required for Ubuntu < 22.04):
 
