@@ -736,6 +736,210 @@ def test_tiq_vertical_bar_text_before(transcript):
     assert line3_stripped.strip() == '', f"Line 3 not blank: {repr(line3_stripped)}"
     # Line 4 should contain Y's text
     assert 'some text' in lines[3] or 'more' in lines[3], f"Line 4 missing Y's text: {lines[3]}"
+
+def test_bar_when_overlap_target_in_same_turn():
+    transcript = Transcript(
+        blocks=[
+            {'index': 1, 'text': 'B text', 'raw_text': 'B text', 'speaker': 1, 'is_turn_start': True},
+            {'index': 2, 'text': 'A overlap', 'raw_text': 'A overlap', 'speaker': 0, 'is_turn_start': False,
+             'overlap_info': {'indent': 3, 'overlap_text': '\u2514A overlap', 'prev_block_idx': 0,
+                              'convention': 'tiq', 'text_before': '', 'text_after': ''}},
+            {'index': 3, 'text': 'B continues', 'raw_text': 'B continues', 'speaker': 1, 'is_turn_start': False},
+        ], speakers=["A", "B"], cjk_mode=False
+    )
+    text = generate_tiq_text(transcript, include_timestamps=False, add_blank_line=True,
+                             concatenate_turns=True, include_diarization=True)
+    lines = text.split('\n')
+    bar_lines = [l for l in lines if '\u2502' in l]
+    assert len(bar_lines) == 1, f"Expected 1 bar, got {len(bar_lines)}"
+
+
+def test_bar_when_overlap_target_in_next_turn():
+    """Overlap targets block in a LATER segment (like user's block 329)."""
+    transcript = Transcript(
+        blocks=[
+            {'index': 1, 'text': 'A first turn', 'raw_text': 'A first turn', 'speaker': 0, 'is_turn_start': True},
+            {'index': 2, 'text': 'B overlap', 'raw_text': 'B overlap', 'speaker': 1, 'is_turn_start': True,
+             'overlap_info': {'indent': 8, 'overlap_text': '\u2514B overlap', 'prev_block_idx': 2,
+                              'convention': 'tiq', 'text_before': '', 'text_after': ''}},
+            {'index': 3, 'text': 'A target text', 'raw_text': 'A target text', 'speaker': 0, 'is_turn_start': True},
+            {'index': 4, 'text': 'A continues', 'raw_text': 'A continues', 'speaker': 0, 'is_turn_start': False},
+        ], speakers=["A", "B"], cjk_mode=False
+    )
+    text = generate_tiq_text(transcript, include_timestamps=False, add_blank_line=True,
+                             concatenate_turns=True, include_diarization=True)
+    lines = text.split('\n')
+    assert any('\u2514' in l for l in lines), "Overlap line missing"
+    bar_lines = [l for l in lines if '\u2502' in l.strip()]
+    assert len(bar_lines) >= 1, f"Expected >=1 bar, got {len(bar_lines)}"
+
+
+def test_multiple_pure_overlaps_one_bar():
+    """Multiple pure overlaps produce <=1 bar (dedup)."""
+    transcript = Transcript(
+        blocks=[
+            {'index': 1, 'text': 'A main', 'raw_text': 'A main', 'speaker': 0, 'is_turn_start': True},
+            {'index': 2, 'text': 'B ov1', 'raw_text': 'B ov1', 'speaker': 1, 'is_turn_start': True,
+             'overlap_info': {'indent': 5, 'overlap_text': '\u2514B ov1', 'prev_block_idx': 0,
+                              'convention': 'tiq', 'text_before': '', 'text_after': ''}},
+            {'index': 3, 'text': 'C ov2', 'raw_text': 'C ov2', 'speaker': 2, 'is_turn_start': True,
+             'overlap_info': {'indent': 12, 'overlap_text': '\u2514C ov2', 'prev_block_idx': 0,
+                              'convention': 'tiq', 'text_before': '', 'text_after': ''}},
+        ], speakers=["A", "B", "C"], cjk_mode=False
+    )
+    text = generate_tiq_text(transcript, include_timestamps=False, add_blank_line=True,
+                             concatenate_turns=True, include_diarization=True)
+    bar_lines = [l for l in text.split('\n') if '\u2502' in l.strip()]
+    assert len(bar_lines) <= 2, f"Expected <=2 bars (one per speaker), got {len(bar_lines)}"
+    assert len(bar_lines) >= 2, f"Expected 2 bars (B and C), got {len(bar_lines)}"
+
+
+def test_no_bar_when_no_overlap():
+    transcript = Transcript(
+        blocks=[{'index': 1, 'text': 'A', 'raw_text': 'A', 'speaker': 0, 'is_turn_start': True},
+                {'index': 2, 'text': 'B', 'raw_text': 'B', 'speaker': 1, 'is_turn_start': True}],
+        speakers=["A", "B"], cjk_mode=False
+    )
+    text = generate_tiq_text(transcript, include_timestamps=False, add_blank_line=True,
+                             concatenate_turns=True, include_diarization=True)
+    bar_lines = [l for l in text.split('\n') if '\u2502' in l.strip()]
+    assert len(bar_lines) == 0, f"Expected 0 bars, got {len(bar_lines)}"
+
+
+def test_620_scenario():
+    """Block 620 pattern: pure overlap targeting earlier block in same turn."""
+    transcript = Transcript(
+        blocks=[
+            {'index': 1, 'text': 'A text', 'raw_text': 'A text', 'speaker': 0, 'is_turn_start': True},
+            {'index': 2, 'text': 'A target', 'raw_text': 'A target', 'speaker': 0, 'is_turn_start': False},
+            {'index': 3, 'text': 'A continuing', 'raw_text': 'A continuing', 'speaker': 0, 'is_turn_start': False},
+            {'index': 4, 'text': 'B pure overlap', 'raw_text': 'B pure overlap', 'speaker': 1, 'is_turn_start': True,
+             'overlap_info': {'indent': 10, 'overlap_text': '\u2514B pure overlap', 'prev_block_idx': 1,
+                              'convention': 'tiq', 'text_before': '', 'text_after': ''}},
+        ], speakers=["A", "B"], cjk_mode=False
+    )
+    text = generate_tiq_text(transcript, include_timestamps=False, add_blank_line=True,
+                             concatenate_turns=True, include_diarization=True)
+    lines = text.split('\n')
+    bar_lines = [l for l in lines if '\u2502' in l.strip()]
+    assert len(bar_lines) == 1, f"Expected 1 bar, got {len(bar_lines)}"
+    assert any('\u2514' in l for l in lines), "Overlap missing"
+
+
+def test_split_A_turn_with_unassigned():
+    """A's turn split by unassigned/pause blocks: only 1 bar for B's overlap."""
+    transcript = Transcript(
+        blocks=[
+            {'index': 1, 'text': 'A part 1', 'raw_text': 'A part 1', 'speaker': 0, 'is_turn_start': True},
+            {'index': 2, 'text': 'unassigned', 'raw_text': 'unassigned', 'speaker': None, 'is_pause': True},
+            {'index': 3, 'text': 'A part 2', 'raw_text': 'A part 2', 'speaker': 0, 'is_turn_start': True},
+            {'index': 4, 'text': 'unassigned 2', 'raw_text': 'unassigned 2', 'speaker': None, 'is_pause': True},
+            {'index': 5, 'text': 'A part 3', 'raw_text': 'A part 3', 'speaker': 0, 'is_turn_start': True},
+            {'index': 6, 'text': 'B overlap', 'raw_text': 'B overlap', 'speaker': 1, 'is_turn_start': True,
+             'overlap_info': {'indent': 5, 'overlap_text': '\u2514B overlap', 'prev_block_idx': 0,
+                              'convention': 'tiq', 'text_before': '', 'text_after': ''}},
+        ], speakers=["A", "B"], cjk_mode=False
+    )
+    text = generate_tiq_text(transcript, include_timestamps=False, add_blank_line=True,
+                             concatenate_turns=True, include_diarization=True)
+    lines = text.split('\n')
+    bar_lines = [l for l in lines if '\u2502' in l.strip()]
+    assert len(bar_lines) == 1, f"Expected 1 bar (split turn), got {len(bar_lines)}"
+
+
+def test_329_scenario_pure_overlap_before_target():
+    """Block 329 pattern: pure overlap whose target is in a later segment.
+
+    The overlap block comes BEFORE the target in the segment list, so
+    _emit_one_turn returns False (absorbed by previous turn), and the bar
+    must be inserted by _maybe_insert_bar_for_pure_overlap_segment.
+    """
+    transcript = Transcript(
+        blocks=[
+            {'index': 327, 'text': 'A text 327', 'raw_text': 'A text 327',
+             'speaker': 0, 'is_turn_start': True},
+            {'index': 328, 'text': 'A text 328', 'raw_text': 'A text 328',
+             'speaker': 0, 'is_turn_start': False},
+            {'index': 329, 'text': '', 'raw_text': '',
+             'speaker': 1, 'is_turn_start': True,
+             'overlap_info': {'indent': 8, 'overlap_text': '\u2514B overlap text',
+                              'prev_block_idx': 4, 'convention': 'tiq',
+                              'text_before': '', 'text_after': ''}},
+            {'index': 330, 'text': 'A text 330', 'raw_text': 'A text 330',
+             'speaker': 0, 'is_turn_start': True},
+            {'index': 350, 'text': 'A target text', 'raw_text': 'A target text',
+             'speaker': 0, 'is_turn_start': False},
+            {'index': 351, 'text': 'A continues', 'raw_text': 'A continues',
+             'speaker': 0, 'is_turn_start': False},
+        ], speakers=["A", "B"], cjk_mode=False
+    )
+    text = generate_tiq_text(transcript, include_timestamps=False, add_blank_line=True,
+                              concatenate_turns=True, include_diarization=True)
+    lines = text.split('\n')
+    bar_lines = [l for l in lines if '\u2502' in l.strip()]
+    overlap_lines = [l for l in lines if '\u2514' in l]
+    assert len(bar_lines) == 1, f"Expected 1 bar for 329 scenario, got {len(bar_lines)}"
+    assert len(overlap_lines) == 1, f"Expected 1 overlap line, got {len(overlap_lines)}"
+
+
+def test_329_with_pause_before_overlap():
+    """Like 329 but with a pause block between A and B's pure overlap."""
+    transcript = Transcript(
+        blocks=[
+            {'index': 320, 'text': 'A text', 'raw_text': 'A text',
+             'speaker': 0, 'is_turn_start': True},
+            {'index': 321, 'text': 'A more text', 'raw_text': 'A more text',
+             'speaker': 0, 'is_turn_start': False},
+            {'index': 322, 'text': '(.) pause', 'raw_text': '(.) pause',
+             'speaker': None, 'is_pause': True},
+            {'index': 323, 'text': '', 'raw_text': '',
+             'speaker': 1, 'is_turn_start': True,
+             'overlap_info': {'indent': 8, 'overlap_text': '\u2514B overlap',
+                              'prev_block_idx': 4, 'convention': 'tiq',
+                              'text_before': '', 'text_after': ''}},
+            {'index': 350, 'text': 'A target', 'raw_text': 'A target',
+             'speaker': 0, 'is_turn_start': True},
+        ], speakers=["A", "B"], cjk_mode=False
+    )
+    text = generate_tiq_text(transcript, include_timestamps=False, add_blank_line=True,
+                              concatenate_turns=True, include_diarization=True)
+    lines = text.split('\n')
+    bar_lines = [l for l in lines if '\u2502' in l.strip()]
+    assert len(bar_lines) == 1, f"Expected 1 bar with pause, got {len(bar_lines)}"
+    assert any('\u2514' in l for l in lines), "Overlap missing"
+
+
+def test_multiple_b_overlap_segments_one_bar():
+    """Multiple B pure-overlap segments (each is_turn_start=True) → only 1 bar."""
+    transcript = Transcript(
+        blocks=[
+            {'index': 1, 'text': 'A main', 'raw_text': 'A main', 'speaker': 0, 'is_turn_start': True},
+            {'index': 2, 'text': 'A cont', 'raw_text': 'A cont', 'speaker': 0, 'is_turn_start': False},
+            {'index': 329, 'text': '', 'raw_text': '', 'speaker': 1, 'is_turn_start': True,
+             'overlap_info': {'indent': 12, 'overlap_text': '\u2514B ov1', 'prev_block_idx': 5,
+                              'convention': 'tiq', 'text_before': '', 'text_after': ''}},
+            {'index': 356, 'text': '', 'raw_text': '', 'speaker': 1, 'is_turn_start': True,
+             'overlap_info': {'indent': 8, 'overlap_text': '\u2514B ov2', 'prev_block_idx': 6,
+                              'convention': 'tiq', 'text_before': '', 'text_after': ''}},
+            {'index': 370, 'text': '', 'raw_text': '', 'speaker': 1, 'is_turn_start': True,
+             'overlap_info': {'indent': 5, 'overlap_text': '\u2514B ov3', 'prev_block_idx': 7,
+                              'convention': 'tiq', 'text_before': '', 'text_after': ''}},
+            {'index': 620, 'text': '', 'raw_text': '', 'speaker': 1, 'is_turn_start': True,
+             'overlap_info': {'indent': 17, 'overlap_text': '\u2514B ov4', 'prev_block_idx': 8,
+                              'convention': 'tiq', 'text_before': '', 'text_after': ''}},
+            {'index': 700, 'text': 'A target 1', 'raw_text': 'A target 1', 'speaker': 0, 'is_turn_start': True},
+            {'index': 701, 'text': 'A target 2', 'raw_text': 'A target 2', 'speaker': 0, 'is_turn_start': False},
+            {'index': 702, 'text': 'A target 3', 'raw_text': 'A target 3', 'speaker': 0, 'is_turn_start': False},
+            {'index': 703, 'text': 'A target 4', 'raw_text': 'A target 4', 'speaker': 0, 'is_turn_start': False},
+        ], speakers=["A", "B"], cjk_mode=False
+    )
+    text = generate_tiq_text(transcript, include_timestamps=False, add_blank_line=True,
+                              concatenate_turns=True, include_diarization=True)
+    lines = text.split('\n')
+    bar_lines = [l for l in lines if '\u2502' in l.strip()]
+    overlap_lines = [l for l in lines if '\u2514' in l]
+    assert len(bar_lines) == 4, f"Expected 4 bars (one per overlap line), got {len(bar_lines)}"
+    assert len(overlap_lines) == 4, f"Expected 4 overlaps, got {len(overlap_lines)}"
 # ----------------------------------------------------------------------
 # Old-format overlap detection and upgrade tests
 # ----------------------------------------------------------------------
