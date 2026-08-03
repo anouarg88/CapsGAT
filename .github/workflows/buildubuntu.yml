@@ -33,10 +33,10 @@ jobs:
           # Output is dist/main
 
       - name: Rename executable
-        run: mv dist/main dist/CapsQual_1.6.1
+        run: mv dist/main dist/CapsQual_debug
 
       - name: Upload artifact (Ubuntu binary for CI/debug)
         uses: actions/upload-artifact@v4
         with:
           name: CapsQual-Ubuntu
-          path: dist/CapsQual_1.6.1
+          path: dist/CapsQual_debug
