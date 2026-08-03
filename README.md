@@ -5,8 +5,12 @@
 
 CapsQual (formerly CapsGAT) is an open source cross-platform workstation for editing and reformatting subtitle files (.SRT, .VTT, .JSON, .TSV, .TXT) into qualitative interview transcripts based on different conventions such as the minimal version of GAT2 ([Gesprächsanalytisches Transkriptionssystem 2](https://gat-to.uni-jena.de/)), TiQ (Talk in Qualitative Research) and those suggested by Kuckartz and Dresing & Pehl. The GUI enables users to assign speakers to segments quickly using keyboard shortcuts. Audio files can be imported and synced to the transcript. This is meant to reduce window-switching and simplify the formatting process. Playback speed can be adjusted (requires VLC Player to be installed). CapsQual features essential transcript-editing functionality such as segment splitting and merging, customizable symbols, overlapping speech, pauses, comments and more.  
 
-
 However, it is not meant as a replacement for dedicated manual transcription software (for full-fledged, professional transcription software, check out [EXMARaLDA](https://www.exmaralda.org)), nor as an all-in-one automated transcription worksuite (for AI-powered transcription with automatic diarization check out [noScribe](https://ai4culture.eu/resources/tools/172)), but as a complementary formatting tool to be used with transcription AI models such as Whisper AI or CapsWriter, aimed at those who wish to efficiently tidy up their automatically transcribed interview-data in a user-friendly, intuitive environment. Projects can be loaded or saved. Transcripts can be exported as .HTML, .DOCX, .TXT or .SRT files.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="screenshots/screenshot_editor_dark.png">
+  <img src="screenshots/screenshot_editor_light.png" alt="CapsQual editor window">
+</picture>
 
 # Installation
 
@@ -18,20 +22,20 @@ However, it is not meant as a replacement for dedicated manual transcription sof
 - **RAM**: 512 MB minimum, 2 GB recommended
 - **Disk space**: 150 MB for the application, plus space for your projects
 
-Optional but highly recommended for audio playback speed control:
+For audio features:
 
-- **VLC media player** (download from [videolan.org](https://www.videolan.org/))
+- **VLC media player** (download from [videolan.org](https://www.videolan.org/) or run `apt install vlc` in Linux or `brew install vlc` in macOS)
 
 
 ## Installation guide
 
-_Note: Version 1.6.0 has been used as an example in this installation guide. Please replace "1.6.0" with whichever version you are going to install._
+_Note: Version 1.6.2 has been used as an example in this installation guide. Please replace "1.6.2" with whichever version you are going to install._
 
 ### Windows
 
-1. Download the Windows installer `CapsQual_1.6.0_Setup.exe` or the portable executable: `CapsQual_1.6.0.exe`.
+1. Download the Windows installer `CapsQual_1.6.2_Setup.exe` or the portable executable: `CapsQual_1.6.2.exe`.
 2. If you downloaded the installer, double‑click and follow the on‑screen instructions.
-3. If you downloaded the portable version, simply unzip the file in any folder and double‑click `CapsQual_1.6.0.exe` to run. A system warning may show up, since this software does not contain any official certificates. You may ignore this at your own discretion.
+3. If you downloaded the portable version, simply unzip the file in any folder and double‑click `CapsQual_1.6.2.exe` to run. A system warning may show up, since this software does not contain any official certificates. You may ignore this at your own discretion.
 4. (Optional) Install [VLC](https://www.videolan.org/) to enable playback speed control and better audio compatibility before running CapsQual.
 
 To run from source:
@@ -58,7 +62,7 @@ Two versions are provided:
 - `CapsQual-macOS-AppleSilicon` for Macs with Apple Silicon (M1, M2, M3)
 
 1. Download the appropriate `.zip` file.
-2. Open the downloaded file and drag `CapsQual_1.6.0.app` to your `Applications` folder.
+2. Open the downloaded file and drag `CapsQual_1.6.2.app` to your `Applications` folder.
 3. The first time you run the app, macOS may warn you that it is from an unidentified developer.  
    To bypass this, right‑click (or Ctrl‑click) the app and select **Open**, then click **Open** again.
 4. (Optional) Install [VLC](https://www.videolan.org/) to enable playback speed control before running CapsQual.
@@ -86,18 +90,18 @@ If `pip install` fails, try `pip install PyQt5 python-docx numpy soundfile pytho
 
 ### Linux (Debian/Ubuntu 22.04 or newer)
 
-1. Download `CapsQual_1.6.0-linux.tar.gz`.
+1. Download `CapsQual_1.6.2-linux.tar.gz`.
 2. Open a terminal in the download folder and unfold the archive:
    ```bash
-   tar -xzf CapsQual_1.6.0-linux.tar.gz
+   tar -xzf CapsQual_1.6.2-linux.tar.gz
    ```
 3. Make the extracted file executable:
    ```bash
-   chmod +x CapsQual_1.6.0
+   chmod +x CapsQual_1.6.2
    ```
 4. Run the program:
    ```bash
-   ./CapsQual_1.6.0
+   ./CapsQual_1.6.2
    ```
 5. (Optional) Install VLC using your package manager (e.g., `sudo apt install vlc` on Debian/Ubuntu) to enable playback speed control.
 
@@ -123,80 +127,36 @@ If `pip` is not installed, run `sudo apt install python3-pip` first.
 
 If you encounter difficulties installing CapsQual, feel free to [open an issue](https://github.com/anouarg88/CapsQual/issues).
 
-# Quickstart
+# Usage
 
-This guide walks you through the basic workflow of CapsQual.  
-Click any image to view it in full size.
+## This quick-start guide walks you through the basic workflow of CapsQual:
 
----
 
-## 1. Install CapsQual
+1. **Import audio & subtitles.** After [installation](#installation), Import your files by dragging them onto the CapsQual window, using the menu bar or clicking the **Load Audio** button. If subtitle files are in the same folder as the audio file, CapsQual will offer to import them automatically.
 
-Download the latest version from the [Releases page](https://github.com/anouarg88/CapsQual/releases)
 
-For detailed setup instructions, see [Installation](#installation).
+2. **Assign speakers.** Use the number keys (`1`, `2`, `3`, …) or buttons in the top-right corner to assign speakers to the selected segments. Add/remove speakers with the `+` / `−` buttons and rename speakers using the text fields.
 
-Prepare your subtitle files.  
-If needed, check this tutorial on [how to install Whisper](https://www.qualitative-forschung.de/fqs-supplement/fotos/zoom/24-1-8-e_app1.pdf).
 
----
+3. **Auto-process transcript.** Use **Modify transcript** to strip punctuation or convert everything to lowercase. CapsQual can also convert silent segments into pause symbols.
 
-## 2. Import Audio & Subtitles
 
-Import your files using the **Load Audio** button. If subtitle files are in the same folder, CapsQual will offer to import them automatically. Otherwise, they can be imported from the menu bar.
+4. **Review & annotate.** Review the transcript sequentially and split (`Space`), merge (`Del`) and edit (`E/F2`) segments where necessary. Drag the position markers in the waveform viewer or edit timestamps directly (T) to adjust the start and end time of each segment if necessary. Use the **Symbols** button (`*`) to insert pauses, overlaps, comments and other transcription symbols. 
 
-![Import Audio & Subtitles in CapsQual](https://github.com/user-attachments/assets/2a3030f0-ec5b-4a20-a1bd-3b65da2d92a4#gh-light-mode-only)
-![Import Audio & Subtitles in CapsQual](https://github.com/user-attachments/assets/9be8710f-a231-48d4-b328-07c57c889b92#gh-dark-mode-only)
 
----
+5. **Finalize and export.** Press the Export button or `Ctrl + Enter` to open the export dialog. Choose transcript conventions, customize line-wrapping, timestamps and other options and export as HTML, DOCX, TXT, or SRT.
 
-## 3. Assign Speakers
-
-- Use the number keys (1, 2, 3, …) or buttons in the top-right corner to assign speakers to the selected segments.
-- Add/remove speakers with the `+` / `−` buttons.
-- Rename speakers using the text fields  
-
-![Assign Speakers in CapsQual](https://github.com/user-attachments/assets/4f83680b-0d01-42d3-8456-bfd304fd7b2f#gh-light-mode-only)
-![Assign Speakers in CapsQual](https://github.com/user-attachments/assets/98fb6702-4e72-4f11-b0e1-a217b81ac412#gh-dark-mode-only)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="screenshots/screenshot_export_dark.png">
+  <img src="screenshots/screenshot_export_light.png" alt="CapsQual export dialog">
+</picture>
 
 ---
 
-## 4. Auto-Process Transcript
-
-Use **Modify transcript** to strip punctuation or convert everything to lowercase. CapsQual can also convert silent segments into pause symbols, if the subtitle files were created with ASR-software which supports _Voice Activity Detection_ (VAD), such as [CapsWriter-Offline](https://github.com/HaujetZhao/CapsWriter-Offline) or [WhisperX](https://github.com/m-bain/WhisperX).
-
-![Auto-Process Transcript in CapsQual](https://github.com/user-attachments/assets/b41a29fc-90a6-42e1-bfa6-f0be2e182989#gh-light-mode-only)
-![Auto-Process Transcript in CapsQual](https://github.com/user-attachments/assets/fb9d77be-8afb-45b5-b741-7049d012c047#gh-dark-mode-only)
-
----
-
-## 5. Review & Annotate
-
-Review the transcript sequentially and split (`Space`), merge (`Del`) and edit (`E/F2`) segments where necessary. Edit timestamps (T) to adjust the start and end time of each segment if necessary. Use the **Symbols** button (`*`) to insert pauses, overlaps, comments and other transcription symbols. 
-
-
-![Review & Annotate in CapsQual](https://github.com/user-attachments/assets/71ed0c77-61ac-49ab-9b66-cb01b96296d9#gh-light-mode-only)
-![Review & Annotate in CapsQual](https://github.com/user-attachments/assets/468d326a-cb9a-47f0-9815-159cb9c15608#gh-dark-mode-only)
-
----
-
-## 6. Export
-
-Press the Export button or **Ctrl + Enter** to open the export dialog.
-
-You can:
-- Choose transcript conventions  
-- Adjust formatting  
-- Export as HTML, DOCX, TXT, or SRT  
-
-![Export in CapsQual](https://github.com/user-attachments/assets/be82ffac-7271-4417-b021-03a6f52ccc35#gh-light-mode-only)
-![Export in CapsQual](https://github.com/user-attachments/assets/655d2dcf-609c-4e1e-9cc0-584ec482e44f#gh-dark-mode-only)
-
----
-
-# CLI Usage
+## CLI Usage
 
 CapsQual can also be used from the command line for headless conversion (Run from one directory level above CapsQual):
+
 
 ```bash
 # Convert an SRT file to GAT2 transcript
