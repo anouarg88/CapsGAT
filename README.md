@@ -127,7 +127,7 @@ If you encounter difficulties installing CapsQual, feel free to [open an issue](
 
 # Usage
 
-## This quick-start guide walks you through the basic workflow of CapsQual:
+## Quick-start guide
 
 
 1. **Import audio & subtitles.** After [installation](#installation), Import your files by dragging them onto the CapsQual window, using the menu bar or clicking the **Load Audio** button. If subtitle files are in the same folder as the audio file, CapsQual will offer to import them automatically.
