@@ -1,0 +1,42 @@
+# Generic Python project ignore rules.
+
+# Byte-compiled and cache files
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# IDE and editor config
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Build and packaging output
+build/
+dist/
+*.spec
+*.zip
+*.tar.gz
+*.exe
+*.msi
+*.dmg
+
+# Coverage
+.coverage
+.coverage.*
+htmlcov/
+
+# Logs
+*.log
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
