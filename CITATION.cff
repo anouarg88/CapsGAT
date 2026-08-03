@@ -5,7 +5,7 @@ authors:
   given-names: "Anouâr"
   orcid: "https://orcid.org/0009-0002-1389-0308"
 title: "CapsQual: Subtitle-to-Transcript Workstation"
-version: 1.6.1
-doi: 10.5281/zenodo.21558092
-date-released: 2026-07-25
+version: 1.6.2
+doi: 10.5281/zenodo.21551449
+date-released: 2026-08-03
 url: "https://github.com/anouarg88/CapsQual"
