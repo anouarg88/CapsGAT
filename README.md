@@ -181,4 +181,16 @@ For a full list of options, run `python -m CapsQual --help`.
 
 For more info on how to use CapsQual, see the [CapsQual User Manual](https://github.com/anouarg88/CapsQual/wiki).
 
+# Citation
+
+**If you use this software, please cite it as below:**
+
+Gadermann, A. (2026). *CapsQual: Subtitle-to-Transcript Workstation (Version 1.6.2)*. Computer software. Zenodo. https://doi.org/10.5281/zenodo.21769829
+
+ 
+**Alternatively, please cite the documentation as below:**
+
+Gadermann, A. (2026). *CapsQual: GUI Tool for Turning ASR Output into Qualitative Transcripts*. Digital Collection of Paderborn University Library (Digitale Sammlungen der Universitätsbibliothek Paderborn). https://doi.org/10.17619/UNIPB/1-2687
+
+---
 CapsQual was developed with the help of DeepSeek AI.
