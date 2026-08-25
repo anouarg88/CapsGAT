@@ -77,11 +77,19 @@ class WaveformViewer(QWidget):
     SPINNER_BLOCK_COUNT = 7
     SPINNER_BLOCK_W = 10
     SPINNER_BLOCK_GAP = 5
+    KEYBOARD_NUDGE_STEP = 0.1  # seconds moved per Ctrl+arrow nudge
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumHeight(self.MIN_HEIGHT)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setFocusPolicy(Qt.ClickFocus)  # clicking the waveform enables keyboard control
+        self.setToolTip(
+            "Waveform keyboard shortcuts:\n"
+            "Ctrl+Left/Right            nudge the start marker\n"
+            "Ctrl+Shift+Left/Right      nudge the end marker\n"
+            "Ctrl+Shift+Alt+Left/Right  set marker to the playhead"
+        )
         self._theme = 'dark'
         self.C = dict(self._dark_theme())
 
@@ -556,6 +564,82 @@ class WaveformViewer(QWidget):
         if event.button() == Qt.LeftButton and self._dragging is not None:
             self._dragging = None
             event.accept()
+
+    def keyPressEvent(self, event):
+        """Keyboard control for the segment markers.
+
+        Used when the widget itself has focus (the editor additionally routes
+        these keys globally via an application event filter, so they work even
+        when another widget has focus).
+
+        - Ctrl+Left/Right       nudge the start marker
+        - Ctrl+Shift+Left/Right nudge the end marker
+        - Ctrl+Shift+Alt+Left/Right set a marker to the playhead position
+
+        Plain arrow keys are intentionally left untouched so the editor's
+        window-level block-navigation shortcuts still work.
+        """
+        if self.duration > 0 and self.start_time is not None and self.end_time is not None:
+            mods = event.modifiers()
+            ctrl = bool(mods & Qt.ControlModifier)
+            shift = bool(mods & Qt.ShiftModifier)
+            alt = bool(mods & Qt.AltModifier)
+            key = event.key()
+
+            if ctrl and not alt and key in (Qt.Key_Left, Qt.Key_Right):
+                direction = 1 if key == Qt.Key_Right else -1
+                which = 'end' if shift else 'start'
+                self.keyboard_nudge(which, direction, event.isAutoRepeat())
+                event.accept()
+                return
+
+            if ctrl and shift and alt and key in (Qt.Key_Left, Qt.Key_Right):
+                which = 'start' if key == Qt.Key_Left else 'end'
+                self.snap_marker_to_playhead(which, event.isAutoRepeat())
+                event.accept()
+                return
+
+        super().keyPressEvent(event)
+
+    def keyboard_nudge(self, which, direction, is_auto_repeat=False):
+        """Nudge one marker by one step via keyboard.
+
+        ``which`` is ``'start'`` or ``'end'``; ``direction`` is -1 or +1.
+        One undo snapshot is pushed per press burst (auto-repeat is deduped).
+        """
+        if not is_auto_repeat:
+            self.drag_started.emit()  # one undo snapshot per press burst
+        step = self.KEYBOARD_NUDGE_STEP * direction
+        if which == 'start':
+            t = self.start_time + step
+            t = max(self.view_start, min(self.view_end, t))
+            t = min(t, self.end_time - 0.001)
+            self.start_time = t
+            self.segment_start_changed.emit(t)
+        else:
+            t = self.end_time + step
+            t = max(self.view_start, min(self.view_end, t))
+            t = max(t, self.start_time + 0.001)
+            self.end_time = t
+            self.segment_end_changed.emit(t)
+        self.update()
+
+    def snap_marker_to_playhead(self, which, is_auto_repeat=False):
+        """Move a marker to the current playhead position."""
+        if is_auto_repeat or self.playback_position is None:
+            return
+        t = self.playback_position
+        t = max(self.view_start, min(self.view_end, t))
+        self.drag_started.emit()  # one undo snapshot per action
+        if which == 'start':
+            t = min(t, self.end_time - 0.001)
+            self.start_time = t
+            self.segment_start_changed.emit(t)
+        else:
+            t = max(t, self.start_time + 0.001)
+            self.end_time = t
+            self.segment_end_changed.emit(t)
+        self.update()
 
     def wheelEvent(self, event):
         if self.duration <= 0:

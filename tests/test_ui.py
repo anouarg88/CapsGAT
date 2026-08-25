@@ -4,6 +4,7 @@ import pytest
 from unittest.mock import patch, Mock, MagicMock, PropertyMock
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout
 from PyQt5.QtGui import QColor
+from PyQt5.QtCore import QEvent, Qt
 from editor import SRTEditor
 from generators import (
     format_timestamp, time_to_seconds, time_to_ms, _ms_to_time as ms_to_time
@@ -326,6 +327,166 @@ def test_waveform_end_drag_pushes_undo_once_per_drag(editor):
 
     editor.redo()
     assert editor.srt_blocks[0]['end_time'] == '00:00:25,000'
+
+# ── waveform keyboard-control tests ───────────────────────────────
+
+def _key_event(key, modifiers, autorep=False):
+    """Build a synthetic QKeyEvent for driving the waveform viewer's keyboard handling."""
+    from PyQt5.QtGui import QKeyEvent
+    return QKeyEvent(QEvent.KeyPress, key, modifiers, "", autorep)
+
+def _make_viewer():
+    from widgets import WaveformViewer
+    viewer = WaveformViewer()
+    viewer.duration = 30.0
+    viewer.view_start, viewer.view_end = 0.0, 30.0
+    viewer.start_time, viewer.end_time = 10.0, 20.0
+    return viewer
+
+def test_waveform_keyboard_nudge_start_marker(app):
+    """Ctrl+Left/Right nudges the start marker by one step."""
+    viewer = _make_viewer()
+    changed, started = [], []
+    viewer.segment_start_changed.connect(changed.append)
+    viewer.drag_started.connect(lambda: started.append(1))
+
+    viewer.keyPressEvent(_key_event(Qt.Key_Left, Qt.ControlModifier))
+    assert viewer.start_time == 9.9
+    assert changed == [9.9]
+    assert len(started) == 1  # one undo snapshot per press
+
+    viewer.keyPressEvent(_key_event(Qt.Key_Right, Qt.ControlModifier))
+    assert viewer.start_time == 10.0
+
+def test_waveform_keyboard_nudge_end_marker(app):
+    """Ctrl+Shift+Left/Right nudges the end marker by one step."""
+    viewer = _make_viewer()
+    changed = []
+    viewer.segment_end_changed.connect(changed.append)
+
+    viewer.keyPressEvent(_key_event(Qt.Key_Right, Qt.ControlModifier | Qt.ShiftModifier))
+    assert viewer.end_time == 20.1
+    assert changed == [20.1]
+
+    viewer.keyPressEvent(_key_event(Qt.Key_Left, Qt.ControlModifier | Qt.ShiftModifier))
+    assert viewer.end_time == 20.0
+
+def test_waveform_keyboard_set_markers_to_playhead(app):
+    """Ctrl+Shift+Alt+Left/Right snaps a marker to the current playhead."""
+    viewer = _make_viewer()
+    viewer.playback_position = 15.0
+    started = []
+    viewer.drag_started.connect(lambda: started.append(1))
+
+    viewer.keyPressEvent(_key_event(
+        Qt.Key_Left, Qt.ControlModifier | Qt.ShiftModifier | Qt.AltModifier))
+    assert viewer.start_time == 15.0
+    assert len(started) == 1
+
+    viewer.start_time = 10.0
+    viewer.keyPressEvent(_key_event(
+        Qt.Key_Right, Qt.ControlModifier | Qt.ShiftModifier | Qt.AltModifier))
+    assert viewer.end_time == 15.0
+
+def test_waveform_keyboard_nudge_keeps_segment_valid(app):
+    """Nudging start right cannot push it past the end marker."""
+    viewer = _make_viewer()
+    viewer.start_time, viewer.end_time = 10.0, 10.5
+    for _ in range(20):
+        viewer.keyPressEvent(_key_event(Qt.Key_Right, Qt.ControlModifier))
+    assert viewer.start_time == pytest.approx(10.5 - 0.001)
+
+def test_waveform_keyboard_nudge_undo_integration(editor):
+    """A keyboard nudge creates ONE undo entry; auto-repeat doesn't add more."""
+    from widgets import WaveformViewer
+    viewer = _make_viewer()
+    viewer.set_segment = Mock()
+    editor.waveform_viewer = viewer
+    editor.srt_blocks = [{
+        'text': 'X', 'raw_text': 'X',
+        'start_time': '00:00:10,000', 'end_time': '00:00:20,000',
+    }]
+    editor.current_block_index = 0
+    editor._seconds_to_srt = Mock(side_effect=lambda s: (
+        f"00:00:{int(s):02d},{int(round((s - int(s)) * 1000)):03d}"))
+    editor.mark_unsaved_changes = Mock()
+
+    viewer.drag_started.connect(editor._on_waveform_drag_started)
+    viewer.segment_start_changed.connect(editor._on_waveform_start_changed)
+
+    # A real keypress nudges start to 9.9 and pushes one undo snapshot
+    viewer.keyPressEvent(_key_event(Qt.Key_Left, Qt.ControlModifier))
+    assert len(editor.undo_stack) == 1
+    assert editor.srt_blocks[0]['start_time'] == '00:00:09,900'
+
+    # Auto-repeat (held key) keeps moving but must NOT push another snapshot
+    viewer.keyPressEvent(_key_event(Qt.Key_Left, Qt.ControlModifier, autorep=True))
+    assert len(editor.undo_stack) == 1
+    assert editor.srt_blocks[0]['start_time'] == '00:00:09,800'
+
+    editor.undo()
+    assert editor.srt_blocks[0]['start_time'] == '00:00:10,000'
+
+    editor.redo()
+    assert editor.srt_blocks[0]['start_time'] == '00:00:09,800'
+
+def test_waveform_keyboard_shortcuts_work_without_waveform_focus(editor):
+    """The editor routes waveform shortcuts globally, no waveform click needed."""
+    from widgets import WaveformViewer
+    viewer = _make_viewer()
+    viewer.set_segment = Mock()
+    editor.waveform_viewer = viewer
+    editor.srt_blocks = [{
+        'text': 'X', 'raw_text': 'X',
+        'start_time': '00:00:10,000', 'end_time': '00:00:20,000',
+    }]
+    editor.current_block_index = 0
+    editor._seconds_to_srt = Mock(side_effect=lambda s: (
+        f"00:00:{int(s):02d},{int(round((s - int(s)) * 1000)):03d}"))
+    editor.mark_unsaved_changes = Mock()
+    viewer.drag_started.connect(editor._on_waveform_drag_started)
+    viewer.segment_start_changed.connect(editor._on_waveform_start_changed)
+    viewer.segment_end_changed.connect(editor._on_waveform_end_changed)
+
+    # Ctrl+Right handled by the editor's global shortcut router
+    handled = editor._handle_waveform_shortcut(
+        _key_event(Qt.Key_Right, Qt.ControlModifier))
+    assert handled is True
+    assert editor.srt_blocks[0]['start_time'] == '00:00:10,100'
+    assert len(editor.undo_stack) == 1
+
+    # Ctrl+Shift+Right nudges the end marker
+    handled = editor._handle_waveform_shortcut(
+        _key_event(Qt.Key_Right, Qt.ControlModifier | Qt.ShiftModifier))
+    assert handled is True
+    assert editor.srt_blocks[0]['end_time'] == '00:00:20,100'
+
+    # Unrelated keys pass through (not consumed)
+    handled = editor._handle_waveform_shortcut(_key_event(Qt.Key_A, Qt.ControlModifier))
+    assert handled is False
+
+def test_waveform_shortcut_text_input_guard(editor):
+    """Editable text fields keep Ctrl+arrows; read-only displays don't block them."""
+    from widgets import WaveformViewer
+    from editor import _is_editable_text_widget
+    from PyQt5.QtWidgets import QTextEdit, QLineEdit
+
+    viewer = _make_viewer()
+    editor.waveform_viewer = viewer
+
+    # Read-only transcript (the app's main display) must NOT be protected
+    ro_display = QTextEdit()
+    ro_display.setReadOnly(True)
+    assert _is_editable_text_widget(ro_display) is False
+
+    # A truly editable text area must be protected (Ctrl+arrow = word nav)
+    editable = QTextEdit()
+    assert _is_editable_text_widget(editable) is True
+    line_edit = QLineEdit()
+    assert _is_editable_text_widget(line_edit) is True
+
+    # Non-text widgets are never protected
+    assert _is_editable_text_widget(viewer) is False
 
 # ── format & time conversion tests ───────────────────────────────
 

@@ -22,9 +22,10 @@ from PyQt5.QtWidgets import (
     QInputDialog, QLineEdit, QDialog, QDialogButtonBox,
     QGridLayout, QPlainTextEdit, QCheckBox, QTabWidget, QRadioButton,
     QSlider, QProgressBar, QMenuBar, QMenu, QAction, QFontDialog,
-    QGroupBox, QScrollArea, QSizePolicy, QComboBox, QStackedWidget, QStyle, QSplashScreen
+    QGroupBox, QScrollArea, QSizePolicy, QComboBox, QStackedWidget, QStyle, QSplashScreen,
+    QAbstractSpinBox
 )
-from PyQt5.QtCore import Qt, QTimer, QUrl, pyqtSignal, QPoint, QRect, QElapsedTimer, QThread, QSize, QRegularExpression, QSettings
+from PyQt5.QtCore import Qt, QTimer, QUrl, pyqtSignal, QPoint, QRect, QElapsedTimer, QThread, QSize, QRegularExpression, QSettings, QEvent
 from PyQt5.QtGui import QFont, QKeySequence, QColor, QPalette, QTextCharFormat, QTextCursor, QIcon, QPixmap
 
 from utils import resource_path, logger
@@ -53,6 +54,25 @@ from dialogs import (
     EnhancedPlacementDialog, PlacementDialog, InsertPausesDialog
 )
 from widgets import SpeedKnob, WaveformViewer, CollapsibleSplitter, CollapsibleSplitterHandle
+
+# Widgets where Ctrl+Left/Right is used for text editing (word navigation /
+# selection). When one of these has focus, the waveform shortcuts must NOT
+# fire — otherwise typing would nudge markers instead of moving the caret.
+_TEXT_EDIT_WIDGETS = (
+    QLineEdit, QPlainTextEdit, QTextEdit, QAbstractSpinBox, QComboBox,
+)
+
+
+def _is_editable_text_widget(widget):
+    """True if ``widget`` is a text-input control where Ctrl+arrow means
+    word navigation/selection (i.e. the user can type into it)."""
+    if not isinstance(widget, _TEXT_EDIT_WIDGETS):
+        return False
+    # Read-only multi-line displays (e.g. the transcript) are not being
+    # edited, so the waveform shortcuts should still work there.
+    if isinstance(widget, (QTextEdit, QPlainTextEdit)):
+        return not widget.isReadOnly()
+    return True
 
 
 class SRTEditor(QMainWindow):
@@ -97,6 +117,14 @@ class SRTEditor(QMainWindow):
         self.splash = splash
         self.transcript = Transcript()
         self.current_block_index = 0
+
+        # App-level event filter so the waveform marker shortcuts work from
+        # anywhere in the window (not only when the waveform has focus), while
+        # leaving Ctrl+Left/Right text editing intact. Qt auto-removes the
+        # filter when this window is destroyed.
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
 
         self.recent_files = []
         self.max_recent = 10
@@ -1698,6 +1726,57 @@ class SRTEditor(QMainWindow):
         """Seek audio to the clicked position in the waveform."""
         if self.audio_player:
             self.audio_player.seek(seconds)
+        # Keep the playhead marker in sync so "set marker to playhead"
+        # reflects a clicked position even when audio is paused.
+        self.waveform_viewer.set_playback_position(seconds)
+
+    def eventFilter(self, obj, event):
+        """Global routing of the waveform-marker keyboard shortcuts.
+
+        The shortcuts work from anywhere in the main window, so the user does
+        not need to click the waveform first. They are intentionally NOT
+        handled while the focus is inside an *editable* text field, so
+        Ctrl+Left / Ctrl+Shift+Left keep doing word navigation / selection
+        while typing. Read-only displays (e.g. the transcript) still get the
+        shortcuts, since the user is not editing text there.
+        """
+        if event.type() == QEvent.KeyPress:
+            fw = QApplication.focusWidget()
+            # Only act when focus is inside this window (or nowhere).
+            if fw is not None and fw.window() is not self:
+                return super().eventFilter(obj, event)
+            if fw is not None and _is_editable_text_widget(fw):
+                return super().eventFilter(obj, event)
+            if self._handle_waveform_shortcut(event):
+                return True
+        return super().eventFilter(obj, event)
+
+    def _handle_waveform_shortcut(self, event):
+        """Apply a waveform-marker shortcut; return True if the event was consumed."""
+        viewer = getattr(self, 'waveform_viewer', None)
+        if viewer is None or viewer.duration <= 0:
+            return False
+        if viewer.start_time is None or viewer.end_time is None:
+            return False
+
+        mods = event.modifiers()
+        ctrl = bool(mods & Qt.ControlModifier)
+        shift = bool(mods & Qt.ShiftModifier)
+        alt = bool(mods & Qt.AltModifier)
+        key = event.key()
+
+        if ctrl and not alt and key in (Qt.Key_Left, Qt.Key_Right):
+            direction = 1 if key == Qt.Key_Right else -1
+            which = 'end' if shift else 'start'
+            viewer.keyboard_nudge(which, direction, event.isAutoRepeat())
+            return True
+
+        if ctrl and shift and alt and key in (Qt.Key_Left, Qt.Key_Right):
+            which = 'start' if key == Qt.Key_Left else 'end'
+            viewer.snap_marker_to_playhead(which, event.isAutoRepeat())
+            return True
+
+        return False
 
     def _sync_waveform_with_current_block(self):
         """Sync waveform segment markers with the currently selected block."""
