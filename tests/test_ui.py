@@ -536,6 +536,30 @@ def test_shortcuts_dialog_filter(app):
     finally:
         dlg.close()
 
+def test_shortcuts_dialog_header_is_theme_aware(app):
+    """The tree header follows the app theme (dark vs light stylesheet)."""
+    from dialogs import ShortcutsDialog
+    dlg = ShortcutsDialog()
+    try:
+        # Light theme (default palette)
+        dlg.dark = False
+        dlg._apply_theme()
+        light_ss = dlg.tree.styleSheet()
+        assert "#f0f0f0" in light_ss      # light header background
+        assert "#333333" in light_ss      # light header text
+        assert "#3a3a3a" not in light_ss  # no dark colours in light mode
+
+        # Dark theme
+        dlg.dark = True
+        dlg._apply_theme()
+        dark_ss = dlg.tree.styleSheet()
+        assert "#3a3a3a" in dark_ss       # dark header background
+        assert "#cccccc" in dark_ss       # dark header text
+        assert "#2d2d2d" in dark_ss       # dark tree background
+        assert "#f0f0f0" not in dark_ss   # no light colours in dark mode
+    finally:
+        dlg.close()
+
 # ── format & time conversion tests ───────────────────────────────
 
 def test_format_timestamp(editor):

@@ -2285,6 +2285,7 @@ class ShortcutsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Keyboard Shortcuts")
         self.setMinimumSize(420, 300)
+        self.dark = _is_dark_theme(self)
 
         layout = QVBoxLayout(self)
 
@@ -2300,6 +2301,7 @@ class ShortcutsDialog(QDialog):
         self.tree.setHeaderLabels(["Shortcut", "Action"])
         self.tree.setAlternatingRowColors(True)
         self.tree.setUniformRowHeights(True)
+        self._apply_theme()
         self._populate()
         layout.addWidget(self.tree, 1)
 
@@ -2319,6 +2321,38 @@ class ShortcutsDialog(QDialog):
         )
 
         self.filter_edit.setFocus()
+
+    def _apply_theme(self):
+        """Style the tree header so it follows the app's light/dark theme.
+
+        QHeaderView does not reliably inherit the app palette in every style,
+        so we set the header colours explicitly to match the current theme.
+        """
+        if self.dark:
+            self.tree.setStyleSheet("""
+                QHeaderView::section {
+                    background-color: #3a3a3a;
+                    color: #cccccc;
+                    border: 1px solid #555555;
+                    padding: 4px 6px;
+                    font-weight: bold;
+                }
+                QTreeWidget {
+                    background-color: #2d2d2d;
+                    color: #cccccc;
+                    alternate-background-color: #373737;
+                }
+            """)
+        else:
+            self.tree.setStyleSheet("""
+                QHeaderView::section {
+                    background-color: #f0f0f0;
+                    color: #333333;
+                    border: 1px solid #cccccc;
+                    padding: 4px 6px;
+                    font-weight: bold;
+                }
+            """)
 
     def _populate(self):
         """Build the tree from SHORTCUT_SECTIONS."""
