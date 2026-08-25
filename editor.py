@@ -346,6 +346,7 @@ class SRTEditor(QMainWindow):
         self.waveform_viewer.set_theme(self.current_theme)
         self.waveform_viewer.segment_start_changed.connect(self._on_waveform_start_changed)
         self.waveform_viewer.segment_end_changed.connect(self._on_waveform_end_changed)
+        self.waveform_viewer.drag_started.connect(self._on_waveform_drag_started)
         self.waveform_viewer.seek_requested.connect(self._on_waveform_seek)
         left_panel.addWidget(self.waveform_viewer)
 
@@ -1668,7 +1669,6 @@ class SRTEditor(QMainWindow):
         """Update current block's start time from waveform drag."""
         if not self.srt_blocks or not (0 <= self.current_block_index < len(self.srt_blocks)):
             return
-        self.push_undo()
         block = self.srt_blocks[self.current_block_index]
         block['start_time'] = self._seconds_to_srt(seconds)
         self.waveform_viewer.set_segment(seconds, self.waveform_viewer.end_time)
@@ -1679,12 +1679,20 @@ class SRTEditor(QMainWindow):
         """Update current block's end time from waveform drag."""
         if not self.srt_blocks or not (0 <= self.current_block_index < len(self.srt_blocks)):
             return
-        self.push_undo()
         block = self.srt_blocks[self.current_block_index]
         block['end_time'] = self._seconds_to_srt(seconds)
         self.waveform_viewer.set_segment(self.waveform_viewer.start_time, seconds)
         self.update_display()
         self.mark_unsaved_changes()
+
+    def _on_waveform_drag_started(self):
+        """Push a single undo snapshot when a waveform handle drag begins.
+
+        Without this, every mouse-move during a drag would call push_undo(),
+        flooding the undo stack with micro-steps so that undo only nudges the
+        boundary by a few milliseconds instead of reverting the whole drag.
+        """
+        self.push_undo()
 
     def _on_waveform_seek(self, seconds: float):
         """Seek audio to the clicked position in the waveform."""

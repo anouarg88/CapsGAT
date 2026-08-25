@@ -27,6 +27,7 @@ class WaveformViewer(QWidget):
     segment_end_changed = pyqtSignal(float)
     seek_requested = pyqtSignal(float)
     loading_complete = pyqtSignal()  # emitted when audio + peaks are fully ready
+    drag_started = pyqtSignal()      # emitted when a segment handle drag begins
 
     # ── colour definitions ────────────────────────────────────────
 
@@ -524,9 +525,11 @@ class WaveformViewer(QWidget):
         if near_start:
             self._dragging = 'start'
             self._drag_offset = self._x_to_time(x) - self.start_time
+            self.drag_started.emit()
         elif near_end:
             self._dragging = 'end'
             self._drag_offset = self._x_to_time(x) - self.end_time
+            self.drag_started.emit()
         else:
             self.seek_requested.emit(self._x_to_time(x))
         event.accept()

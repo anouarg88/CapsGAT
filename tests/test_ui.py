@@ -255,6 +255,78 @@ def test_load_waveform_audio_delegates(editor):
     editor._load_waveform_audio("/fake/path.wav")
     mock_viewer.load_audio.assert_called_once_with("/fake/path.wav")
 
+def test_waveform_drag_pushes_undo_once_per_drag(editor):
+    """A single waveform handle drag pushes exactly ONE undo snapshot.
+
+    Regression: previously every mouse-move during a drag emitted
+    segment_start_changed/segment_end_changed, and each emission called
+    push_undo(). That flooded the undo stack with micro-steps, so undo
+    only nudged the boundary by a few milliseconds instead of reverting
+    the whole drag. The drag_started signal now captures the pre-drag
+    state once, so one undo restores the entire drag.
+    """
+    from widgets import WaveformViewer
+
+    viewer = WaveformViewer()
+    viewer.end_time = 20.0
+    viewer.set_segment = Mock()
+    editor.waveform_viewer = viewer
+    editor.srt_blocks = [{
+        'text': 'X', 'raw_text': 'X',
+        'start_time': '00:00:10,000', 'end_time': '00:00:20,000',
+    }]
+    editor.current_block_index = 0
+    editor._seconds_to_srt = Mock(side_effect=lambda s: f"00:00:{int(s):02d},000")
+    editor.mark_unsaved_changes = Mock()
+
+    viewer.drag_started.connect(editor._on_waveform_drag_started)
+    viewer.segment_start_changed.connect(editor._on_waveform_start_changed)
+
+    # Simulate one drag gesture: handle press + several mouse moves
+    viewer.drag_started.emit()
+    for i in range(1, 6):
+        viewer.segment_start_changed.emit(10.0 + i)  # 11, 12, 13, 14, 15
+
+    # Exactly one undo entry for the whole gesture
+    assert len(editor.undo_stack) == 1
+
+    editor.undo()
+    assert editor.srt_blocks[0]['start_time'] == '00:00:10,000'
+
+    editor.redo()
+    assert editor.srt_blocks[0]['start_time'] == '00:00:15,000'
+
+def test_waveform_end_drag_pushes_undo_once_per_drag(editor):
+    """The end-handle drag has the same once-per-gesture undo behaviour."""
+    from widgets import WaveformViewer
+
+    viewer = WaveformViewer()
+    viewer.start_time = 10.0
+    viewer.set_segment = Mock()
+    editor.waveform_viewer = viewer
+    editor.srt_blocks = [{
+        'text': 'X', 'raw_text': 'X',
+        'start_time': '00:00:10,000', 'end_time': '00:00:20,000',
+    }]
+    editor.current_block_index = 0
+    editor._seconds_to_srt = Mock(side_effect=lambda s: f"00:00:{int(s):02d},000")
+    editor.mark_unsaved_changes = Mock()
+
+    viewer.drag_started.connect(editor._on_waveform_drag_started)
+    viewer.segment_end_changed.connect(editor._on_waveform_end_changed)
+
+    viewer.drag_started.emit()
+    for i in range(1, 6):
+        viewer.segment_end_changed.emit(20.0 + i)  # 21, 22, 23, 24, 25
+
+    assert len(editor.undo_stack) == 1
+
+    editor.undo()
+    assert editor.srt_blocks[0]['end_time'] == '00:00:20,000'
+
+    editor.redo()
+    assert editor.srt_blocks[0]['end_time'] == '00:00:25,000'
+
 # ── format & time conversion tests ───────────────────────────────
 
 def test_format_timestamp(editor):
