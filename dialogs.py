@@ -9,9 +9,10 @@ from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QDialogButtonBox,
     QPushButton, QLineEdit, QWidget, QMessageBox, QComboBox, QStackedWidget,
     QScrollArea, QFrame, QSizePolicy, QGridLayout, QFileDialog, QCheckBox,
-    QRadioButton, QGroupBox, QSpinBox, QDoubleSpinBox, QPlainTextEdit, QShortcut, QFontDialog, QFormLayout, QApplication
+    QRadioButton, QGroupBox, QSpinBox, QDoubleSpinBox, QPlainTextEdit, QShortcut, QFontDialog, QFormLayout, QApplication,
+    QTreeWidget, QTreeWidgetItem
 )
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt, QTimer, QRect
 from PyQt5.QtGui import QFont, QKeySequence
 
 from widgets import ThemeToggle
@@ -2207,7 +2208,147 @@ class ExportPreviewDialog(QDialog):
             return "default"
         else:
             return "custom"
-        
+
+
+# ── Shortcuts dialog ─────────────────────────────────────────────
+
+# Data-driven list of keyboard shortcuts shown by the F1 dialog. Adding a new
+# shortcut is a one-line entry here — the dialog renders and filters it
+# automatically, so the list never drifts from reality again.
+SHORTCUT_SECTIONS = [
+    ("Navigation", [
+        ("P / Left Arrow", "Previous block"),
+        ("N / Right Arrow", "Next block"),
+    ]),
+    ("Assigning Speakers", [
+        ("1-4", "Assign speakers A-D"),
+        ("U", "Unassign current block"),
+    ]),
+    ("Editing", [
+        ("Space", "Split current block"),
+        ("Delete", "Merge with next block"),
+        ("E / F2", "Edit segment content"),
+        ("T", "Edit segment timestamp"),
+        ("Enter", "Insert empty line"),
+        ("Ctrl+Del", "Remove overlap"),
+    ]),
+    ("Transcription Symbols", [
+        ("*", "Open symbols dialog"),
+        (".", "Insert micropause (with placement)"),
+        ("h", "Insert short inhale (with placement)"),
+        ("H", "Insert short exhale (with placement)"),
+    ]),
+    ("Audio Controls", [
+        ("End", "Play/Pause audio"),
+        ("PgUp", "Rewind 5 seconds"),
+        ("PgDn", "Fast forward 5 seconds"),
+        ("Ctrl+J", "Jump to Time"),
+        ("Shift+L", "Jump to Current Audio Location"),
+        ("Ctrl+L", "Toggle Auto-sync to Audio"),
+        ("Shift+Enter", "Play from current segment"),
+        ("-", "Lower Playback Speed"),
+        ("+", "Speed up Playback"),
+    ]),
+    ("Waveform Viewer", [
+        ("Ctrl+Left/Right", "Move left marker"),
+        ("Ctrl+Shift+Left/Right", "Move right marker"),
+        ("Ctrl+Shift+Alt+Left/Right", "Set right/left marker to audio position"),
+    ]),
+    ("Search Functions", [
+        ("Ctrl+F", "Open Search Dialog"),
+        ("F3", "Find Next"),
+        ("Shift+F3", "Find Previous"),
+    ]),
+    ("File Operations", [
+        ("Ctrl+N", "New Project"),
+        ("Ctrl+O", "Open Project"),
+        ("Ctrl+S", "Save Project"),
+        ("Ctrl+Return", "Export Transcript"),
+    ]),
+    ("Help", [
+        ("F1", "Show Shortcuts (this dialog)"),
+        ("Ctrl+F1", "Open Online Manual (requires internet)"),
+    ]),
+]
+
+
+class ShortcutsDialog(QDialog):
+    """Scrollable, searchable keyboard-shortcut reference.
+
+    Replaces the old QMessageBox-based cheat sheet, which auto-sized to the
+    text and overflowed small screens (e.g. 800x600) as shortcuts were added.
+    The shortcut tree scrolls internally, is capped to the available screen,
+    and the filter box narrows the list instantly.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Keyboard Shortcuts")
+        self.setMinimumSize(420, 300)
+
+        layout = QVBoxLayout(self)
+
+        # Filter box
+        self.filter_edit = QLineEdit()
+        self.filter_edit.setPlaceholderText("Filter shortcuts... (type to narrow)")
+        self.filter_edit.textChanged.connect(self._apply_filter)
+        layout.addWidget(self.filter_edit)
+
+        # Shortcut tree (grouped by category, two columns)
+        self.tree = QTreeWidget()
+        self.tree.setColumnCount(2)
+        self.tree.setHeaderLabels(["Shortcut", "Action"])
+        self.tree.setAlternatingRowColors(True)
+        self.tree.setUniformRowHeights(True)
+        self._populate()
+        layout.addWidget(self.tree, 1)
+
+        # Close button (also closes on Esc via reject)
+        button_box = QDialogButtonBox(QDialogButtonBox.Close)
+        button_box.rejected.connect(self.reject)
+        button_box.accepted.connect(self.accept)
+        layout.addWidget(button_box)
+
+        # Cap the dialog to the available screen so it always fits,
+        # even on an 800x600 display.
+        screen = QApplication.primaryScreen()
+        avail = screen.availableGeometry() if screen else QRect(0, 0, 800, 600)
+        self.resize(
+            min(680, avail.width() - 40),
+            min(520, avail.height() - 80),
+        )
+
+        self.filter_edit.setFocus()
+
+    def _populate(self):
+        """Build the tree from SHORTCUT_SECTIONS."""
+        for category, entries in SHORTCUT_SECTIONS:
+            cat_item = QTreeWidgetItem([category, ""])
+            cat_item.setFirstColumnSpanned(True)
+            font = cat_item.font(0)
+            font.setBold(True)
+            cat_item.setFont(0, font)
+            for shortcut, action in entries:
+                QTreeWidgetItem(cat_item, [shortcut, action])
+            self.tree.addTopLevelItem(cat_item)
+        self.tree.expandAll()
+
+    def _apply_filter(self, text):
+        """Show only categories/shortcuts matching ``text`` (case-insensitive)."""
+        text = text.strip().lower()
+        for i in range(self.tree.topLevelItemCount()):
+            cat = self.tree.topLevelItem(i)
+            cat_match = text in cat.text(0).lower()
+            any_child_visible = False
+            for j in range(cat.childCount()):
+                child = cat.child(j)
+                haystack = f"{child.text(0)} {child.text(1)}".lower()
+                match = cat_match or text in haystack
+                child.setHidden(not match)
+                any_child_visible = any_child_visible or match
+            cat.setHidden(not (cat_match or any_child_visible))
+
+
 class SearchDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)

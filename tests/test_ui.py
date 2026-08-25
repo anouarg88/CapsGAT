@@ -488,6 +488,54 @@ def test_waveform_shortcut_text_input_guard(editor):
     # Non-text widgets are never protected
     assert _is_editable_text_widget(viewer) is False
 
+# ── shortcuts dialog tests ───────────────────────────────────────
+
+def test_shortcuts_dialog_fits_small_screen(app):
+    """The F1 shortcuts dialog must fit an 800x600 screen (scrollable, capped)."""
+    from dialogs import ShortcutsDialog
+    dlg = ShortcutsDialog()
+    try:
+        assert dlg.width() <= 800
+        assert dlg.height() <= 600
+    finally:
+        dlg.close()
+
+def test_shortcuts_dialog_lists_all_sections(app):
+    """Every documented shortcut category is present in the dialog tree."""
+    from dialogs import ShortcutsDialog, SHORTCUT_SECTIONS
+    dlg = ShortcutsDialog()
+    try:
+        assert dlg.tree.topLevelItemCount() == len(SHORTCUT_SECTIONS)
+        for i, (name, entries) in enumerate(SHORTCUT_SECTIONS):
+            item = dlg.tree.topLevelItem(i)
+            assert item.text(0) == name
+            assert item.childCount() == len(entries)
+    finally:
+        dlg.close()
+
+def test_shortcuts_dialog_filter(app):
+    """Typing in the filter narrows the list to matching categories."""
+    from dialogs import ShortcutsDialog
+    dlg = ShortcutsDialog()
+    try:
+        dlg.filter_edit.setText("waveform")
+        visible = [i for i in range(dlg.tree.topLevelItemCount())
+                   if not dlg.tree.topLevelItem(i).isHidden()]
+        assert len(visible) == 1
+        assert dlg.tree.topLevelItem(visible[0]).text(0) == "Waveform Viewer"
+
+        dlg.filter_edit.setText("ctrl+z")
+        visible = [i for i in range(dlg.tree.topLevelItemCount())
+                   if not dlg.tree.topLevelItem(i).isHidden()]
+        assert visible == []
+
+        dlg.filter_edit.setText("")
+        visible = [i for i in range(dlg.tree.topLevelItemCount())
+                   if not dlg.tree.topLevelItem(i).isHidden()]
+        assert len(visible) == dlg.tree.topLevelItemCount()
+    finally:
+        dlg.close()
+
 # ── format & time conversion tests ───────────────────────────────
 
 def test_format_timestamp(editor):
