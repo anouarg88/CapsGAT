@@ -699,7 +699,10 @@ class EnhancedSymbolDialog(QDialog):
 
     def __init__(self, parent=None, initial_category=None):
         super().__init__(parent)
-        self.parent = parent
+        # NOTE: do NOT store the editor as `self.parent` — that shadows
+        # QWidget.parent() and crashes callers like AddCustomSymbolDialog
+        # (TypeError: '<Editor>' object is not callable).
+        self.editor = parent
         self.initial_category = initial_category
         self.categories = []
         self.current_category_index = 0
@@ -711,7 +714,7 @@ class EnhancedSymbolDialog(QDialog):
     def _is_dark(self):
         """Detect if the parent editor is in dark theme."""
         try:
-            return self.parent.current_theme == "dark"
+            return self.editor.current_theme == "dark"
         except AttributeError:
             return False
 
@@ -1126,7 +1129,7 @@ class EnhancedSymbolDialog(QDialog):
             self.update_category_display()
 
     def export_custom_symbols(self):
-        base_dir = getattr(self.parent(), '_base_dir_for_dialog', lambda: '')()
+        base_dir = getattr(self.editor, '_base_dir_for_dialog', lambda: '')()
         file_path, _ = QFileDialog.getSaveFileName(
             self, "Export Custom Symbols", base_dir,
             "JSON Files (*.json);;All Files (*)"
@@ -1140,7 +1143,7 @@ class EnhancedSymbolDialog(QDialog):
                 QMessageBox.critical(self, "Error", f"Could not export: {e}")
 
     def import_custom_symbols(self):
-        base_dir = getattr(self.parent(), '_base_dir_for_dialog', lambda: '')()
+        base_dir = getattr(self.editor, '_base_dir_for_dialog', lambda: '')()
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Import Custom Symbols", base_dir,
             "JSON Files (*.json);;All Files (*)"
