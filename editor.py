@@ -51,7 +51,7 @@ from dialogs import (
     TextSelectionDialog, BlockSplitDialog, EnhancedSymbolDialog, CommentDialog,
     RichEditDialog, EditTimestampsDialog, SettingsDialog, ProjectMemoDialog, JsonImportDialog,
     UnassignedSegmentsDialog, ExportPreviewDialog, SearchDialog, JumpToTimeDialog,
-    EnhancedPlacementDialog, PlacementDialog, InsertPausesDialog
+    EnhancedPlacementDialog, PlacementDialog, InsertPausesDialog, ShortcutsDialog
 )
 from widgets import SpeedKnob, WaveformViewer, CollapsibleSplitter, CollapsibleSplitterHandle
 
@@ -295,7 +295,7 @@ class SRTEditor(QMainWindow):
         self.mark_unsaved_changes()
         
     def init_ui(self):
-        self.setWindowTitle("CapsQual 1.6.2 - Subtitle-to-Transcript Workstation")
+        self.setWindowTitle("CapsQual 1.6.3 - Subtitle-to-Transcript Workstation")
         # Get the screen geometry (available space, excluding taskbars/docks)
         screen = QApplication.primaryScreen()
         screen_geom = screen.availableGeometry()
@@ -2019,59 +2019,8 @@ class SRTEditor(QMainWindow):
 
 
     def show_shortcuts(self):
-        """Show keyboard shortcuts dialog"""
-        shortcuts_text = """
-Keyboard Shortcuts:
-
-Navigation:
-• P / Left Arrow: Previous block
-• N / Right Arrow: Next block
-
-Assigning Speakers:
-• 1-4: Assign speakers A-D
-• U: Unassign current block
-
-Editing:
-• Space: Split current block
-• Delete: Merge with next block
-• E/F2: Edit segment content
-• T: Edit segment timestamp
-• Enter: Insert empty line
-• Ctrl+Del: Remove overlap
-
-Transcription Symbols:
-• *: Open symbols dialog
-• .: Insert micropause (with placement)
-• h: Insert short inhale (with placement)
-• H: Insert short exhale (with placement)
-
-Audio Controls:
-• End: Play/Pause audio
-• PgUp: Rewind 5 seconds
-• PgDn: Fast forward 5 seconds
-• Ctrl+J: Jump to Time
-• Shift+L: Jump to Current Audio Location
-• Ctrl+L: Toggle Auto-sync to Audio
-• Shift+Enter: Play from current segment
-• -: Lower Playback Speed
-• +: Speed up Playback
-
-Search Functions:
-• Ctrl+F: Open Search Dialog
-• F3: Find Next
-• Shift+F3: Find Previous
-
-File Operations:
-• Ctrl+N: New Project
-• Ctrl+O: Open Project
-• Ctrl+S: Save Project
-• Ctrl+Return: Export Transcript
-
-Help:
-• F1: Show Shortcuts (this dialog)
-• Ctrl+F1: Open Online Manual (requires internet)
-"""
-        QMessageBox.information(self, "Keyboard Shortcuts", shortcuts_text)
+        """Show the searchable, scrollable keyboard shortcuts dialog."""
+        ShortcutsDialog(self).exec_()
         
     def open_manual(self):
         """Open online manual in browser"""
@@ -2080,7 +2029,7 @@ Help:
     def show_about(self):
         """Show about dialog"""
         about_text = """
-<b style="font-size: 16px;">CapsQual 1.6.2</b><br><br>
+<b style="font-size: 16px;">CapsQual 1.6.3</b><br><br>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -2105,7 +2054,7 @@ CapsQual was engineered with the help of DeepSeek AI.
     def mark_unsaved_changes(self):
         """Mark that there are unsaved changes"""
         self.has_unsaved_changes = True
-        base_title = "CapsQual 1.6.2 - Subtitle-to-Transcript Workstation"
+        base_title = "CapsQual 1.6.3 - Subtitle-to-Transcript Workstation"
         if self.project_name:
             self.setWindowTitle(f"{base_title} - {self.project_name} *")
         else:
@@ -2114,7 +2063,7 @@ CapsQual was engineered with the help of DeepSeek AI.
     def clear_unsaved_changes(self):
         """Clear unsaved changes marker"""
         self.has_unsaved_changes = False
-        base_title = "CapsQual 1.6.2 - Subtitle-to-Transcript Workstation"
+        base_title = "CapsQual 1.6.3 - Subtitle-to-Transcript Workstation"
         if self.project_name:
             self.setWindowTitle(f"{base_title} - {self.project_name}")
         else:
