@@ -114,6 +114,53 @@ Hello world
     assert len(blocks) == 1
     assert blocks[0]['start_time'] == "00:00:01,000"
 
+def test_parse_vtt_no_hours_timestamp():
+    """VTT with MM:SS.mmm timestamps (no hours component) parses correctly.
+
+    This is the format emitted by many real-world tools (YouTube captions,
+    Whisper exports, caption editors). Previously the hours component was
+    required, so these files produced 0 blocks and showed 'No content loaded'.
+    """
+    content = """WEBVTT
+
+00:01.000 --> 00:02.500
+Hello world
+
+00:03.000 --> 00:04.500
+Second line
+"""
+    blocks, speakers = parse_vtt(content)
+    assert len(blocks) == 2
+    assert blocks[0]['text'] == "Hello world"
+    assert blocks[0]['start_time'] == "00:00:01,000"
+    assert blocks[0]['end_time'] == "00:00:02,500"
+    assert blocks[1]['text'] == "Second line"
+    assert speakers == []
+
+def test_parse_vtt_single_digit_hours():
+    """VTT with H:MM:SS.mmm timestamps (single-digit hours) parses correctly."""
+    content = """WEBVTT
+
+0:00:01.000 --> 0:00:02.500
+Hello world
+"""
+    blocks, speakers = parse_vtt(content)
+    assert len(blocks) == 1
+    assert blocks[0]['start_time'] == "0:00:01,000"
+
+def test_parse_vtt_no_hours_with_voice_tags():
+    """MM:SS.mmm timestamps combined with <v> speaker tags."""
+    content = """WEBVTT
+
+00:01.000 --> 00:02.500
+<v Alice>Hello world
+"""
+    blocks, speakers = parse_vtt(content)
+    assert len(blocks) == 1
+    assert blocks[0]['text'] == "Hello world"
+    assert blocks[0]['speaker'] == 0
+    assert speakers == ["Alice"]
+
 def test_parse_vtt_header_only():
     """Only a WEBVTT header with no cues should return empty lists."""
     content = "WEBVTT\n"

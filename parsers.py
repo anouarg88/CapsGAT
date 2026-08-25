@@ -81,8 +81,10 @@ def auto_segment_tokens(tokens: list[str],
 # ── Parsers ───────────────────────────────────────────────────────
 
 _VTT_TIMESTAMP_RE = re.compile(
-    r'(\d{2}):(\d{2}):(\d{2})[.,](\d{3})\s*-->\s*'
-    r'(\d{2}):(\d{2}):(\d{2})[.,](\d{3})'
+    # Hours are optional (WebVTT allows MM:SS.mmm); minutes/seconds are
+    # always two digits per the spec.
+    r'(?:(\d+):)?(\d{2}):(\d{2})[.,](\d{3})\s*-->\s*'
+    r'(?:(\d+):)?(\d{2}):(\d{2})[.,](\d{3})'
 )
 
 # Matches WebVTT inline tags: <v Speaker>, <b>, <i>, <u>, <c.class>,
@@ -209,13 +211,15 @@ def parse_vtt(content: str) -> tuple[list[dict], list[str]]:
                 vtt_speakers.append(vtt_speaker)
             speaker_idx = vtt_speaker_map[vtt_speaker]
 
+        start_h = m.group(1) or '00'
+        end_h = m.group(5) or '00'
         block_data = {
             'index': len(blocks) + 1,
             'start_time':
-                f"{m.group(1)}:{m.group(2)}:{m.group(3)},{m.group(4)}",
+                f"{start_h}:{m.group(2)}:{m.group(3)},{m.group(4)}",
             'start_ms': int(m.group(4)),
             'end_time':
-                f"{m.group(5)}:{m.group(6)}:{m.group(7)},{m.group(8)}",
+                f"{end_h}:{m.group(6)}:{m.group(7)},{m.group(8)}",
             'end_ms': int(m.group(8)),
             'text': cue_text,
             'raw_text': cue_text,
