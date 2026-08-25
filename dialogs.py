@@ -3,6 +3,7 @@ import html
 import os
 import json
 import re
+import shutil
 from pathlib import Path
 
 from PyQt5.QtWidgets import (
@@ -17,7 +18,7 @@ from PyQt5.QtGui import QFont, QKeySequence
 
 from widgets import ThemeToggle
 
-from utils import logger
+from utils import logger, app_data_dir
 from highlighting import FormattingMarkerHighlighter
 from generators import (
     generate_srt_text, generate_transcript_text, strip_markup
@@ -695,7 +696,13 @@ class AddCustomSymbolDialog(QDialog):
         return data
 
 class EnhancedSymbolDialog(QDialog):
-    custom_symbols_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "custom_symbols.json")
+    # Custom symbols live in the per-user data directory (standard convention),
+    # NOT next to the executable — the install dir may be read-only.
+    custom_symbols_file = os.path.join(app_data_dir(), "custom_symbols.json")
+    # Builds before the app-data change saved next to the source/install dir;
+    # load_custom_symbols() migrates it on first run of the new version.
+    _legacy_custom_symbols_file = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "custom_symbols.json")
     custom_symbols = []
 
     def __init__(self, parent=None, initial_category=None):
@@ -756,8 +763,11 @@ class EnhancedSymbolDialog(QDialog):
 
     def load_custom_symbols(self):
         try:
-            if os.path.exists(EnhancedSymbolDialog.custom_symbols_file):
-                with open(EnhancedSymbolDialog.custom_symbols_file, 'r', encoding='utf-8') as f:
+            path = EnhancedSymbolDialog.custom_symbols_file
+            if not os.path.exists(path):
+                self._migrate_custom_symbols_if_needed(path)
+            if os.path.exists(path):
+                with open(path, 'r', encoding='utf-8') as f:
                     self.custom_symbols = json.load(f)
             else:
                 self.custom_symbols = []
@@ -765,9 +775,23 @@ class EnhancedSymbolDialog(QDialog):
             logger.error(f"Failed to load custom symbols: {e}")
             self.custom_symbols = []
 
+    def _migrate_custom_symbols_if_needed(self, new_path):
+        """One-time migration from the old install-dir location, if present."""
+        legacy = EnhancedSymbolDialog._legacy_custom_symbols_file
+        if legacy == new_path or not os.path.exists(legacy):
+            return
+        try:
+            os.makedirs(os.path.dirname(new_path), exist_ok=True)
+            shutil.copy2(legacy, new_path)
+            logger.info("Migrated custom symbols from %s to %s", legacy, new_path)
+        except Exception as e:
+            logger.warning("Could not migrate custom symbols from %s: %s", legacy, e)
+
     def save_custom_symbols(self):
         try:
-            with open(EnhancedSymbolDialog.custom_symbols_file, 'w', encoding='utf-8') as f:
+            path = EnhancedSymbolDialog.custom_symbols_file
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, 'w', encoding='utf-8') as f:
                 json.dump(self.custom_symbols, f, indent=2)
         except Exception as e:
             logger.error(f"Failed to save custom symbols: {e}")

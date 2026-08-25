@@ -36,6 +36,9 @@ htmlcov/
 # Logs
 *.log
 
+# Per-user runtime data (now stored in the OS app-data directory)
+custom_symbols.json
+
 # OS junk
 .DS_Store
 Thumbs.db

@@ -1,5 +1,7 @@
 """Basic UI and non‑UI tests for CapsQual – focuses on initialisation and core logic without GUI."""
 import sys
+import os
+import json
 import pytest
 from unittest.mock import patch, Mock, MagicMock, PropertyMock
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout
@@ -557,6 +559,102 @@ def test_shortcuts_dialog_header_is_theme_aware(app):
         assert "#cccccc" in dark_ss       # dark header text
         assert "#2d2d2d" in dark_ss       # dark tree background
         assert "#f0f0f0" not in dark_ss   # no light colours in dark mode
+    finally:
+        dlg.close()
+
+# ── user-data location & custom-symbols tests ────────────────────
+
+def test_app_data_dir_windows(monkeypatch, tmp_path):
+    """Windows: custom data goes to %APPDATA%\\CapsQual."""
+    from utils import app_data_dir
+    monkeypatch.setattr("sys.platform", "win32")
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    expected = os.path.join(str(tmp_path), "CapsQual")
+    assert app_data_dir() == expected
+    assert os.path.isdir(expected)
+
+def test_app_data_dir_windows_no_appdata(monkeypatch, tmp_path):
+    """Windows without APPDATA falls back to the home directory."""
+    from utils import app_data_dir
+    monkeypatch.setattr("sys.platform", "win32")
+    monkeypatch.delenv("APPDATA", raising=False)
+    monkeypatch.setattr(os.path, "expanduser", lambda p: str(tmp_path))
+    assert app_data_dir() == os.path.join(str(tmp_path), "CapsQual")
+
+def test_app_data_dir_macos(monkeypatch, tmp_path):
+    """macOS: custom data goes to ~/Library/Application Support/CapsQual."""
+    from utils import app_data_dir
+    monkeypatch.setattr("sys.platform", "darwin")
+    monkeypatch.setattr(os.path, "expanduser", lambda p: str(tmp_path))
+    assert app_data_dir() == os.path.join(str(tmp_path), "CapsQual")
+
+def test_app_data_dir_linux(monkeypatch, tmp_path):
+    """Linux: custom data goes to $XDG_DATA_HOME/CapsQual (else ~/.local/share)."""
+    from utils import app_data_dir
+    monkeypatch.setattr("sys.platform", "linux")
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    assert app_data_dir() == os.path.join(str(tmp_path), "CapsQual")
+
+def test_custom_symbols_file_lives_in_app_data(app):
+    """custom_symbols.json must NOT live next to the executable/source."""
+    import dialogs
+    from dialogs import EnhancedSymbolDialog
+    from utils import app_data_dir
+    path = os.path.abspath(EnhancedSymbolDialog.custom_symbols_file)
+    assert path == os.path.abspath(os.path.join(app_data_dir(), "custom_symbols.json"))
+    # The source/install directory must not be the parent.
+    source_dir = os.path.abspath(os.path.dirname(dialogs.__file__))
+    assert os.path.dirname(path) != source_dir
+
+def test_custom_symbols_migration_from_install_dir(app, monkeypatch, tmp_path):
+    """Legacy install-dir custom_symbols.json is migrated to the app-data dir."""
+    from dialogs import EnhancedSymbolDialog
+
+    new_dir = tmp_path / "new"
+    legacy_file = tmp_path / "legacy_custom_symbols.json"
+    legacy_file.write_text(
+        json.dumps([{"type": "simple", "display": "MIGRATED", "value": "MIGRATED"}]),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        EnhancedSymbolDialog, "custom_symbols_file",
+        str(new_dir / "custom_symbols.json"))
+    monkeypatch.setattr(
+        EnhancedSymbolDialog, "_legacy_custom_symbols_file", str(legacy_file))
+
+    dlg = EnhancedSymbolDialog()
+    try:
+        assert dlg.custom_symbols == [
+            {"type": "simple", "display": "MIGRATED", "value": "MIGRATED"}]
+        assert (new_dir / "custom_symbols.json").exists()
+    finally:
+        dlg.close()
+
+def test_custom_symbols_save_and_load(app, monkeypatch, tmp_path):
+    """Custom symbols round-trip through the app-data file (dir auto-created)."""
+    from dialogs import EnhancedSymbolDialog
+
+    target = tmp_path / "nested" / "custom_symbols.json"
+    monkeypatch.setattr(EnhancedSymbolDialog, "custom_symbols_file", str(target))
+    monkeypatch.setattr(
+        EnhancedSymbolDialog, "_legacy_custom_symbols_file",
+        str(tmp_path / "does_not_exist.json"))
+
+    symbols = [
+        {"type": "simple", "display": "X1", "value": "X1", "description": "X1"},
+        {"type": "wrapper", "display": "<<text>>", "left": "<<", "right": ">>",
+         "description": "wrapper"},
+    ]
+    dlg = EnhancedSymbolDialog()
+    try:
+        dlg.custom_symbols = symbols
+        dlg.save_custom_symbols()
+        assert target.exists()
+
+        dlg2 = EnhancedSymbolDialog()
+        assert dlg2.custom_symbols == symbols
+        dlg2.close()
     finally:
         dlg.close()
 
