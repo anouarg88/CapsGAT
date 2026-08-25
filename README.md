@@ -185,7 +185,7 @@ For more info on how to use CapsQual, see the [CapsQual User Manual](https://git
 
 **If you use this software, please cite it as below:**
 
-Gadermann, A. (2026). *CapsQual: Subtitle-to-Transcript Workstation (Version 1.6.2)*. Computer software. Zenodo. https://doi.org/10.5281/zenodo.21551449
+Gadermann, A. (2026). *CapsQual: Subtitle-to-Transcript Workstation (Version 1.6.3)*. Computer software. Zenodo. https://doi.org/10.5281/zenodo.21551449
 
  
 **Alternatively, please cite the documentation as below:**
