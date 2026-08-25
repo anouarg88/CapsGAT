@@ -29,13 +29,13 @@ For audio features:
 
 ## Installation guide
 
-_Note: Version 1.6.2 has been used as an example in this installation guide. Please replace "1.6.2" with whichever version you are going to install._
+_Note: Version 1.6.3 has been used as an example in this installation guide. Please replace "1.6.3" with whichever version you are going to install._
 
 ### Windows
 
-1. Download the Windows installer `CapsQual_1.6.2_Setup.exe` or the portable executable: `CapsQual_1.6.2.exe`.
+1. Download the Windows installer `CapsQual_1.6.3_Setup.exe` or the portable executable: `CapsQual_1.6.3.exe`.
 2. If you downloaded the installer, double‑click and follow the on‑screen instructions.
-3. If you downloaded the portable version, simply unzip the file in any folder and double‑click `CapsQual_1.6.2.exe` to run. A system warning may show up, since this software does not contain any official certificates. You may ignore this at your own discretion.
+3. If you downloaded the portable version, simply unzip the file in any folder and double‑click `CapsQual_1.6.3.exe` to run. A system warning may show up, since this software does not contain any official certificates. You may ignore this at your own discretion.
 4. (Optional) Install [VLC](https://www.videolan.org/) for audio features.
 
 To run from source:
@@ -62,7 +62,7 @@ Two versions are provided:
 - `CapsQual-macOS-AppleSilicon` for Macs with Apple Silicon (M1, M2, M3)
 
 1. Download the appropriate `.zip` file.
-2. Open the downloaded file and drag `CapsQual_1.6.2.app` to your `Applications` folder.
+2. Open the downloaded file and drag `CapsQual_1.6.3.app` to your `Applications` folder.
 3. The first time you run the app, macOS may warn you that it is from an unidentified developer.  
    To bypass this, right‑click (or Ctrl‑click) the app and select **Open**, then click **Open** again.
 4. (Optional) Install [VLC](https://www.videolan.org/) for audio features.
@@ -88,18 +88,18 @@ python3 main.py
 
 ### Linux (Debian/Ubuntu 22.04 or newer)
 
-1. Download `CapsQual_1.6.2-linux.tar.gz`.
+1. Download `CapsQual_1.6.3-linux.tar.gz`.
 2. Open a terminal in the download folder and unfold the archive:
    ```bash
-   tar -xzf CapsQual_1.6.2-linux.tar.gz
+   tar -xzf CapsQual_1.6.3-linux.tar.gz
    ```
 3. Make the extracted file executable:
    ```bash
-   chmod +x CapsQual_1.6.2
+   chmod +x CapsQual_1.6.3
    ```
 4. Run the program:
    ```bash
-   ./CapsQual_1.6.2
+   ./CapsQual_1.6.3
    ```
 5. (Optional) Install VLC using your package manager (e.g., `sudo apt install vlc` on Debian/Ubuntu) for audio features.
 
@@ -185,7 +185,7 @@ For more info on how to use CapsQual, see the [CapsQual User Manual](https://git
 
 **If you use this software, please cite it as below:**
 
-Gadermann, A. (2026). *CapsQual: Subtitle-to-Transcript Workstation (Version 1.6.2)*. Computer software. Zenodo. https://doi.org/10.5281/zenodo.21769829
+Gadermann, A. (2026). *CapsQual: Subtitle-to-Transcript Workstation (Version 1.6.2)*. Computer software. Zenodo. https://doi.org/10.5281/zenodo.21551449
 
  
 **Alternatively, please cite the documentation as below:**
