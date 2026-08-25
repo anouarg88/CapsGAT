@@ -1188,7 +1188,8 @@ class SRTEditor(QMainWindow):
         dialog.switch_category(len(dialog.categories) - 1)
         if dialog.exec_() == QDialog.Accepted:
             symbol_info = dialog.get_selected_symbol_info()
-            self.handle_symbol_insertion(symbol_info)
+            if symbol_info is not None:
+                self.handle_symbol_insertion(symbol_info)
 
     def export_custom_symbols(self):
         """Export custom symbols to file"""
@@ -3413,9 +3414,10 @@ CapsQual was engineered with the help of DeepSeek AI.
         dialog = EnhancedSymbolDialog(self, initial_category=self.last_symbol_category)
         if dialog.exec_() == QDialog.Accepted:
             symbol_info = dialog.get_selected_symbol_info()
-            self.handle_symbol_insertion(symbol_info)
-            # Store the category that was just used
-            self.last_symbol_category = dialog.current_category_index
+            if symbol_info is not None:
+                self.handle_symbol_insertion(symbol_info)
+                # Store the category that was just used
+                self.last_symbol_category = dialog.current_category_index
 
         if was_playing and self.auto_pause_enabled:
             if self.audio_player:

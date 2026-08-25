@@ -934,6 +934,8 @@ class EnhancedSymbolDialog(QDialog):
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
         layout.addWidget(button_box)
+        self.button_box = button_box
+        self._update_ok_button_state()
 
         # Shortcuts for Tab / Shift+Tab to switch categories
         self.tab_shortcut = QShortcut(QKeySequence(Qt.Key_Tab), self)
@@ -975,6 +977,9 @@ class EnhancedSymbolDialog(QDialog):
             self.btn_export_custom.setVisible(is_custom)
             self.btn_import_custom.setVisible(is_custom)
             self.btn_delete_custom.setVisible(is_custom)
+
+            # Disable OK when this category has nothing to select
+            self._update_ok_button_state()
 
     def update_category_display(self):
         # Clear all widgets from the grid layout
@@ -1128,6 +1133,17 @@ class EnhancedSymbolDialog(QDialog):
             self.selected_option = 0
             self.update_category_display()
 
+        self._update_ok_button_state()
+
+    def _update_ok_button_state(self):
+        """Disable OK when the current category has no selectable symbols."""
+        if not hasattr(self, 'button_box'):
+            return
+        category = self.categories[self.current_category_index]
+        ok_btn = self.button_box.button(QDialogButtonBox.Ok)
+        if ok_btn:
+            ok_btn.setEnabled(bool(category.symbols))
+
     def export_custom_symbols(self):
         base_dir = getattr(self.editor, '_base_dir_for_dialog', lambda: '')()
         file_path, _ = QFileDialog.getSaveFileName(
@@ -1193,9 +1209,13 @@ class EnhancedSymbolDialog(QDialog):
 
     def get_selected_symbol_info(self):
         category = self.categories[self.current_category_index]
+        if not category.symbols or self.selected_option >= len(category.symbols):
+            return None
         symbol_display = category.symbols[self.selected_option]
 
         if self.current_category_index == len(self.categories) - 1:
+            if self.selected_option >= len(self.custom_symbols):
+                return None
             symbol_data = self.custom_symbols[self.selected_option].copy()
             symbol_data['category'] = 'custom'
             return symbol_data
